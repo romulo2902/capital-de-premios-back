@@ -1,0 +1,43 @@
+---
+description: Capital de Prêmios API — Cursor IDE Rules
+---
+
+## Nomenclatura
+- camelCase: variáveis e funções
+- PascalCase: classes, interfaces e enums
+- kebab-case: arquivos e pastas
+- UPPER_SNAKE_CASE: constantes
+
+## Padrões NestJS Obrigatórios
+- Sempre usar DTOs com class-validator para toda entrada de dados
+- Sempre usar @ApiProperty() do Swagger em todos os campos de DTO
+- Nunca usar `any` — tipar explicitamente tudo
+- Sempre injetar ConfigService para ler variáveis de ambiente — nunca usar process.env diretamente
+- Sempre usar Logger do NestJS em todo service: `private readonly logger = new Logger(NomeDaClasse.name)`
+- Transações Prisma obrigatórias em operações que afetam múltiplas tabelas
+- Sempre usar guards para autenticação: @UseGuards(JwtAuthGuard, RolesGuard)
+- Sempre usar @Roles() decorator para controle de acesso por perfil
+- IDs sempre UUID: todo campo `id` no Prisma usa `@id @default(uuid())`. DTOs que recebem IDs validam com `@IsUUID()`
+
+## Padrão de Resposta da API
+```typescript
+{ statusCode: number; message: string; data: T | T[] | null; }
+```
+
+## Tratamento de Erros
+- Sempre lançar exceções do NestJS (NotFoundException, BadRequestException, etc.)
+- Nunca retornar erro diretamente no controller
+- Filtro global HttpExceptionFilter trata todos os erros
+
+## Testes
+- Criar arquivo .spec.ts para todo service criado
+- Mockar Prisma com jest.mock
+- Cobertura mínima de 70% nos services
+
+## Commits (português)
+- feat: nova funcionalidade
+- fix: correção de bug
+- refactor: refatoração
+- docs: documentação
+- test: testes
+- chore: configuração

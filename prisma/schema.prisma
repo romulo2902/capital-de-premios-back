@@ -1,0 +1,221 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Perfil {
+  ADMIN
+  DISTRIBUIDOR
+  VENDEDOR
+  CLIENTE
+}
+
+enum StatusUsuario {
+  ATIVO
+  INATIVO
+}
+
+enum StatusEdicao {
+  RASCUNHO
+  ATIVA
+  ENCERRADA
+  SORTEANDO
+  FINALIZADA
+}
+
+enum StatusVenda {
+  PENDENTE
+  APROVADO
+  RECUSADO
+  CANCELADO
+}
+
+enum TipoPagamento {
+  PIX
+  CARTAO
+}
+
+enum StatusSaque {
+  SOLICITADO
+  APROVADO
+  PAGO
+  RECUSADO
+}
+
+enum TipoSaque {
+  VENDEDOR
+  DISTRIBUIDOR
+}
+
+enum StatusComissao {
+  PENDENTE
+  PAGO
+}
+
+model Usuario {
+  id        String        @id @default(uuid())
+  cpf       String?       @unique
+  email     String?       @unique
+  senhaHash String?
+  perfil    Perfil
+  status    StatusUsuario @default(ATIVO)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model Distribuidor {
+  id         String        @id @default(uuid())
+  usuarioId  String        @unique
+  nome       String
+  cpf        String        @unique
+  telefone   String
+  email      String
+  cidade     String
+  estado     String
+  link       String?
+  qrcode     String?
+  status     StatusUsuario @default(ATIVO)
+  createdAt  DateTime      @default(now())
+  vendedores Vendedor[]
+  saques     Saque[]
+}
+
+model Vendedor {
+  id              String        @id @default(uuid())
+  usuarioId       String        @unique
+  distribuidorId  String
+  nome            String
+  codigo          String        @unique
+  comissaoPercent Decimal       @default(0)
+  telefone        String
+  email           String
+  cidade          String
+  estado          String
+  link            String?
+  qrcode          String?
+  status          StatusUsuario @default(ATIVO)
+  createdAt       DateTime      @default(now())
+  distribuidor    Distribuidor  @relation(fields: [distribuidorId], references: [id])
+  vendas          Venda[]
+  comissoes       Comissao[]
+  saques          Saque[]
+}
+
+model Cliente {
+  id        String        @id @default(uuid())
+  cpf       String        @unique
+  nome      String
+  telefone  String
+  email     String?
+  cidade    String?
+  estado    String?
+  status    StatusUsuario @default(ATIVO)
+  createdAt DateTime      @default(now())
+  vendas    Venda[]
+}
+
+model Edicao {
+  id               String       @id @default(uuid())
+  numero           Int          @unique
+  dataSorteio      DateTime
+  dataEncerramento DateTime
+  valorCartela     Decimal
+  rangeInicio      BigInt
+  rangeFinal       BigInt
+  qtdPremios       Int
+  especie          String
+  imagemUrl        String?
+  status           StatusEdicao @default(RASCUNHO)
+  createdAt        DateTime     @default(now())
+  premios          Premio[]
+  vendas           Venda[]
+  resultado        Resultado?
+}
+
+model Premio {
+  id                String   @id @default(uuid())
+  edicaoId          String
+  ordem             Int
+  descricao         String
+  valor             Decimal
+  ganhadorBilheteId String?
+  edicao            Edicao   @relation(fields: [edicaoId], references: [id])
+}
+
+model Range {
+  id             String    @id @default(uuid())
+  numero         BigInt    @unique
+  sequenciaBolas Int[]
+  disponivel     Boolean   @default(true)
+  bilhetes       Bilhete[]
+}
+
+model Venda {
+  id             String        @id @default(uuid())
+  edicaoId       String
+  clienteId      String
+  vendedorId     String?
+  distribuidorId String?
+  quantidade     Int
+  total          Decimal
+  status         StatusVenda   @default(PENDENTE)
+  tipoPagamento  TipoPagamento
+  gatewayId      String?
+  gatewayPayload Json?
+  createdAt      DateTime      @default(now())
+  edicao         Edicao        @relation(fields: [edicaoId], references: [id])
+  cliente        Cliente       @relation(fields: [clienteId], references: [id])
+  vendedor       Vendedor?     @relation(fields: [vendedorId], references: [id])
+  bilhetes       Bilhete[]
+  comissao       Comissao?
+}
+
+model Bilhete {
+  id             String   @id @default(uuid())
+  vendaId        String
+  rangeId        String
+  numero         BigInt
+  sequenciaBolas Int[]
+  ganhador       Boolean  @default(false)
+  premioId       String?
+  venda          Venda    @relation(fields: [vendaId], references: [id])
+  range          Range    @relation(fields: [rangeId], references: [id])
+}
+
+model Resultado {
+  id              String   @id @default(uuid())
+  edicaoId        String   @unique
+  numerosApurados Int[]
+  createdAt       DateTime @default(now())
+  edicao          Edicao   @relation(fields: [edicaoId], references: [id])
+}
+
+model Comissao {
+  id         String         @id @default(uuid())
+  vendedorId String
+  vendaId    String         @unique
+  valor      Decimal
+  status     StatusComissao @default(PENDENTE)
+  createdAt  DateTime       @default(now())
+  vendedor   Vendedor       @relation(fields: [vendedorId], references: [id])
+  venda      Venda          @relation(fields: [vendaId], references: [id])
+}
+
+model Saque {
+  id             String        @id @default(uuid())
+  tipo           TipoSaque
+  vendedorId     String?
+  distribuidorId String?
+  valor          Decimal
+  status         StatusSaque   @default(SOLICITADO)
+  createdAt      DateTime      @default(now())
+  vendedor       Vendedor?     @relation(fields: [vendedorId], references: [id])
+  distribuidor   Distribuidor? @relation(fields: [distribuidorId], references: [id])
+}
