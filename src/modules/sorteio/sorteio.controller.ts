@@ -8,7 +8,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 @ApiTags('Sorteio')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('sorteio')
+@Controller('admin/sorteio')
 export class SorteioController {
   constructor(private readonly sorteioService: SorteioService) {}
 

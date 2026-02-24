@@ -22,7 +22,7 @@ import { UpdateDistribuidorDto } from './dto/update-distribuidor.dto';
 @ApiTags('Distribuidores')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('distribuidores')
+@Controller('admin/distribuidores')
 export class DistribuidoresController {
   constructor(private readonly distribuidoresService: DistribuidoresService) {}
 

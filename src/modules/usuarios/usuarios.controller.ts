@@ -7,7 +7,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 @ApiTags('Usuarios')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('usuarios')
+@Controller('admin/usuarios')
 export class UsuariosController {
   constructor(private readonly usuariosService: UsuariosService) {}
 

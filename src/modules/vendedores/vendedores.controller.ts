@@ -22,7 +22,7 @@ import { UpdateVendedorDto } from './dto/update-vendedor.dto';
 @ApiTags('Vendedores')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('vendedores')
+@Controller('admin/vendedores')
 export class VendedoresController {
   constructor(private readonly vendedoresService: VendedoresService) {}
 

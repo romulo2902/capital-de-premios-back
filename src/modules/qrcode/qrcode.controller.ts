@@ -7,7 +7,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 @ApiTags('QR Code')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('qrcode')
+@Controller('admin/qrcode')
 export class QrcodeController {
   constructor(private readonly qrcodeService: QrcodeService) {}
 

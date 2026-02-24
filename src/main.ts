@@ -48,6 +48,9 @@ async function bootstrap(): Promise<void> {
   // Global Interceptors
   app.useGlobalInterceptors(new ResponseInterceptor());
 
+  // Global Prefix
+  app.setGlobalPrefix('api');
+
   // Swagger
   const swaggerUser = config.get<string>('SWAGGER_USER', 'admin');
   const swaggerPass = config.get<string>('SWAGGER_PASS', 'admin');

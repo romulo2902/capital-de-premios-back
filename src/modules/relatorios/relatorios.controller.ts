@@ -13,7 +13,7 @@ const ADMIN = 'ADMIN';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(ADMIN)
-@Controller('relatorios')
+@Controller('admin/relatorios')
 export class RelatoriosController {
   constructor(private readonly relatoriosService: RelatoriosService) {}
 
