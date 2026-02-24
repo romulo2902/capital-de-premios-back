@@ -1,98 +1,114 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Capital de Premios API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+API em NestJS para o sistema Capital de Premios, com Postgres, Prisma e Redis.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+**Stack**
+- Node.js 20 + TypeScript (strict)
+- NestJS 10
+- Prisma 6 + PostgreSQL
+- Redis + BullMQ
+- Swagger/OpenAPI
 
-## Description
+## Requisitos
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- Node.js 20
+- Yarn
+- PostgreSQL 16
+- Redis 7
 
-## Project setup
+Se preferir, use Docker para subir Postgres e Redis.
 
+## Setup rapido (Docker)
+
+1. Suba os servicos de banco e cache:
 ```bash
-$ npm install
+docker-compose up -d
 ```
 
-## Compile and run the project
-
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+2. Ajuste o `.env.development`:
+```env
+DATABASE_URL=postgresql://user:password@localhost:5432/capital_premios_db
+REDIS_URL=redis://localhost:6379
 ```
 
-## Run tests
-
+3. Instale dependencias:
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+yarn
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
+4. Gere o Prisma Client e rode as migrations:
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+yarn prisma:generate
+yarn prisma:migrate
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+5. (Opcional) Seed:
+```bash
+yarn prisma:seed
+```
 
-## Resources
+6. Suba a API:
+```bash
+yarn start:dev
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+## Setup local (Postgres e Redis ja instalados)
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+1. Ajuste o `.env.development` com suas credenciais locais.
+2. Instale dependencias:
+```bash
+yarn
+```
+3. Gere o Prisma Client e rode as migrations:
+```bash
+yarn prisma:generate
+yarn prisma:migrate
+```
+4. Suba a API:
+```bash
+yarn start:dev
+```
 
-## Support
+## Variaveis de ambiente
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+- Baseie-se no `.env.example`
+- O projeto usa `.env.development` por padrao nos scripts do Prisma
+- Ajuste `DATABASE_URL` e `REDIS_URL` conforme seu ambiente
 
-## Stay in touch
+## Comandos principais
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+- `yarn start:dev` desenvolvimento com watch
+- `yarn build` build de producao
+- `yarn prisma:migrate` cria e aplica migrations
+- `yarn prisma:generate` gera o Prisma Client
+- `yarn prisma:seed` popula dados de exemplo
+- `yarn prisma:studio` abre o Prisma Studio
+- `yarn test` tests unitarios
+- `yarn test:cov` cobertura
 
-## License
+## Erros comuns
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+**P3014: Prisma Migrate could not create the shadow database**
+
+Isso acontece quando o usuario do Postgres nao tem permissao para criar bancos.
+
+Opcoes:
+
+1. Usar o Docker do projeto e ajustar a `DATABASE_URL` para `user:password`.
+2. Conceder permissao `CREATEDB` ao usuario:
+```sql
+ALTER USER seu_usuario CREATEDB;
+```
+3. Usar um banco sombra manual com `SHADOW_DATABASE_URL`:
+```env
+SHADOW_DATABASE_URL=postgresql://usuario:senha@localhost:5432/capital_premios_shadow
+```
+E no `prisma/schema.prisma`:
+```prisma
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+```
+

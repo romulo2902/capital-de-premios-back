@@ -57,6 +57,29 @@ Implementado via `ResponseInterceptor` global.
 
 ---
 
+## Sorteio em Tempo Real — Firebase
+
+**Decisão arquitetural**: o sorteio em tempo real usa **Firebase Firestore**, não WebSocket.
+
+- O backend (`SorteioService`) escreve cada número sorteado no Firestore via **Firebase Admin SDK**
+- O frontend escuta as mudanças em tempo real via **Firebase Client SDK** (sem polling)
+- Cada cliente marca os números na própria cartela localmente ao receber os eventos
+
+```typescript
+// SorteioService — escreve no Firestore a cada número sorteado
+await firestore.collection('sorteios').doc(edicaoId)
+  .collection('numeros')
+  .add({ numero, sequencia, timestamp: FieldValue.serverTimestamp() });
+```
+
+Estrutura no Firestore:
+```
+sorteios/{edicaoId}/status      → { estado: 'em_andamento' | 'encerrado' }
+sorteios/{edicaoId}/numeros/{}  → { numero, sequencia, timestamp }
+```
+
+---
+
 ## Contextos de Acesso
 
 ### Painel Admin (`/admin` | `POST /auth/login`)

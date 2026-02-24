@@ -11,7 +11,8 @@ Este arquivo guia agentes de IA (OpenAI Codex, GPT-4o, etc.) sobre as convençõ
 - **ORM**: Prisma 6 + PostgreSQL
 - **Auth**: JWT (access + refresh), bcrypt
 - **Docs**: Swagger/OpenAPI (`@nestjs/swagger`)
-- **Queue**: BullMQ + Redis
+- **Tempo Real**: Firebase Firestore (Admin SDK no backend, Client SDK no frontend)
+  - Sorteio transmite números em tempo real via Firestore — **não usar WebSocket**
 - **Dev**: `npm run start:dev` | Build: `npm run build`
 
 ---
