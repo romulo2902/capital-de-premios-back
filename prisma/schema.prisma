@@ -59,6 +59,14 @@ enum StatusComissao {
   PAGO
 }
 
+enum TipoChavePix {
+  CPF
+  CNPJ
+  EMAIL
+  TELEFONE
+  ALEATORIA
+}
+
 model Usuario {
   id        String        @id @default(uuid())
   cpf       String?       @unique
@@ -71,54 +79,85 @@ model Usuario {
 }
 
 model Distribuidor {
-  id         String        @id @default(uuid())
-  usuarioId  String        @unique
-  nome       String
-  cpf        String        @unique
-  telefone   String
-  email      String
-  cidade     String
-  estado     String
-  link       String?
-  qrcode     String?
-  status     StatusUsuario @default(ATIVO)
-  createdAt  DateTime      @default(now())
-  vendedores Vendedor[]
-  saques     Saque[]
+  id             String         @id @default(uuid())
+  codigo         Int            @unique @default(autoincrement())
+  usuarioId      String         @unique
+  nome           String
+  cpf            String         @unique
+  telefone       String
+  dataNascimento DateTime?
+  cep            String?
+  endereco       String?
+  numero         String?
+  bairro         String?
+  cidade         String?
+  estado         String?
+  email          String
+  tipoChavePix   TipoChavePix?
+  chavePix       String?
+  saldo          Decimal        @default(0)
+  link           String?
+  qrcode         String?
+  status         StatusUsuario  @default(ATIVO)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  vendedores     Vendedor[]
+  saques         Saque[]
 }
 
 model Vendedor {
-  id              String        @id @default(uuid())
-  usuarioId       String        @unique
+  id              String         @id @default(uuid())
+  codigo          Int            @unique @default(autoincrement())
+  usuarioId       String         @unique
   distribuidorId  String
   nome            String
-  codigo          String        @unique
-  comissaoPercent Decimal       @default(0)
+  cpf             String         @unique
+  nomeRecebedor   String?
+  comissaoPercent Decimal        @default(0)
   telefone        String
+  dataNascimento  DateTime?
+  cep             String?
+  endereco        String?
+  numero          String?
+  bairro          String?
+  cidade          String?
+  estado          String?
   email           String
-  cidade          String
-  estado          String
+  tipoChavePix    TipoChavePix?
+  chavePix        String?
+  saldo           Decimal        @default(0)
   link            String?
   qrcode          String?
-  status          StatusUsuario @default(ATIVO)
-  createdAt       DateTime      @default(now())
-  distribuidor    Distribuidor  @relation(fields: [distribuidorId], references: [id])
+  status          StatusUsuario  @default(ATIVO)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  distribuidor    Distribuidor   @relation(fields: [distribuidorId], references: [id])
+  clientes        Cliente[]
   vendas          Venda[]
   comissoes       Comissao[]
   saques          Saque[]
 }
 
 model Cliente {
-  id        String        @id @default(uuid())
-  cpf       String        @unique
-  nome      String
-  telefone  String
-  email     String?
-  cidade    String?
-  estado    String?
-  status    StatusUsuario @default(ATIVO)
-  createdAt DateTime      @default(now())
-  vendas    Venda[]
+  id             String        @id @default(uuid())
+  codigo         Int           @unique @default(autoincrement())
+  cpf            String        @unique
+  nome           String
+  telefone       String
+  dataNascimento DateTime?
+  cep            String?
+  endereco       String?
+  numero         String?
+  bairro         String?
+  cidade         String?
+  estado         String?
+  email          String?
+  vendedorId     String?
+  status         StatusUsuario @default(ATIVO)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  vendedor       Vendedor?     @relation(fields: [vendedorId], references: [id])
+  vendas         Venda[]
 }
 
 model Edicao {

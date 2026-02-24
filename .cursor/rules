@@ -10,7 +10,8 @@ description: Capital de Prêmios API — Cursor IDE Rules
 
 ## Padrões NestJS Obrigatórios
 - Sempre usar DTOs com class-validator para toda entrada de dados
-- Sempre usar @ApiProperty() do Swagger em todos os campos de DTO
+- Sempre usar @ApiProperty() / @ApiPropertyOptional() com `example` e `description` em todos os campos de DTO
+- Sempre que alterar rota, DTO ou regra de acesso: atualizar @ApiTags, @ApiOperation, @ApiQuery e @ApiBearerAuth correspondentes
 - Nunca usar `any` — tipar explicitamente tudo
 - Sempre injetar ConfigService para ler variáveis de ambiente — nunca usar process.env diretamente
 - Sempre usar Logger do NestJS em todo service: `private readonly logger = new Logger(NomeDaClasse.name)`
@@ -33,6 +34,14 @@ description: Capital de Prêmios API — Cursor IDE Rules
 - Criar arquivo .spec.ts para todo service criado
 - Mockar Prisma com jest.mock
 - Cobertura mínima de 70% nos services
+
+## Contextos de Acesso
+- **Painel Admin** (`POST /auth/login`, email+senha): ADMIN (acesso total) e DISTRIBUIDOR (gerenciar próprios vendedores)
+- **Web / Loja** (`POST /auth/loja`, CPF sem senha): VENDEDOR (dashboard, comissões) e CLIENTE (compras, resultados)
+- JWT payload sempre carrega `perfil` para o guard verificar
+- `@Roles('ADMIN', 'DISTRIBUIDOR')` = acesso ao painel | `@Roles('VENDEDOR', 'CLIENTE')` = acesso à loja
+- Hierarquia de cadastro: ADMIN cadastra DISTRIBUIDOR → DISTRIBUIDOR cadastra VENDEDOR → CLIENTE auto-cadastra por CPF
+- Venda sempre registra `vendedorId` ou `distribuidorId` (origem do link) para rastreio de comissão
 
 ## Commits (português)
 - feat: nova funcionalidade
