@@ -12,6 +12,7 @@ description: Capital de Prêmios API — Cursor IDE Rules
 - Sempre usar DTOs com class-validator para toda entrada de dados
 - Sempre usar @ApiProperty() / @ApiPropertyOptional() com `example` e `description` em todos os campos de DTO
 - Sempre que alterar rota, DTO ou regra de acesso: atualizar @ApiTags, @ApiOperation, @ApiQuery e @ApiBearerAuth correspondentes
+- **Regra obrigatória de @Roles → Swagger**: se alterar `@Roles(...)` em qualquer endpoint, obrigatoriamente atualizar o `@ApiOperation({ summary })` do mesmo endpoint incluindo o perfil autorizado — formato: `(ADMIN)`, `(ADMIN + DISTRIBUIDOR)`, `(ADMIN apenas)`, etc.
 - Nunca usar `any` — tipar explicitamente tudo
 - Sempre injetar ConfigService para ler variáveis de ambiente — nunca usar process.env diretamente
 - Sempre usar Logger do NestJS em todo service: `private readonly logger = new Logger(NomeDaClasse.name)`

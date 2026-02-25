@@ -51,35 +51,30 @@ async function bootstrap(): Promise<void> {
   // Global Prefix
   app.setGlobalPrefix('api');
 
-  // Swagger
-  const swaggerUser = config.get<string>('SWAGGER_USER', 'admin');
-  const swaggerPass = config.get<string>('SWAGGER_PASS', 'admin');
+  // Swagger — apenas em desenvolvimento
+  if (nodeEnv !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Capital de Prêmios API')
+      .setDescription(
+        `## Contextos de acesso\n\n` +
+        `### 🖥️ Painel Admin — \`/api/admin/*\`\n` +
+        `Rotas restritas a **ADMIN** e **DISTRIBUIDOR**. Autenticação via \`POST /api/auth/login\` (email + senha).\n\n` +
+        `### 🛒 Loja Web — \`/api/*\`\n` +
+        `Rotas da loja. **VENDEDOR** autentica com email+senha, **CLIENTE** autentica com CPF via \`POST /api/auth/loja\`.\n\n` +
+        `---\n\n` +
+        `> 🔐  Clique em **Authorize** e informe o \`accessToken\` retornado pelo login.`,
+      )
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Capital de Prêmios API')
-    .setDescription('API para plataforma de vendas de bilhetes e sorteios')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-
-  if (nodeEnv === 'production') {
-    // Basic auth for Swagger in production
-    app.use('/api/docs', (req: any, res: any, next: any) => {
-      const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
-      const [user, pass] = Buffer.from(b64auth, 'base64').toString().split(':');
-      if (user === swaggerUser && pass === swaggerPass) return next();
-      res.set('WWW-Authenticate', 'Basic realm="Swagger"');
-      res.status(401).send('Autenticação necessária');
-    });
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document);
+    logger.log(`📚 Swagger disponível em: http://localhost:${port}/api/docs`);
   }
-
-  SwaggerModule.setup('api/docs', app, document);
 
   await app.listen(port);
   logger.log(`🚀 Aplicação rodando na porta ${port}`);
-  logger.log(`📚 Swagger disponível em: http://localhost:${port}/api/docs`);
   logger.log(`🌍 Ambiente: ${nodeEnv}`);
 }
 

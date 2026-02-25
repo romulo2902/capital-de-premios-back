@@ -6,25 +6,23 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 
-const ADMIN = 'ADMIN';
-
-
-@ApiTags('Relatórios')
+@ApiTags('Admin / Relatórios')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(ADMIN)
+@Roles('ADMIN', 'DISTRIBUIDOR')
 @Controller('admin/relatorios')
 export class RelatoriosController {
   constructor(private readonly relatoriosService: RelatoriosService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Listar endpoints de relatórios disponíveis' })
+  @ApiOperation({ summary: 'Listar endpoints de relatórios disponíveis (ADMIN + DISTRIBUIDOR)' })
   findAll() {
     return this.relatoriosService.findAll();
   }
 
   @Get('vendas/xlsx')
-  @ApiOperation({ summary: 'Exportar vendas em XLSX (ADMIN)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Exportar todas as vendas em XLSX (ADMIN apenas)' })
   @ApiQuery({ name: 'dataInicio', required: false })
   @ApiQuery({ name: 'dataFim', required: false })
   @ApiQuery({ name: 'edicaoId', required: false })
@@ -38,7 +36,8 @@ export class RelatoriosController {
   }
 
   @Get('comissoes/pdf')
-  @ApiOperation({ summary: 'Exportar comissões em PDF (ADMIN)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Exportar comissões em PDF (ADMIN apenas)' })
   async exportarComissoesPdf(@Res() res: Response) {
     return this.relatoriosService.exportarComissoesPdf(res);
   }

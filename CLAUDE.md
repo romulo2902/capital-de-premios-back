@@ -17,11 +17,12 @@ Este arquivo define as regras e convenções que DEVEM ser seguidas em TODO o pr
 
 - **Sempre** usar DTOs com `class-validator` para toda entrada de dados
 - **Sempre** usar `@ApiProperty()` / `@ApiPropertyOptional()` do Swagger em **todos** os campos de DTO, com `example` e `description`
-- **Sempre** que alterar uma rota, DTO ou regra de acesso, **atualizar** o Swagger correspondente:
+- **Sempre** que alterar uma rota, DTO, `@Roles` ou regra de acesso, **atualizar** o Swagger correspondente:
   - `@ApiTags('...')` no controller
-  - `@ApiOperation({ summary: '...' })` em cada endpoint
+  - `@ApiOperation({ summary: '...' })` em cada endpoint — **incluir o perfil autorizado no summary**, ex: `(ADMIN)`, `(ADMIN + DISTRIBUIDOR)`, `(ADMIN apenas)`
   - `@ApiQuery(...)` em parâmetros de query
   - `@ApiBearerAuth()` em rotas protegidas
+  - **Regra de ouro**: se mudou `@Roles(...)` → obrigatório atualizar `@ApiOperation({ summary })` do mesmo endpoint
 - **Nunca** usar `any` — tipar explicitamente tudo
 - **Sempre** injetar `ConfigService` para ler variáveis de ambiente — **nunca** usar `process.env` diretamente
 - **Sempre** usar `Logger` do NestJS em todo service:

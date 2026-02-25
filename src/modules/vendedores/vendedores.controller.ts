@@ -19,7 +19,7 @@ import { VendedoresService } from './vendedores.service';
 import { CreateVendedorDto } from './dto/create-vendedor.dto';
 import { UpdateVendedorDto } from './dto/update-vendedor.dto';
 
-@ApiTags('Vendedores')
+@ApiTags('Admin / Vendedores')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/vendedores')
@@ -50,8 +50,8 @@ export class VendedoresController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
-  @ApiOperation({ summary: 'Buscar vendedor por ID' })
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({ summary: 'Buscar vendedor por ID (ADMIN + DISTRIBUIDOR)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.vendedoresService.findOne(id);
   }
@@ -64,8 +64,8 @@ export class VendedoresController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
-  @ApiOperation({ summary: 'Atualizar vendedor' })
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({ summary: 'Atualizar vendedor (ADMIN + DISTRIBUIDOR)' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateVendedorDto,

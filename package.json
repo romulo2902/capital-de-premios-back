@@ -5,6 +5,10 @@
   "author": "",
   "private": true,
   "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -24,8 +28,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.995.0",
-    "@aws-sdk/lib-storage": "^3.995.0",
+    "@aws-sdk/client-s3": "^3.997.0",
+    "@aws-sdk/lib-storage": "^3.997.0",
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.1.14",
     "@nestjs/config": "^4.0.3",
@@ -37,7 +41,7 @@
     "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "^6.19.2",
     "bcrypt": "^6.0.0",
-    "bullmq": "^5.69.4",
+    "bullmq": "^5.70.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
     "compression": "^1.8.1",
@@ -54,7 +58,7 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.3",
+    "@eslint/eslintrc": "^3.3.4",
     "@eslint/js": "^9.18.0",
     "@nestjs/cli": "^11.0.16",
     "@nestjs/schematics": "^11.0.9",
@@ -63,7 +67,7 @@
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.19.11",
+    "@types/node": "^22.0.0",
     "@types/passport-jwt": "^4.0.1",
     "@types/passport-local": "^1.0.38",
     "@types/pdfkit": "^0.17.5",
@@ -83,8 +87,8 @@
     "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.56.0"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
   },
   "jest": {
     "moduleFileExtensions": [

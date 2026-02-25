@@ -5,7 +5,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 
-@ApiTags('Sorteio')
+@ApiTags('Admin / Sorteio')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/sorteio')
@@ -13,20 +13,22 @@ export class SorteioController {
   constructor(private readonly sorteioService: SorteioService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Listar sorteios' })
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({ summary: 'Listar sorteios (ADMIN + DISTRIBUIDOR)' })
   findAll() {
     return this.sorteioService.findAll();
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Buscar sorteio por edição' })
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({ summary: 'Buscar sorteio por edição (ADMIN + DISTRIBUIDOR)' })
   findOne(@Param('id') id: string) {
     return this.sorteioService.findOne(id);
   }
 
   @Post(':edicaoId/iniciar')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Iniciar apuração do sorteio (ADMIN)' })
+  @ApiOperation({ summary: 'Iniciar apuração do sorteio (ADMIN apenas)' })
   iniciarSorteio(@Param('edicaoId') edicaoId: string) {
     return this.sorteioService.iniciarSorteio(edicaoId);
   }

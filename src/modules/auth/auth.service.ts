@@ -61,15 +61,17 @@ export class AuthService {
       throw new UnauthorizedException('Clientes acessam a loja pelo CPF');
     }
 
+    // VENDEDOR acessa a loja via /auth/loja (email+senha), não o painel admin
+    if (usuario.perfil === 'VENDEDOR') {
+      throw new UnauthorizedException('Vendedores não tem acesso a este painel');
+    }
+
     const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
     this.logger.log(`Login realizado: ${usuario.email} [${usuario.perfil}]`);
 
-    // Para VENDEDOR, incluir dados do vendedor na resposta
+    // Para DISTRIBUIDOR, incluir dados do distribuidor na resposta
     let extra: Record<string, unknown> = {};
-    if (usuario.perfil === 'VENDEDOR') {
-      const vendedor = await this.prisma.vendedor.findFirst({ where: { usuarioId: usuario.id } });
-      extra = { vendedor };
-    } else if (usuario.perfil === 'DISTRIBUIDOR') {
+    if (usuario.perfil === 'DISTRIBUIDOR') {
       const distribuidor = await this.prisma.distribuidor.findFirst({ where: { usuarioId: usuario.id } });
       extra = { distribuidor };
     }

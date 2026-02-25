@@ -19,7 +19,7 @@ import { DistribuidoresService } from './distribuidores.service';
 import { CreateDistribuidorDto } from './dto/create-distribuidor.dto';
 import { UpdateDistribuidorDto } from './dto/update-distribuidor.dto';
 
-@ApiTags('Distribuidores')
+@ApiTags('Admin / Distribuidores')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/distribuidores')
@@ -49,14 +49,14 @@ export class DistribuidoresController {
 
   @Get(':id')
   @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Buscar distribuidor por ID' })
+  @ApiOperation({ summary: 'Buscar distribuidor por ID (ADMIN + DISTRIBUIDOR)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.distribuidoresService.findOne(id);
   }
 
   @Get('codigo/:codigo')
   @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Buscar distribuidor por código sequencial' })
+  @ApiOperation({ summary: 'Buscar distribuidor por código sequencial (ADMIN + DISTRIBUIDOR)' })
   findByCodigo(@Param('codigo', ParseIntPipe) codigo: number) {
     return this.distribuidoresService.findByCodigo(codigo);
   }

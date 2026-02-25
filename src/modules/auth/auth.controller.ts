@@ -12,14 +12,14 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login pelo e-mail e senha (painel admin/vendedor)' })
+  @ApiOperation({ summary: 'Login pelo painel admin (ADMIN + DISTRIBUIDOR) — email + senha' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
   @Post('loja')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login pelo CPF (loja — cliente final)' })
+  @ApiOperation({ summary: 'Login pela loja (VENDEDOR: email+senha | CLIENTE: CPF)' })
   loginLoja(@Body() dto: LoginLojaDto) {
     return this.authService.loginLoja(dto);
   }

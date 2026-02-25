@@ -1,6 +1,4 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // Use string constants to avoid enum import issues in strict mode
@@ -40,25 +38,7 @@ interface PremioInfo {
 export class SorteioService {
   private readonly logger = new Logger(SorteioService.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
-    private readonly config: ConfigService,
-  ) {}
-
-  async validarToken(token: string): Promise<{ id: string; perfil: string } | null> {
-    try {
-      const tokenLimpo = token.startsWith('Bearer ') ? token.slice(7) : token;
-      const payload = this.jwtService.verify<{ sub: string; perfil: string }>(tokenLimpo, {
-        secret: this.config.get<string>('JWT_ACCESS_SECRET'),
-      });
-      const usuario = await this.prisma.usuario.findUnique({ where: { id: payload.sub } });
-      if (!usuario || usuario.status === 'INATIVO') return null;
-      return { id: usuario.id, perfil: usuario.perfil };
-    } catch {
-      return null;
-    }
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
   async iniciarSorteio(edicaoId: string): Promise<{ message: string; data: unknown }> {
     const edicao = await this.prisma.edicao.findUnique({ where: { id: edicaoId } });
