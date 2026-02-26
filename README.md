@@ -14,21 +14,21 @@ API em NestJS para o sistema Capital de Premios, com Postgres, Prisma e Redis.
 
 - Node.js 22
 - npm 10
-- PostgreSQL 16
+- Acesso ao PostgreSQL (RDS)
 - Redis 7
 
-Se preferir, use Docker para subir Postgres e Redis.
+Se preferir, use Docker para subir apenas o Redis.
 
 ## Setup rapido (Docker)
 
-1. Suba os servicos de banco e cache:
+1. Suba o Redis:
 ```bash
 docker-compose up -d
 ```
 
 2. Ajuste o `.env.development` (baseie-se no `.env.example`):
 ```env
-DATABASE_URL=postgresql://user:password@localhost:5432/capital_premios_db
+DATABASE_URL=postgresql://user:password@seu-endpoint-rds:5432/capital_premios_db
 REDIS_URL=redis://localhost:6379
 ```
 
@@ -53,7 +53,7 @@ npm run prisma:seed
 npm run start:dev
 ```
 
-## Setup local (Postgres e Redis ja instalados)
+## Setup local (RDS + Redis ja instalados)
 
 1. Ajuste o `.env.development` com suas credenciais locais.
 2. Instale dependencias:
