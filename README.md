@@ -3,16 +3,17 @@
 API em NestJS para o sistema Capital de Premios, com Postgres, Prisma e Redis.
 
 **Stack**
-- Node.js 20 + TypeScript (strict)
-- NestJS 10
+- Node.js 22 + TypeScript (strict)
+- NestJS 11
 - Prisma 6 + PostgreSQL
 - Redis + BullMQ
 - Swagger/OpenAPI
+- AWS S3 (uploads)
 
 ## Requisitos
 
-- Node.js 20
-- Yarn
+- Node.js 22
+- npm 10
 - PostgreSQL 16
 - Redis 7
 
@@ -25,7 +26,7 @@ Se preferir, use Docker para subir Postgres e Redis.
 docker-compose up -d
 ```
 
-2. Ajuste o `.env.development`:
+2. Ajuste o `.env.development` (baseie-se no `.env.example`):
 ```env
 DATABASE_URL=postgresql://user:password@localhost:5432/capital_premios_db
 REDIS_URL=redis://localhost:6379
@@ -33,23 +34,23 @@ REDIS_URL=redis://localhost:6379
 
 3. Instale dependencias:
 ```bash
-yarn
+npm install
 ```
 
 4. Gere o Prisma Client e rode as migrations:
 ```bash
-yarn prisma:generate
-yarn prisma:migrate
+npm run prisma:generate
+npm run prisma:migrate
 ```
 
 5. (Opcional) Seed:
 ```bash
-yarn prisma:seed
+npm run prisma:seed
 ```
 
 6. Suba a API:
 ```bash
-yarn start:dev
+npm run start:dev
 ```
 
 ## Setup local (Postgres e Redis ja instalados)
@@ -57,16 +58,16 @@ yarn start:dev
 1. Ajuste o `.env.development` com suas credenciais locais.
 2. Instale dependencias:
 ```bash
-yarn
+npm install
 ```
 3. Gere o Prisma Client e rode as migrations:
 ```bash
-yarn prisma:generate
-yarn prisma:migrate
+npm run prisma:generate
+npm run prisma:migrate
 ```
 4. Suba a API:
 ```bash
-yarn start:dev
+npm run start:dev
 ```
 
 ## Variaveis de ambiente
@@ -74,17 +75,22 @@ yarn start:dev
 - Baseie-se no `.env.example`
 - O projeto usa `.env.development` por padrao nos scripts do Prisma
 - Ajuste `DATABASE_URL` e `REDIS_URL` conforme seu ambiente
+- Configure JWT, gateways de pagamento, AWS S3, Swagger (prod) e throttle
 
 ## Comandos principais
 
-- `yarn start:dev` desenvolvimento com watch
-- `yarn build` build de producao
-- `yarn prisma:migrate` cria e aplica migrations
-- `yarn prisma:generate` gera o Prisma Client
-- `yarn prisma:seed` popula dados de exemplo
-- `yarn prisma:studio` abre o Prisma Studio
-- `yarn test` tests unitarios
-- `yarn test:cov` cobertura
+- `npm run start:dev` desenvolvimento com watch
+- `npm run build` build de producao
+- `npm run lint` lint do projeto
+- `npm run format` formatacao do codigo
+- `npm run prisma:migrate` cria e aplica migrations
+- `npm run prisma:generate` gera o Prisma Client
+- `npm run prisma:seed` popula dados de exemplo
+- `npm run prisma:studio` abre o Prisma Studio
+- `npm run test` tests unitarios
+- `npm run test:watch` tests com watch
+- `npm run test:cov` cobertura
+- `npm run test:e2e` tests e2e
 
 ## Erros comuns
 
@@ -111,4 +117,3 @@ datasource db {
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 ```
-
