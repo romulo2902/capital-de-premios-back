@@ -33,7 +33,7 @@ export class QrcodeService {
       type: 'png',
       width: 300,
       margin: 2,
-      color: { dark: '#2E4057', light: '#FFFFFF' },
+      color: { dark: '#000000', light: '#FFFFFF' },
     });
 
     // Upload to S3 and save URL
@@ -59,7 +59,7 @@ export class QrcodeService {
       type: 'png',
       width: 300,
       margin: 2,
-      color: { dark: '#2E4057', light: '#FFFFFF' },
+      color: { dark: '#000000', light: '#FFFFFF' },
     });
 
     await this.uploadQrcode(buffer, `distribuidores/${id}/qrcode.png`);
