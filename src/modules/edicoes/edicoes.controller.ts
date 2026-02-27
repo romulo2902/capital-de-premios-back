@@ -8,19 +8,19 @@ import { Roles } from '../../common/decorators/roles.decorator';
 @ApiTags('Admin / Edições')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'DISTRIBUIDOR')
+@Roles('ADMIN')
 @Controller('admin/edicoes')
 export class EdicoesController {
   constructor(private readonly edicoesService: EdicoesService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Listar edições (ADMIN + DISTRIBUIDOR)' })
+  @ApiOperation({ summary: 'Listar edições (ADMIN)' })
   findAll() {
     return this.edicoesService.findAll();
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Buscar edição por ID (ADMIN + DISTRIBUIDOR)' })
+  @ApiOperation({ summary: 'Buscar edição por ID (ADMIN)' })
   findOne(@Param('id') id: string) {
     return this.edicoesService.findOne(id);
   }

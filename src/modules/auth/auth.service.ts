@@ -56,50 +56,51 @@ export class AuthService {
       throw new UnauthorizedException('Usuário inativo');
     }
 
-    // CLIENTE não tem senha — só acessa via /auth/loja (CPF)
-    if (usuario.perfil === 'CLIENTE') {
-      throw new UnauthorizedException('Clientes acessam a loja pelo CPF');
-    }
-
-    // VENDEDOR acessa a loja via /auth/loja (email+senha), não o painel admin
-    if (usuario.perfil === 'VENDEDOR') {
-      throw new UnauthorizedException('Vendedores não tem acesso a este painel');
+    // Apenas ADMIN pode acessar o painel admin
+    if (usuario.perfil !== 'ADMIN') {
+      throw new UnauthorizedException('Acesso restrito ao painel administrativo (ADMIN)');
     }
 
     const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
-    this.logger.log(`Login realizado: ${usuario.email} [${usuario.perfil}]`);
-
-    // Para DISTRIBUIDOR, incluir dados do distribuidor na resposta
-    let extra: Record<string, unknown> = {};
-    if (usuario.perfil === 'DISTRIBUIDOR') {
-      const distribuidor = await this.prisma.distribuidor.findFirst({ where: { usuarioId: usuario.id } });
-      extra = { distribuidor };
-    }
+    this.logger.log(`Login admin: ${usuario.email} [${usuario.perfil}]`);
 
     return {
       message: 'Login realizado com sucesso',
-      data: { ...tokens, perfil: usuario.perfil, usuario: { id: usuario.id, email: usuario.email, perfil: usuario.perfil }, ...extra },
+      data: { ...tokens, perfil: usuario.perfil, usuario: { id: usuario.id, email: usuario.email, perfil: usuario.perfil } },
     };
   }
 
   async loginLoja(dto: LoginLojaDto): Promise<{ message: string; data: unknown }> {
-    // ── VENDEDOR: email + senha ───────────────────────────────────
+    // ── DISTRIBUIDOR ou VENDEDOR: email + senha ───────────────────
     if (dto.email && dto.senha) {
       const usuario = await this.prisma.usuario.findUnique({ where: { email: dto.email } });
 
-      if (!usuario || !usuario.senhaHash || usuario.perfil !== 'VENDEDOR') {
+      if (!usuario || !usuario.senhaHash) {
         throw new UnauthorizedException('Credenciais inválidas');
       }
       if (usuario.status === 'INATIVO') {
-        throw new UnauthorizedException('Vendedor inativo');
+        throw new UnauthorizedException('Usuário inativo');
+      }
+      if (usuario.perfil !== 'VENDEDOR' && usuario.perfil !== 'DISTRIBUIDOR') {
+        throw new UnauthorizedException('Credenciais inválidas');
       }
 
       const senhaValida = await bcrypt.compare(dto.senha, usuario.senhaHash);
       if (!senhaValida) throw new UnauthorizedException('Credenciais inválidas');
 
       const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
-      const vendedor = await this.prisma.vendedor.findFirst({ where: { usuarioId: usuario.id } });
 
+      if (usuario.perfil === 'DISTRIBUIDOR') {
+        const distribuidor = await this.prisma.distribuidor.findFirst({ where: { usuarioId: usuario.id } });
+        this.logger.log(`Login loja DISTRIBUIDOR: ${usuario.email}`);
+        return {
+          message: 'Login realizado com sucesso',
+          data: { ...tokens, perfil: 'DISTRIBUIDOR', distribuidor },
+        };
+      }
+
+      // VENDEDOR
+      const vendedor = await this.prisma.vendedor.findFirst({ where: { usuarioId: usuario.id } });
       this.logger.log(`Login loja VENDEDOR: ${usuario.email}`);
       return {
         message: 'Login realizado com sucesso',
@@ -109,7 +110,7 @@ export class AuthService {
 
     // ── CLIENTE: CPF apenas (sem senha) ──────────────────────────
     if (!dto.cpf) {
-      throw new UnauthorizedException('Informe CPF (cliente) ou email+senha (vendedor)');
+      throw new UnauthorizedException('Informe CPF (cliente) ou email+senha (vendedor/distribuidor)');
     }
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');

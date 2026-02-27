@@ -13,15 +13,15 @@ export class SorteioController {
   constructor(private readonly sorteioService: SorteioService) {}
 
   @Get()
-  @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Listar sorteios (ADMIN + DISTRIBUIDOR)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Listar sorteios (ADMIN)' })
   findAll() {
     return this.sorteioService.findAll();
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Buscar sorteio por edição (ADMIN + DISTRIBUIDOR)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Buscar sorteio por edição (ADMIN)' })
   findOne(@Param('id') id: string) {
     return this.sorteioService.findOne(id);
   }

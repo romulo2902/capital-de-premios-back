@@ -9,13 +9,13 @@ import { Roles } from '../../common/decorators/roles.decorator';
 @ApiTags('Admin / Relatórios')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'DISTRIBUIDOR')
+@Roles('ADMIN')
 @Controller('admin/relatorios')
 export class RelatoriosController {
   constructor(private readonly relatoriosService: RelatoriosService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Listar endpoints de relatórios disponíveis (ADMIN + DISTRIBUIDOR)' })
+  @ApiOperation({ summary: 'Listar endpoints de relatórios disponíveis (ADMIN)' })
   findAll() {
     return this.relatoriosService.findAll();
   }

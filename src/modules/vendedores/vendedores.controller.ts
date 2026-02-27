@@ -27,14 +27,14 @@ export class VendedoresController {
   constructor(private readonly vendedoresService: VendedoresService) {}
 
   @Post()
-  @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Criar vendedor (ADMIN ou DISTRIBUIDOR)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Criar vendedor (ADMIN)' })
   create(@Body() dto: CreateVendedorDto) {
     return this.vendedoresService.create(dto);
   }
 
   @Get()
-  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Listar vendedores' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
@@ -50,22 +50,22 @@ export class VendedoresController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Buscar vendedor por ID (ADMIN + DISTRIBUIDOR)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Buscar vendedor por ID (ADMIN)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.vendedoresService.findOne(id);
   }
 
   @Get('codigo/:codigo')
-  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Buscar vendedor por código sequencial' })
   findByCodigo(@Param('codigo', ParseIntPipe) codigo: number) {
     return this.vendedoresService.findByCodigo(codigo);
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Atualizar vendedor (ADMIN + DISTRIBUIDOR)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Atualizar vendedor (ADMIN)' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateVendedorDto,
@@ -74,7 +74,7 @@ export class VendedoresController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Inativar vendedor' })
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.vendedoresService.remove(id);

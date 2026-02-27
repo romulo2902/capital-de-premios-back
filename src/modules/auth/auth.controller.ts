@@ -12,21 +12,21 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login pelo painel admin (ADMIN + DISTRIBUIDOR) — email + senha' })
+  @ApiOperation({ summary: 'Login pelo painel admin (ADMIN apenas) — email + senha' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
   @Post('loja')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login pela loja (VENDEDOR: email+senha | CLIENTE: CPF)' })
+  @ApiOperation({ summary: 'Login pela loja (DISTRIBUIDOR/VENDEDOR: email+senha | CLIENTE: CPF)' })
   loginLoja(@Body() dto: LoginLojaDto) {
     return this.authService.loginLoja(dto);
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Renovar access token com refresh token' })
+  @ApiOperation({ summary: 'Renovar access token com refresh token (todos os perfis)' })
   refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto);
   }

@@ -20,6 +20,8 @@ import { RelatoriosModule } from './modules/relatorios/relatorios.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { QrcodeModule } from './modules/qrcode/qrcode.module';
 import { MigracaoModule } from './modules/migracao/migracao.module';
+import { DistribuidorLojaModule } from './modules/distribuidor-loja/distribuidor-loja.module';
+import { VendedorLojaModule } from './modules/vendedor-loja/vendedor-loja.module';
 
 @Module({
   imports: [
@@ -69,6 +71,8 @@ import { MigracaoModule } from './modules/migracao/migracao.module';
     DashboardModule,
     QrcodeModule,
     MigracaoModule,
+    DistribuidorLojaModule,
+    VendedorLojaModule,
   ],
 })
 export class AppModule {}

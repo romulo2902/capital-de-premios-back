@@ -48,22 +48,22 @@ export class DistribuidoresController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Buscar distribuidor por ID (ADMIN + DISTRIBUIDOR)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Buscar distribuidor por ID (ADMIN)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.distribuidoresService.findOne(id);
   }
 
   @Get('codigo/:codigo')
-  @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Buscar distribuidor por código sequencial (ADMIN + DISTRIBUIDOR)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Buscar distribuidor por código sequencial (ADMIN)' })
   findByCodigo(@Param('codigo', ParseIntPipe) codigo: number) {
     return this.distribuidoresService.findByCodigo(codigo);
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Atualizar distribuidor (ADMIN ou próprio DISTRIBUIDOR)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Atualizar distribuidor (ADMIN)' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateDistribuidorDto,

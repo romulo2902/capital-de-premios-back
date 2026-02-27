@@ -9,13 +9,13 @@ import { Roles } from '../../common/decorators/roles.decorator';
 @ApiTags('Admin / QR Code')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'DISTRIBUIDOR')
+@Roles('ADMIN')
 @Controller('admin/qrcode')
 export class QrcodeController {
   constructor(private readonly qrcodeService: QrcodeService) {}
 
   @Get('vendedor/:id')
-  @ApiOperation({ summary: 'Gerar QR Code do vendedor (ADMIN + DISTRIBUIDOR)' })
+  @ApiOperation({ summary: 'Gerar QR Code do vendedor (ADMIN)' })
   async vendedor(@Param('id') id: string, @Res() res: Response) {
     const buffer = await this.qrcodeService.gerarQrcodeVendedor(id);
     res.setHeader('Content-Type', 'image/png');
@@ -23,7 +23,7 @@ export class QrcodeController {
   }
 
   @Get('distribuidor/:id')
-  @ApiOperation({ summary: 'Gerar QR Code do distribuidor (ADMIN + DISTRIBUIDOR)' })
+  @ApiOperation({ summary: 'Gerar QR Code do distribuidor (ADMIN)' })
   async distribuidor(@Param('id') id: string, @Res() res: Response) {
     const buffer = await this.qrcodeService.gerarQrcodeDistribuidor(id);
     res.setHeader('Content-Type', 'image/png');
