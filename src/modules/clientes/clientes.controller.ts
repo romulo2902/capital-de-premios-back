@@ -40,13 +40,21 @@ export class ClientesController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'vendedorId', required: false, type: String })
+  @ApiQuery({ name: 'distribuidorId', required: false, type: String })
   findAll(
     @Query('page') page = 1,
     @Query('limit') limit = 20,
     @Query('search') search?: string,
     @Query('vendedorId') vendedorId?: string,
+    @Query('distribuidorId') distribuidorId?: string,
   ) {
-    return this.clientesService.findAll(+page, +limit, search, vendedorId);
+    return this.clientesService.findAll(
+      +page,
+      +limit,
+      search,
+      vendedorId,
+      distribuidorId,
+    );
   }
 
   @Get(':id')

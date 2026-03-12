@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { LoginLojaDto } from './dto/login-loja.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { RedefinirSenhaPrimeiroAcessoDto } from './dto/redefinir-senha-primeiro-acesso.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -29,5 +30,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Renovar access token com refresh token (todos os perfis)' })
   refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto);
+  }
+
+  @Post('redefinir-senha-primeiro-acesso')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Redefinir senha de primeiro acesso para DISTRIBUIDOR/VENDEDOR migrado' })
+  redefinirSenhaPrimeiroAcesso(@Body() dto: RedefinirSenhaPrimeiroAcessoDto) {
+    return this.authService.redefinirSenhaPrimeiroAcesso(dto);
   }
 }

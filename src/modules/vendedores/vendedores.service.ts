@@ -37,6 +37,7 @@ export class VendedoresService {
           cpf: dto.cpf,
           senhaHash,
           perfil: Perfil.VENDEDOR,
+          deveRedefinirSenha: false,
           status: StatusUsuario.ATIVO,
         },
       });
@@ -137,7 +138,10 @@ export class VendedoresService {
       const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
       await this.prisma.usuario.update({
         where: { id: vendedor!.usuarioId },
-        data: { senhaHash: await bcrypt.hash(dto.senha, 10) },
+        data: {
+          senhaHash: await bcrypt.hash(dto.senha, 10),
+          deveRedefinirSenha: false,
+        },
       });
     }
 

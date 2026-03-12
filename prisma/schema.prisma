@@ -68,14 +68,15 @@ enum TipoChavePix {
 }
 
 model Usuario {
-  id        String        @id @default(uuid())
-  cpf       String?       @unique
-  email     String?       @unique
-  senhaHash String?
-  perfil    Perfil
-  status    StatusUsuario @default(ATIVO)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id                 String        @id @default(uuid())
+  cpf                String?       @unique
+  email              String?       @unique
+  senhaHash          String?
+  perfil             Perfil
+  deveRedefinirSenha Boolean       @default(false)
+  status             StatusUsuario @default(ATIVO)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 }
 
 model Distribuidor {
@@ -102,6 +103,7 @@ model Distribuidor {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   vendedores     Vendedor[]
+  clientes       Cliente[]
   saques         Saque[]
 }
 
@@ -153,10 +155,12 @@ model Cliente {
   estado         String?
   email          String?
   vendedorId     String?
+  distribuidorId String?
   status         StatusUsuario @default(ATIVO)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   vendedor       Vendedor?     @relation(fields: [vendedorId], references: [id])
+  distribuidor   Distribuidor? @relation(fields: [distribuidorId], references: [id])
   vendas         Venda[]
 }
 

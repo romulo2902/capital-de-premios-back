@@ -71,6 +71,11 @@ Este arquivo guia agentes de IA (OpenAI Codex, GPT-4o, etc.) sobre as convençõ
 
 8. **Tipagem** — nunca usar `any`. Tipar tudo explicitamente.
 
+9. **TypeError / erros de tipo** — sempre validar erros de tipagem antes de concluir qualquer alteração:
+   - Rodar validação de build/typecheck após mudanças relevantes
+   - Não encerrar tarefa com `TS2339`, `TS2353`, incompatibilidade de DTO/Prisma, ou tipos desatualizados
+   - Se houver mudança em `schema.prisma`, validar também `prisma:generate` antes do build
+
 ---
 
 ## Contextos de Acesso

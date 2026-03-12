@@ -93,4 +93,12 @@ export class CreateClienteDto {
   @IsOptional()
   @IsString()
   vendedorId?: string;
+
+  @ApiPropertyOptional({
+    example: 'uuid-do-distribuidor',
+    description: 'ID UUID do distribuidor/revendedor ao qual este cliente está vinculado.',
+  })
+  @IsOptional()
+  @IsString()
+  distribuidorId?: string;
 }

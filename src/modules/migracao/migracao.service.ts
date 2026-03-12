@@ -23,7 +23,6 @@ interface ContagemImportacao {
 
 interface LinhaVendedorImportacao {
   rowNumber: number;
-  codigo: number | null;
   nome: string;
   cpf: string;
   telefone: string | null;
@@ -190,7 +189,12 @@ export class MigracaoService {
 
           await this.prisma.usuario.update({
             where: { id: existente.usuarioId },
-            data: { cpf, email, perfil: Perfil.DISTRIBUIDOR },
+            data: {
+              cpf,
+              email,
+              perfil: Perfil.DISTRIBUIDOR,
+              deveRedefinirSenha: true,
+            },
           });
 
           relatorio.distribuidores.atualizados += 1;
@@ -300,7 +304,6 @@ export class MigracaoService {
 
       linhas.push({
         rowNumber,
-        codigo: this.numero(row.getCell(1).value),
         nome,
         cpf,
         telefone: this.texto(row.getCell(5).value),
@@ -320,35 +323,25 @@ export class MigracaoService {
 
     const cpfs = linhas.map((item) => item.cpf);
     const emails = linhas.map((item) => item.email);
-    const codigos = linhas
-      .map((item) => item.codigo)
-      .filter((codigo): codigo is number => codigo !== null);
 
-    const [vendedoresExistentes, usuariosExistentes, codigosOcupados] =
-      await Promise.all([
-        this.prisma.vendedor.findMany({
-          where: { cpf: { in: cpfs } },
-          select: { id: true, cpf: true, usuarioId: true },
-        }),
-        this.prisma.usuario.findMany({
-          where: {
-            OR: [{ cpf: { in: cpfs } }, { email: { in: emails } }],
-          },
-          select: {
-            id: true,
-            cpf: true,
-            email: true,
-            perfil: true,
-            senhaHash: true,
-          },
-        }),
-        codigos.length
-          ? this.prisma.vendedor.findMany({
-              where: { codigo: { in: codigos } },
-              select: { codigo: true },
-            })
-          : Promise.resolve([]),
-      ]);
+    const [vendedoresExistentes, usuariosExistentes] = await Promise.all([
+      this.prisma.vendedor.findMany({
+        where: { cpf: { in: cpfs } },
+        select: { id: true, cpf: true, usuarioId: true },
+      }),
+      this.prisma.usuario.findMany({
+        where: {
+          OR: [{ cpf: { in: cpfs } }, { email: { in: emails } }],
+        },
+        select: {
+          id: true,
+          cpf: true,
+          email: true,
+          perfil: true,
+          senhaHash: true,
+        },
+      }),
+    ]);
     const vendedoresPorUsuariosExistentes = usuariosExistentes.length
       ? await this.prisma.vendedor.findMany({
           where: {
@@ -378,10 +371,9 @@ export class MigracaoService {
         .filter((item) => Boolean(item.email))
         .map((item) => [item.email as string, item]),
     );
-    const codigosReservados = new Set<number>(
-      codigosOcupados.map((item) => item.codigo),
-    );
     const usuarioIdsParaCriacaoVendedor = new Set<string>();
+    const indiceCriacaoPorUsuarioId = new Map<string, number>();
+    const usuarioIdsNovos = new Set<string>();
 
     const senhaVendedorHash = await bcrypt.hash(this.senhaVendedorDefault, 10);
     const usuariosParaCriar: Prisma.UsuarioCreateManyInput[] = [];
@@ -421,6 +413,7 @@ export class MigracaoService {
           cpf: linha.cpf,
           email: linha.email,
           perfil: Perfil.VENDEDOR,
+          deveRedefinirSenha: true,
           status: StatusUsuario.ATIVO,
         });
         continue;
@@ -428,7 +421,12 @@ export class MigracaoService {
 
       const usuarioExistente =
         usuarioPorCpf.get(linha.cpf) ?? usuarioPorEmail.get(linha.email);
-      if (usuarioExistente && usuarioExistente.perfil !== Perfil.VENDEDOR) {
+      let usuarioId: string;
+      if (
+        usuarioExistente &&
+        usuarioExistente.perfil !== Perfil.VENDEDOR &&
+        usuarioExistente.perfil !== Perfil.DISTRIBUIDOR
+      ) {
         relatorio.vendedores.ignorados += 1;
         relatorio.erros.push(
           `[${worksheet.name} linha ${linha.rowNumber}] Usuário ${linha.cpf} já existe com perfil ${usuarioExistente.perfil}`,
@@ -436,8 +434,31 @@ export class MigracaoService {
         continue;
       }
 
-      let usuarioId: string;
-      if (usuarioExistente) {
+      if (usuarioExistente && usuarioExistente.perfil === Perfil.DISTRIBUIDOR) {
+        usuarioId = randomUUID();
+        const emailUsuarioVendedor = this.gerarEmailUsuarioVendedorImportacao(
+          linha.cpf,
+          linha.rowNumber,
+        );
+
+        usuariosParaCriar.push({
+          id: usuarioId,
+          cpf: null,
+          email: emailUsuarioVendedor,
+          senhaHash: senhaVendedorHash,
+          perfil: Perfil.VENDEDOR,
+          deveRedefinirSenha: true,
+          status: StatusUsuario.ATIVO,
+        });
+        usuarioIdsNovos.add(usuarioId);
+        usuarioPorEmail.set(emailUsuarioVendedor, {
+          id: usuarioId,
+          cpf: null,
+          email: emailUsuarioVendedor,
+          perfil: Perfil.VENDEDOR,
+          senhaHash: senhaVendedorHash,
+        });
+      } else if (usuarioExistente) {
         usuarioId = usuarioExistente.id;
         const vendedorDoUsuario = vendedorPorUsuarioId.get(usuarioId);
         if (vendedorDoUsuario) {
@@ -466,6 +487,7 @@ export class MigracaoService {
             cpf: linha.cpf,
             email: linha.email,
             perfil: Perfil.VENDEDOR,
+            deveRedefinirSenha: true,
             status: StatusUsuario.ATIVO,
             ...(usuarioExistente.senhaHash
               ? {}
@@ -474,24 +496,19 @@ export class MigracaoService {
           continue;
         }
 
-        if (usuarioIdsParaCriacaoVendedor.has(usuarioId)) {
-          relatorio.vendedores.ignorados += 1;
-          relatorio.erros.push(
-            `[${worksheet.name} linha ${linha.rowNumber}] Vendedor ignorado: usuário já associado em outra linha do arquivo (${usuarioId})`,
-          );
-          continue;
+        if (usuarioIdsParaCriacaoVendedor.has(usuarioId)) continue;
+        if (!usuarioIdsNovos.has(usuarioId)) {
+          usuariosParaAtualizar.set(usuarioId, {
+            cpf: linha.cpf,
+            email: linha.email,
+            perfil: Perfil.VENDEDOR,
+            deveRedefinirSenha: true,
+            status: StatusUsuario.ATIVO,
+            ...(usuarioExistente.senhaHash
+              ? {}
+              : { senhaHash: senhaVendedorHash }),
+          });
         }
-        usuarioIdsParaCriacaoVendedor.add(usuarioId);
-
-        usuariosParaAtualizar.set(usuarioId, {
-          cpf: linha.cpf,
-          email: linha.email,
-          perfil: Perfil.VENDEDOR,
-          status: StatusUsuario.ATIVO,
-          ...(usuarioExistente.senhaHash
-            ? {}
-            : { senhaHash: senhaVendedorHash }),
-        });
       } else {
         usuarioId = randomUUID();
         usuariosParaCriar.push({
@@ -500,6 +517,7 @@ export class MigracaoService {
           email: linha.email,
           senhaHash: senhaVendedorHash,
           perfil: Perfil.VENDEDOR,
+          deveRedefinirSenha: true,
           status: StatusUsuario.ATIVO,
         });
 
@@ -508,20 +526,15 @@ export class MigracaoService {
           cpf: linha.cpf,
           email: linha.email,
           perfil: Perfil.VENDEDOR,
+          deveRedefinirSenha: true,
           senhaHash: senhaVendedorHash,
         };
+        usuarioIdsNovos.add(usuarioId);
         usuarioPorCpf.set(linha.cpf, novoUsuario);
         usuarioPorEmail.set(linha.email, novoUsuario);
       }
 
-      const codigo =
-        linha.codigo && !codigosReservados.has(linha.codigo)
-          ? linha.codigo
-          : null;
-      if (codigo) codigosReservados.add(codigo);
-
-      vendedoresParaCriar.push({
-        ...(codigo ? { codigo } : {}),
+      const vendedorParaCriar: Prisma.VendedorCreateManyInput = {
         usuarioId,
         distribuidorId: linha.distribuidorId,
         nome: linha.nome,
@@ -537,19 +550,24 @@ export class MigracaoService {
         estado: linha.estado,
         email: linha.email,
         status: StatusUsuario.ATIVO,
-      });
+      };
+
+      if (usuarioIdsParaCriacaoVendedor.has(usuarioId)) {
+        const indiceExistente = indiceCriacaoPorUsuarioId.get(usuarioId);
+        if (indiceExistente !== undefined) {
+          vendedoresParaCriar[indiceExistente] = vendedorParaCriar;
+        }
+        continue;
+      }
+
+      usuarioIdsParaCriacaoVendedor.add(usuarioId);
+      indiceCriacaoPorUsuarioId.set(usuarioId, vendedoresParaCriar.length);
+      vendedoresParaCriar.push(vendedorParaCriar);
     }
 
     if (usuariosParaCriar.length || vendedoresParaCriar.length) {
       try {
         await this.prisma.$transaction(async (tx) => {
-          await tx.$executeRawUnsafe(
-            `SELECT setval(
-              pg_get_serial_sequence('"Vendedor"', 'codigo'),
-              COALESCE((SELECT MAX("codigo") FROM "Vendedor"), 1),
-              true
-            )`,
-          );
           if (usuariosParaCriar.length) {
             for (const lote of this.quebrarEmLotes(usuariosParaCriar, 500)) {
               await tx.usuario.createMany({ data: lote });
@@ -604,10 +622,16 @@ export class MigracaoService {
     worksheet: ExcelJS.Worksheet,
     relatorio: RelatorioImportacao,
   ): Promise<void> {
-    const vendedores = await this.prisma.vendedor.findMany({
-      select: { id: true, nome: true },
-    });
+    const [vendedores, distribuidores] = await Promise.all([
+      this.prisma.vendedor.findMany({
+        select: { id: true, nome: true },
+      }),
+      this.prisma.distribuidor.findMany({
+        select: { id: true, nome: true },
+      }),
+    ]);
     const vendedorPorNome = this.mapearPorNome(vendedores);
+    const distribuidorPorNome = this.mapearPorNome(distribuidores);
 
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
       const row = worksheet.getRow(rowNumber);
@@ -618,7 +642,7 @@ export class MigracaoService {
       const nome = this.texto(row.getCell(3).value);
       const cpf = this.cpf(row.getCell(4).value);
       const email = this.email(row.getCell(13).value);
-      const nomeVendedor = this.texto(row.getCell(14).value);
+      const nomeVendedorOuDistribuidor = this.texto(row.getCell(14).value);
 
       if (!nome || !cpf) {
         relatorio.clientes.ignorados += 1;
@@ -628,22 +652,21 @@ export class MigracaoService {
         continue;
       }
 
-      const vendedorId = nomeVendedor
-        ? this.buscarRelacionamentoPorNome(nomeVendedor, vendedorPorNome)
+      const vendedorId = nomeVendedorOuDistribuidor
+        ? this.buscarRelacionamentoPorNome(
+            nomeVendedorOuDistribuidor,
+            vendedorPorNome,
+          )
         : null;
-
-      if (nomeVendedor && !vendedorId) {
-        relatorio.clientes.ignorados += 1;
-        relatorio.erros.push(
-          `[${worksheet.name} linha ${rowNumber}] Vendedor não encontrado para "${nomeVendedor}"`,
-        );
-        continue;
-      }
+      const distribuidorId =
+        !vendedorId && nomeVendedorOuDistribuidor
+          ? this.buscarRelacionamentoPorNome(
+              nomeVendedorOuDistribuidor,
+              distribuidorPorNome,
+            )
+          : null;
 
       try {
-        const codigo = await this.resolverCodigoCliente(
-          this.numero(row.getCell(1).value),
-        );
         const existente = await this.prisma.cliente.findUnique({
           where: { cpf },
         });
@@ -653,6 +676,7 @@ export class MigracaoService {
             where: { id: existente.id },
             data: {
               vendedorId,
+              distribuidorId,
               nome,
               telefone: this.texto(row.getCell(5).value) ?? undefined,
               dataNascimento: this.data(row.getCell(6).value),
@@ -669,24 +693,24 @@ export class MigracaoService {
           continue;
         }
 
-        await this.prisma.cliente.create({
-          data: {
-            ...(codigo ? { codigo } : {}),
-            cpf,
-            nome,
-            telefone: this.texto(row.getCell(5).value) ?? '',
-            dataNascimento: this.data(row.getCell(6).value),
-            cep: this.texto(row.getCell(7).value),
-            endereco: this.texto(row.getCell(8).value),
-            numero: this.texto(row.getCell(9).value),
-            cidade: this.texto(row.getCell(10).value),
-            bairro: this.texto(row.getCell(11).value),
-            estado: this.texto(row.getCell(12).value),
-            email,
-            vendedorId,
-            status: StatusUsuario.ATIVO,
-          },
-        });
+        const dataCriacaoCliente: Prisma.ClienteUncheckedCreateInput = {
+          cpf,
+          nome,
+          telefone: this.texto(row.getCell(5).value) ?? '',
+          dataNascimento: this.data(row.getCell(6).value),
+          cep: this.texto(row.getCell(7).value),
+          endereco: this.texto(row.getCell(8).value),
+          numero: this.texto(row.getCell(9).value),
+          cidade: this.texto(row.getCell(10).value),
+          bairro: this.texto(row.getCell(11).value),
+          estado: this.texto(row.getCell(12).value),
+          email,
+          vendedorId,
+          distribuidorId,
+          status: StatusUsuario.ATIVO,
+        };
+
+        await this.prisma.cliente.create({ data: dataCriacaoCliente });
 
         relatorio.clientes.criados += 1;
       } catch (error) {
@@ -733,13 +757,30 @@ export class MigracaoService {
     const usuarioEmail = await tx.usuario.findUnique({
       where: { email: payload.email },
     });
-    const usuarioExistente = usuarioCpf ?? usuarioEmail;
+    if (usuarioCpf && usuarioEmail && usuarioCpf.id !== usuarioEmail.id) {
+      throw new BadRequestException(
+        `Conflito de identidade para CPF ${payload.cpf} e email ${payload.email}: registros de usuário distintos`,
+      );
+    }
 
+    const usuarioExistente = usuarioCpf ?? usuarioEmail;
     if (usuarioExistente) {
       if (usuarioExistente.perfil !== payload.perfil) {
-        throw new BadRequestException(
-          `Usuário ${payload.cpf} já existe com perfil ${usuarioExistente.perfil}`,
-        );
+        return tx.usuario.create({
+          data: {
+            cpf: usuarioCpf ? null : payload.cpf,
+            email: usuarioEmail
+              ? this.gerarEmailUsuarioMigradoConflito(
+                  payload.cpf,
+                  payload.perfil,
+                )
+              : payload.email,
+            perfil: payload.perfil,
+            deveRedefinirSenha: true,
+            status: StatusUsuario.ATIVO,
+            senhaHash: await bcrypt.hash(payload.senhaPadrao, 10),
+          },
+        });
       }
 
       const senhaHash = usuarioExistente.senhaHash
@@ -752,6 +793,7 @@ export class MigracaoService {
           cpf: payload.cpf,
           email: payload.email,
           perfil: payload.perfil,
+          deveRedefinirSenha: true,
           status: StatusUsuario.ATIVO,
           ...(senhaHash ? { senhaHash } : {}),
         },
@@ -763,6 +805,7 @@ export class MigracaoService {
         cpf: payload.cpf,
         email: payload.email,
         perfil: payload.perfil,
+        deveRedefinirSenha: true,
         status: StatusUsuario.ATIVO,
         senhaHash: await bcrypt.hash(payload.senhaPadrao, 10),
       },
@@ -845,28 +888,6 @@ export class MigracaoService {
     return existe ? null : codigo;
   }
 
-  private async resolverCodigoVendedor(
-    codigo: number | null,
-  ): Promise<number | null> {
-    if (!codigo) return null;
-    const existe = await this.prisma.vendedor.findUnique({
-      where: { codigo },
-      select: { id: true },
-    });
-    return existe ? null : codigo;
-  }
-
-  private async resolverCodigoCliente(
-    codigo: number | null,
-  ): Promise<number | null> {
-    if (!codigo) return null;
-    const existe = await this.prisma.cliente.findUnique({
-      where: { codigo },
-      select: { id: true },
-    });
-    return existe ? null : codigo;
-  }
-
   private cpf(value: ExcelJS.CellValue): string | null {
     const txt = this.texto(value);
     if (!txt) return null;
@@ -908,6 +929,20 @@ export class MigracaoService {
     }
 
     return null;
+  }
+
+  private gerarEmailUsuarioVendedorImportacao(
+    cpf: string,
+    rowNumber: number,
+  ): string {
+    return `${cpf}.${rowNumber}.${randomUUID().slice(0, 8)}@vendedor-import.local`;
+  }
+
+  private gerarEmailUsuarioMigradoConflito(
+    cpf: string,
+    perfil: Perfil,
+  ): string {
+    return `${cpf}.${perfil.toLowerCase()}.${randomUUID().slice(0, 8)}@migracao.local`;
   }
 
   private isEmail(value: string): boolean {

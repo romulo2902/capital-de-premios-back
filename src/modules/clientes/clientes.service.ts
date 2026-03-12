@@ -19,9 +19,19 @@ export class ClientesService {
     const existing = await this.prisma.cliente.findUnique({ where: { cpf: dto.cpf } });
     if (existing) throw new ConflictException('CPF já cadastrado');
 
+    if (dto.vendedorId && dto.distribuidorId) {
+      throw new ConflictException('Informe apenas vendedorId ou distribuidorId');
+    }
+
     if (dto.vendedorId) {
       const vendedor = await this.prisma.vendedor.findUnique({ where: { id: dto.vendedorId } });
       if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
+    }
+    if (dto.distribuidorId) {
+      const distribuidor = await this.prisma.distribuidor.findUnique({
+        where: { id: dto.distribuidorId },
+      });
+      if (!distribuidor) throw new NotFoundException('Distribuidor não encontrado');
     }
 
     const cliente = await this.prisma.cliente.create({
@@ -39,10 +49,12 @@ export class ClientesService {
         estado: dto.estado,
         email: dto.email,
         vendedorId: dto.vendedorId ?? null,
+        distribuidorId: dto.distribuidorId ?? null,
         status: StatusUsuario.ATIVO,
       },
       include: {
         vendedor: { select: { id: true, nome: true, codigo: true } },
+        distribuidor: { select: { id: true, nome: true, codigo: true } },
       },
     });
 
@@ -50,11 +62,18 @@ export class ClientesService {
     return cliente;
   }
 
-  async findAll(page = 1, limit = 20, search?: string, vendedorId?: string) {
+  async findAll(
+    page = 1,
+    limit = 20,
+    search?: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ) {
     const skip = (page - 1) * limit;
     const where: Record<string, unknown> = {};
 
     if (vendedorId) where.vendedorId = vendedorId;
+    if (distribuidorId) where.distribuidorId = distribuidorId;
     if (search) {
       where.OR = [
         { nome: { contains: search, mode: 'insensitive' } },
@@ -72,6 +91,7 @@ export class ClientesService {
         orderBy: { createdAt: 'desc' },
         include: {
           vendedor: { select: { id: true, nome: true, codigo: true } },
+          distribuidor: { select: { id: true, nome: true, codigo: true } },
         },
       }),
       this.prisma.cliente.count({ where }),
@@ -85,6 +105,7 @@ export class ClientesService {
       where: { id },
       include: {
         vendedor: { select: { id: true, nome: true, codigo: true } },
+        distribuidor: { select: { id: true, nome: true, codigo: true } },
         _count: { select: { vendas: true } },
       },
     });
@@ -114,9 +135,19 @@ export class ClientesService {
       if (conflict) throw new ConflictException('CPF já cadastrado');
     }
 
+    if (dto.vendedorId && dto.distribuidorId) {
+      throw new ConflictException('Informe apenas vendedorId ou distribuidorId');
+    }
+
     if (dto.vendedorId) {
       const vendedor = await this.prisma.vendedor.findUnique({ where: { id: dto.vendedorId } });
       if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
+    }
+    if (dto.distribuidorId) {
+      const distribuidor = await this.prisma.distribuidor.findUnique({
+        where: { id: dto.distribuidorId },
+      });
+      if (!distribuidor) throw new NotFoundException('Distribuidor não encontrado');
     }
 
     const data: Record<string, unknown> = { ...dto };
@@ -126,7 +157,10 @@ export class ClientesService {
     return this.prisma.cliente.update({
       where: { id },
       data,
-      include: { vendedor: { select: { id: true, nome: true, codigo: true } } },
+      include: {
+        vendedor: { select: { id: true, nome: true, codigo: true } },
+        distribuidor: { select: { id: true, nome: true, codigo: true } },
+      },
     });
   }
 

@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -6,6 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { LoginLojaDto } from './dto/login-loja.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { RedefinirSenhaPrimeiroAcessoDto } from './dto/redefinir-senha-primeiro-acesso.dto';
 
 type UsuarioRow = {
   id: string;
@@ -13,6 +14,7 @@ type UsuarioRow = {
   cpf: string | null;
   senhaHash: string | null;
   perfil: string;
+  deveRedefinirSenha: boolean;
   status: string;
 };
 
@@ -56,6 +58,10 @@ export class AuthService {
       throw new UnauthorizedException('Usuário inativo');
     }
 
+    if (usuario.deveRedefinirSenha) {
+      throw new ForbiddenException('Usuário deve redefinir a senha antes de acessar');
+    }
+
     // Apenas ADMIN pode acessar o painel admin
     if (usuario.perfil !== 'ADMIN') {
       throw new UnauthorizedException('Acesso restrito ao painel administrativo (ADMIN)');
@@ -87,6 +93,10 @@ export class AuthService {
 
       const senhaValida = await bcrypt.compare(dto.senha, usuario.senhaHash);
       if (!senhaValida) throw new UnauthorizedException('Credenciais inválidas');
+
+      if (usuario.deveRedefinirSenha) {
+        throw new ForbiddenException('Usuário deve redefinir a senha antes de acessar');
+      }
 
       const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
 
@@ -176,6 +186,38 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('Refresh token inválido ou expirado');
     }
+  }
+
+  async redefinirSenhaPrimeiroAcesso(
+    dto: RedefinirSenhaPrimeiroAcessoDto,
+  ): Promise<{ message: string }> {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (!usuario || !usuario.senhaHash) {
+      throw new UnauthorizedException('Credenciais inválidas');
+    }
+
+    if (usuario.perfil !== 'VENDEDOR' && usuario.perfil !== 'DISTRIBUIDOR') {
+      throw new ForbiddenException('Operação permitida apenas para vendedor ou distribuidor');
+    }
+
+    const senhaValida = await bcrypt.compare(dto.senhaAtual, usuario.senhaHash);
+    if (!senhaValida) {
+      throw new UnauthorizedException('Credenciais inválidas');
+    }
+
+    await this.prisma.usuario.update({
+      where: { id: usuario.id },
+      data: {
+        senhaHash: await bcrypt.hash(dto.novaSenha, 10),
+        deveRedefinirSenha: false,
+      },
+    });
+
+    this.logger.log(`Senha redefinida no primeiro acesso: ${usuario.email} [${usuario.perfil}]`);
+    return { message: 'Senha redefinida com sucesso' };
   }
 
   private gerarTokens(usuario: UsuarioRow): AuthTokens {
