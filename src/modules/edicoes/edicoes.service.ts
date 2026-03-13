@@ -7,7 +7,7 @@ export class EdicoesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll() {
     this.logger.log('Listando edicao');
     return { message: 'edicao listados com sucesso', data: [] };
   }

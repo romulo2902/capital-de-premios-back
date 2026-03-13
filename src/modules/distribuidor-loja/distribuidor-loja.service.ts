@@ -1,7 +1,6 @@
 import {
   Injectable,
   NotFoundException,
-  ForbiddenException,
   Logger,
   BadRequestException,
 } from '@nestjs/common';
@@ -14,7 +13,9 @@ export class DistribuidorLojaService {
   constructor(private readonly prisma: PrismaService) {}
 
   private async getDistribuidor(distribuidorId: string) {
-    const d = await this.prisma.distribuidor.findUnique({ where: { id: distribuidorId } });
+    const d = await this.prisma.distribuidor.findUnique({
+      where: { id: distribuidorId },
+    });
     if (!d) throw new NotFoundException('Distribuidor não encontrado');
     return d;
   }
@@ -34,14 +35,17 @@ export class DistribuidorLojaService {
     return { message: 'Vendedores do distribuidor', data: vendedores };
   }
 
-  async createVendedor(distribuidorId: string, dto: {
-    nome: string;
-    cpf: string;
-    email: string;
-    telefone: string;
-    comissaoPercent?: number;
-    senha: string;
-  }) {
+  async createVendedor(
+    distribuidorId: string,
+    dto: {
+      nome: string;
+      cpf: string;
+      email: string;
+      telefone: string;
+      comissaoPercent?: number;
+      senha: string;
+    },
+  ) {
     const { senha, ...perfil } = dto;
 
     // Verifica se o distribuidor existe e está ativo
@@ -49,11 +53,15 @@ export class DistribuidorLojaService {
 
     // CPF único
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cpfExistente = await this.prisma.vendedor.findUnique({ where: { cpf: cpfLimpo } });
+    const cpfExistente = await this.prisma.vendedor.findUnique({
+      where: { cpf: cpfLimpo },
+    });
     if (cpfExistente) throw new BadRequestException('CPF já cadastrado');
 
     // Email único
-    const emailExistente = await this.prisma.usuario.findUnique({ where: { email: dto.email } });
+    const emailExistente = await this.prisma.usuario.findUnique({
+      where: { email: dto.email },
+    });
     if (emailExistente) throw new BadRequestException('Email já cadastrado');
 
     const bcrypt = await import('bcrypt');
@@ -77,16 +85,21 @@ export class DistribuidorLojaService {
       return vendedor;
     });
 
-    this.logger.log(`DISTRIBUIDOR ${distribuidorId} criou vendedor ${result.id}`);
+    this.logger.log(
+      `DISTRIBUIDOR ${distribuidorId} criou vendedor ${result.id}`,
+    );
     return { message: 'Vendedor criado com sucesso', data: result };
   }
 
   // ─── Vendas ───────────────────────────────────────────────────────────────
-  async getVendas(distribuidorId: string, params: {
-    page?: number;
-    limit?: number;
-    status?: string;
-  }) {
+  async getVendas(
+    distribuidorId: string,
+    params: {
+      page?: number;
+      limit?: number;
+      status?: string;
+    },
+  ) {
     const { page = 1, limit = 20, status } = params;
 
     // Busca IDs dos vendedores do distribuidor
@@ -97,10 +110,7 @@ export class DistribuidorLojaService {
     const vendedorIds = vendedores.map((v) => v.id);
 
     const where = {
-      OR: [
-        { distribuidorId },
-        { vendedorId: { in: vendedorIds } },
-      ],
+      OR: [{ distribuidorId }, { vendedorId: { in: vendedorIds } }],
       ...(status ? { status: status as never } : {}),
     };
 
@@ -115,7 +125,10 @@ export class DistribuidorLojaService {
       }),
     ]);
 
-    return { message: 'Vendas do distribuidor', data: { total, page, limit, vendas } };
+    return {
+      message: 'Vendas do distribuidor',
+      data: { total, page, limit, vendas },
+    };
   }
 
   // ─── Relatório de Performance por Etapa ──────────────────────────────────
@@ -137,7 +150,15 @@ export class DistribuidorLojaService {
     });
 
     // Formata resultado
-    const resultado: Record<string, { vendedorId: string | null; nome: string; quantidade: number; total: number }[]> = {};
+    const resultado: Record<
+      string,
+      {
+        vendedorId: string | null;
+        nome: string;
+        quantidade: number;
+        total: number;
+      }[]
+    > = {};
     for (const item of vendas) {
       const etapa = item.status;
       if (!resultado[etapa]) resultado[etapa] = [];
@@ -169,13 +190,21 @@ export class DistribuidorLojaService {
     if (Number(distribuidor.saldo) < valor) {
       throw new BadRequestException('Saldo insuficiente para saque');
     }
-    if (valor <= 0) throw new BadRequestException('Valor do saque deve ser positivo');
+    if (valor <= 0)
+      throw new BadRequestException('Valor do saque deve ser positivo');
 
     const saque = await this.prisma.saque.create({
-      data: { distribuidorId, tipo: 'DISTRIBUIDOR', valor, status: 'SOLICITADO' },
+      data: {
+        distribuidorId,
+        tipo: 'DISTRIBUIDOR',
+        valor,
+        status: 'SOLICITADO',
+      },
     });
 
-    this.logger.log(`DISTRIBUIDOR ${distribuidorId} solicitou saque de R$${valor}`);
+    this.logger.log(
+      `DISTRIBUIDOR ${distribuidorId} solicitou saque de R$${valor}`,
+    );
     return { message: 'Saque solicitado com sucesso', data: saque };
   }
 }

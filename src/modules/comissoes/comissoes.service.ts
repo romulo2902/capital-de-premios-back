@@ -7,7 +7,7 @@ export class ComissoesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll() {
     this.logger.log('Listando comissao');
     return { message: 'comissao listados com sucesso', data: [] };
   }

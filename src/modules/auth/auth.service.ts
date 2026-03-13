@@ -1,5 +1,10 @@
-import { ForbiddenException, Injectable, UnauthorizedException, Logger } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -59,12 +64,16 @@ export class AuthService {
     }
 
     if (usuario.deveRedefinirSenha) {
-      throw new ForbiddenException('Usuário deve redefinir a senha antes de acessar');
+      throw new ForbiddenException(
+        'Usuário deve redefinir a senha antes de acessar',
+      );
     }
 
     // Apenas ADMIN pode acessar o painel admin
     if (usuario.perfil !== 'ADMIN') {
-      throw new UnauthorizedException('Acesso restrito ao painel administrativo (ADMIN)');
+      throw new UnauthorizedException(
+        'Acesso restrito ao painel administrativo (ADMIN)',
+      );
     }
 
     const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
@@ -72,14 +81,26 @@ export class AuthService {
 
     return {
       message: 'Login realizado com sucesso',
-      data: { ...tokens, perfil: usuario.perfil, usuario: { id: usuario.id, email: usuario.email, perfil: usuario.perfil } },
+      data: {
+        ...tokens,
+        perfil: usuario.perfil,
+        usuario: {
+          id: usuario.id,
+          email: usuario.email,
+          perfil: usuario.perfil,
+        },
+      },
     };
   }
 
-  async loginLoja(dto: LoginLojaDto): Promise<{ message: string; data: unknown }> {
+  async loginLoja(
+    dto: LoginLojaDto,
+  ): Promise<{ message: string; data: unknown }> {
     // ── DISTRIBUIDOR ou VENDEDOR: email + senha ───────────────────
     if (dto.email && dto.senha) {
-      const usuario = await this.prisma.usuario.findUnique({ where: { email: dto.email } });
+      const usuario = await this.prisma.usuario.findUnique({
+        where: { email: dto.email },
+      });
 
       if (!usuario || !usuario.senhaHash) {
         throw new UnauthorizedException('Credenciais inválidas');
@@ -92,16 +113,21 @@ export class AuthService {
       }
 
       const senhaValida = await bcrypt.compare(dto.senha, usuario.senhaHash);
-      if (!senhaValida) throw new UnauthorizedException('Credenciais inválidas');
+      if (!senhaValida)
+        throw new UnauthorizedException('Credenciais inválidas');
 
       if (usuario.deveRedefinirSenha) {
-        throw new ForbiddenException('Usuário deve redefinir a senha antes de acessar');
+        throw new ForbiddenException(
+          'Usuário deve redefinir a senha antes de acessar',
+        );
       }
 
       const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
 
       if (usuario.perfil === 'DISTRIBUIDOR') {
-        const distribuidor = await this.prisma.distribuidor.findFirst({ where: { usuarioId: usuario.id } });
+        const distribuidor = await this.prisma.distribuidor.findFirst({
+          where: { usuarioId: usuario.id },
+        });
         this.logger.log(`Login loja DISTRIBUIDOR: ${usuario.email}`);
         return {
           message: 'Login realizado com sucesso',
@@ -110,7 +136,9 @@ export class AuthService {
       }
 
       // VENDEDOR
-      const vendedor = await this.prisma.vendedor.findFirst({ where: { usuarioId: usuario.id } });
+      const vendedor = await this.prisma.vendedor.findFirst({
+        where: { usuarioId: usuario.id },
+      });
       this.logger.log(`Login loja VENDEDOR: ${usuario.email}`);
       return {
         message: 'Login realizado com sucesso',
@@ -120,11 +148,15 @@ export class AuthService {
 
     // ── CLIENTE: CPF apenas (sem senha) ──────────────────────────
     if (!dto.cpf) {
-      throw new UnauthorizedException('Informe CPF (cliente) ou email+senha (vendedor/distribuidor)');
+      throw new UnauthorizedException(
+        'Informe CPF (cliente) ou email+senha (vendedor/distribuidor)',
+      );
     }
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    let cliente = await this.prisma.cliente.findUnique({ where: { cpf: cpfLimpo } });
+    let cliente = await this.prisma.cliente.findUnique({
+      where: { cpf: cpfLimpo },
+    });
     if (!cliente) {
       // Auto-cria um registro temporário; dados completos são preenchidos na compra
       cliente = await this.prisma.cliente.create({
@@ -132,19 +164,19 @@ export class AuthService {
       });
     }
 
-    const payload: JwtPayload = { sub: cliente.id, perfil: 'CLIENTE', cpf: cpfLimpo };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const accessToken = this.jwtService.sign(payload as any, {
-      secret: this.config.get<string>('JWT_ACCESS_SECRET'),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expiresIn: this.config.get<string>('JWT_ACCESS_EXPIRES', '15m') as any,
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const refreshToken = this.jwtService.sign(payload as any, {
-      secret: this.config.get<string>('JWT_REFRESH_SECRET'),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES', '7d') as any,
-    });
+    const payload: JwtPayload = {
+      sub: cliente.id,
+      perfil: 'CLIENTE',
+      cpf: cpfLimpo,
+    };
+    const accessToken = this.jwtService.sign(
+      payload,
+      this.getAccessTokenOptions(),
+    );
+    const refreshToken = this.jwtService.sign(
+      payload,
+      this.getRefreshTokenOptions(),
+    );
 
     this.logger.log(`Login loja CLIENTE: CPF ${cpfLimpo}`);
     return {
@@ -153,7 +185,9 @@ export class AuthService {
     };
   }
 
-  async refresh(dto: RefreshTokenDto): Promise<{ message: string; data: unknown }> {
+  async refresh(
+    dto: RefreshTokenDto,
+  ): Promise<{ message: string; data: unknown }> {
     try {
       const payload = this.jwtService.verify<JwtPayload>(dto.refreshToken, {
         secret: this.config.get<string>('JWT_REFRESH_SECRET'),
@@ -161,27 +195,35 @@ export class AuthService {
 
       // CLIENTE não tem Usuario — busca direto na tabela Cliente
       if (payload.perfil === 'CLIENTE') {
-        const cliente = await this.prisma.cliente.findUnique({ where: { id: payload.sub } });
+        const cliente = await this.prisma.cliente.findUnique({
+          where: { id: payload.sub },
+        });
         if (!cliente || cliente.status === 'INATIVO') {
           throw new UnauthorizedException('Token inválido');
         }
-        const clientePayload: JwtPayload = { sub: cliente.id, perfil: 'CLIENTE', cpf: cliente.cpf };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const accessToken = this.jwtService.sign(clientePayload as any, {
-          secret: this.config.get<string>('JWT_ACCESS_SECRET'),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          expiresIn: this.config.get<string>('JWT_ACCESS_EXPIRES', '15m') as any,
-        });
+        const clientePayload: JwtPayload = {
+          sub: cliente.id,
+          perfil: 'CLIENTE',
+          cpf: cliente.cpf,
+        };
+        const accessToken = this.jwtService.sign(
+          clientePayload,
+          this.getAccessTokenOptions(),
+        );
         return { message: 'Token renovado', data: { accessToken } };
       }
 
       // ADMIN, DISTRIBUIDOR, VENDEDOR — busca pelo Usuario
-      const usuario = await this.prisma.usuario.findUnique({ where: { id: payload.sub } });
+      const usuario = await this.prisma.usuario.findUnique({
+        where: { id: payload.sub },
+      });
       if (!usuario || usuario.status === 'INATIVO') {
         throw new UnauthorizedException('Token inválido');
       }
 
-      const accessToken = this.gerarAccessToken(usuario as unknown as UsuarioRow);
+      const accessToken = this.gerarAccessToken(
+        usuario as unknown as UsuarioRow,
+      );
       return { message: 'Token renovado', data: { accessToken } };
     } catch {
       throw new UnauthorizedException('Refresh token inválido ou expirado');
@@ -200,7 +242,9 @@ export class AuthService {
     }
 
     if (usuario.perfil !== 'VENDEDOR' && usuario.perfil !== 'DISTRIBUIDOR') {
-      throw new ForbiddenException('Operação permitida apenas para vendedor ou distribuidor');
+      throw new ForbiddenException(
+        'Operação permitida apenas para vendedor ou distribuidor',
+      );
     }
 
     const senhaValida = await bcrypt.compare(dto.senhaAtual, usuario.senhaHash);
@@ -216,7 +260,9 @@ export class AuthService {
       },
     });
 
-    this.logger.log(`Senha redefinida no primeiro acesso: ${usuario.email} [${usuario.perfil}]`);
+    this.logger.log(
+      `Senha redefinida no primeiro acesso: ${usuario.email} [${usuario.perfil}]`,
+    );
     return { message: 'Senha redefinida com sucesso' };
   }
 
@@ -228,22 +274,36 @@ export class AuthService {
   }
 
   private gerarAccessToken(usuario: UsuarioRow): string {
-    const payload: JwtPayload = { sub: usuario.id, perfil: usuario.perfil, email: usuario.email ?? undefined };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return this.jwtService.sign(payload as any, {
-      secret: this.config.get<string>('JWT_ACCESS_SECRET'),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expiresIn: this.config.get<string>('JWT_ACCESS_EXPIRES', '15m') as any,
-    });
+    const payload: JwtPayload = {
+      sub: usuario.id,
+      perfil: usuario.perfil,
+      email: usuario.email ?? undefined,
+    };
+    return this.jwtService.sign(payload, this.getAccessTokenOptions());
   }
 
   private gerarRefreshToken(usuario: UsuarioRow): string {
     const payload: JwtPayload = { sub: usuario.id, perfil: usuario.perfil };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return this.jwtService.sign(payload as any, {
+    return this.jwtService.sign(payload, this.getRefreshTokenOptions());
+  }
+
+  private getAccessTokenOptions(): JwtSignOptions {
+    return {
+      secret: this.config.get<string>('JWT_ACCESS_SECRET'),
+      expiresIn: this.config.get<string>(
+        'JWT_ACCESS_EXPIRES',
+        '15m',
+      ) as JwtSignOptions['expiresIn'],
+    };
+  }
+
+  private getRefreshTokenOptions(): JwtSignOptions {
+    return {
       secret: this.config.get<string>('JWT_REFRESH_SECRET'),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES', '7d') as any,
-    });
+      expiresIn: this.config.get<string>(
+        'JWT_REFRESH_EXPIRES',
+        '7d',
+      ) as JwtSignOptions['expiresIn'],
+    };
   }
 }

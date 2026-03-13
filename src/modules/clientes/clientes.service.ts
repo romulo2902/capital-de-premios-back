@@ -16,22 +16,29 @@ export class ClientesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateClienteDto) {
-    const existing = await this.prisma.cliente.findUnique({ where: { cpf: dto.cpf } });
+    const existing = await this.prisma.cliente.findUnique({
+      where: { cpf: dto.cpf },
+    });
     if (existing) throw new ConflictException('CPF já cadastrado');
 
     if (dto.vendedorId && dto.distribuidorId) {
-      throw new ConflictException('Informe apenas vendedorId ou distribuidorId');
+      throw new ConflictException(
+        'Informe apenas vendedorId ou distribuidorId',
+      );
     }
 
     if (dto.vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({ where: { id: dto.vendedorId } });
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { id: dto.vendedorId },
+      });
       if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
     }
     if (dto.distribuidorId) {
       const distribuidor = await this.prisma.distribuidor.findUnique({
         where: { id: dto.distribuidorId },
       });
-      if (!distribuidor) throw new NotFoundException('Distribuidor não encontrado');
+      if (!distribuidor)
+        throw new NotFoundException('Distribuidor não encontrado');
     }
 
     const cliente = await this.prisma.cliente.create({
@@ -40,7 +47,9 @@ export class ClientesService {
         cpf: dto.cpf,
         nome: dto.nome,
         telefone: dto.telefone,
-        dataNascimento: dto.dataNascimento ? new Date(dto.dataNascimento) : undefined,
+        dataNascimento: dto.dataNascimento
+          ? new Date(dto.dataNascimento)
+          : undefined,
         cep: dto.cep,
         endereco: dto.endereco,
         numero: dto.numero,
@@ -136,18 +145,23 @@ export class ClientesService {
     }
 
     if (dto.vendedorId && dto.distribuidorId) {
-      throw new ConflictException('Informe apenas vendedorId ou distribuidorId');
+      throw new ConflictException(
+        'Informe apenas vendedorId ou distribuidorId',
+      );
     }
 
     if (dto.vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({ where: { id: dto.vendedorId } });
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { id: dto.vendedorId },
+      });
       if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
     }
     if (dto.distribuidorId) {
       const distribuidor = await this.prisma.distribuidor.findUnique({
         where: { id: dto.distribuidorId },
       });
-      if (!distribuidor) throw new NotFoundException('Distribuidor não encontrado');
+      if (!distribuidor)
+        throw new NotFoundException('Distribuidor não encontrado');
     }
 
     const data: Record<string, unknown> = { ...dto };

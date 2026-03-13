@@ -7,7 +7,7 @@ export class UsuariosService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll() {
     this.logger.log('Listando usuario');
     return { message: 'usuario listados com sucesso', data: [] };
   }

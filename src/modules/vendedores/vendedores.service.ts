@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -26,9 +25,12 @@ export class VendedoresService {
     const distribuidor = await this.prisma.distribuidor.findUnique({
       where: { id: dto.distribuidorId },
     });
-    if (!distribuidor) throw new NotFoundException('Distribuidor não encontrado');
+    if (!distribuidor)
+      throw new NotFoundException('Distribuidor não encontrado');
 
-    const senhaHash = dto.senha ? await bcrypt.hash(dto.senha, 10) : await bcrypt.hash('Vend@123', 10);
+    const senhaHash = dto.senha
+      ? await bcrypt.hash(dto.senha, 10)
+      : await bcrypt.hash('Vend@123', 10);
 
     return this.prisma.$transaction(async (tx) => {
       const usuario = await tx.usuario.create({
@@ -52,7 +54,9 @@ export class VendedoresService {
           nomeRecebedor: dto.nomeRecebedor ?? dto.nome,
           telefone: dto.telefone,
           email: dto.email,
-          dataNascimento: dto.dataNascimento ? new Date(dto.dataNascimento) : undefined,
+          dataNascimento: dto.dataNascimento
+            ? new Date(dto.dataNascimento)
+            : undefined,
           cep: dto.cep,
           endereco: dto.endereco,
           numero: dto.numero,
@@ -66,12 +70,19 @@ export class VendedoresService {
         },
       });
 
-      this.logger.log(`Vendedor criado: ${vendedor.nome} (${vendedor.codigo}) → dist ${distribuidor.codigo}`);
+      this.logger.log(
+        `Vendedor criado: ${vendedor.nome} (${vendedor.codigo}) → dist ${distribuidor.codigo}`,
+      );
       return vendedor;
     });
   }
 
-  async findAll(page = 1, limit = 20, search?: string, distribuidorId?: string) {
+  async findAll(
+    page = 1,
+    limit = 20,
+    search?: string,
+    distribuidorId?: string,
+  ) {
     const skip = (page - 1) * limit;
     const where: Record<string, unknown> = {};
 
@@ -114,7 +125,9 @@ export class VendedoresService {
   }
 
   async findByCodigo(codigo: number) {
-    const vendedor = await this.prisma.vendedor.findUnique({ where: { codigo } });
+    const vendedor = await this.prisma.vendedor.findUnique({
+      where: { codigo },
+    });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
     return vendedor;
   }

@@ -7,7 +7,7 @@ export class RangesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll() {
     this.logger.log('Listando range');
     return { message: 'range listados com sucesso', data: [] };
   }

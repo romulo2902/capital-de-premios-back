@@ -1,12 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { StatusEdicao } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-
-// Use string constants to avoid enum import issues in strict mode
-const STATUS = {
-  SORTEANDO: 'SORTEANDO',
-  FINALIZADA: 'FINALIZADA',
-  ENCERRADA: 'ENCERRADA',
-} as const;
 
 interface MarcarNumeroPayload {
   edicaoId: string;
@@ -40,24 +39,31 @@ export class SorteioService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async iniciarSorteio(edicaoId: string): Promise<{ message: string; data: unknown }> {
-    const edicao = await this.prisma.edicao.findUnique({ where: { id: edicaoId } });
+  async iniciarSorteio(
+    edicaoId: string,
+  ): Promise<{ message: string; data: unknown }> {
+    const edicao = await this.prisma.edicao.findUnique({
+      where: { id: edicaoId },
+    });
     if (!edicao) throw new NotFoundException('Edição não encontrada');
-    if (edicao.status !== STATUS.ENCERRADA) {
-      throw new BadRequestException('A edição precisa estar ENCERRADA para iniciar o sorteio');
+    if (edicao.status !== StatusEdicao.ENCERRADA) {
+      throw new BadRequestException(
+        'A edição precisa estar ENCERRADA para iniciar o sorteio',
+      );
     }
 
     const edicaoAtualizada = await this.prisma.edicao.update({
       where: { id: edicaoId },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data: { status: STATUS.SORTEANDO as any },
+      data: { status: StatusEdicao.SORTEANDO },
     });
 
     this.logger.log(`Sorteio iniciado para edição ${edicaoId}`);
     return { message: 'Sorteio iniciado', data: edicaoAtualizada };
   }
 
-  async marcarNumero(payload: MarcarNumeroPayload): Promise<MarcarNumeroResult> {
+  async marcarNumero(
+    payload: MarcarNumeroPayload,
+  ): Promise<MarcarNumeroResult> {
     const { edicaoId, numero, sequenciaBolas } = payload;
 
     const edicao = await this.prisma.edicao.findUnique({
@@ -66,7 +72,7 @@ export class SorteioService {
     });
 
     if (!edicao) throw new NotFoundException('Edição não encontrada');
-    if (edicao.status !== STATUS.SORTEANDO) {
+    if (edicao.status !== StatusEdicao.SORTEANDO) {
       throw new BadRequestException('Edição não está em status de sorteio');
     }
 
@@ -92,7 +98,11 @@ export class SorteioService {
       .filter((p) => !p.ganhadorBilheteId)
       .sort((a, b) => a.ordem - b.ordem);
 
-    for (let i = 0; i < bilhetesGanhadores.length && i < premiosDisponiveis.length; i++) {
+    for (
+      let i = 0;
+      i < bilhetesGanhadores.length && i < premiosDisponiveis.length;
+      i++
+    ) {
       const bilhete = bilhetesGanhadores[i];
       const premio = premiosDisponiveis[i];
 
@@ -125,11 +135,10 @@ export class SorteioService {
     if (premiosRestantes === 0) {
       await this.prisma.edicao.update({
         where: { id: edicaoId },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        data: { status: STATUS.FINALIZADA as any },
+        data: { status: StatusEdicao.FINALIZADA },
       });
       finalizado = true;
-      statusAtualizado = STATUS.FINALIZADA;
+      statusAtualizado = StatusEdicao.FINALIZADA;
     }
 
     return { ganhadores, finalizado, statusAtualizado };
@@ -137,7 +146,9 @@ export class SorteioService {
 
   async findAll(): Promise<{ message: string; data: unknown }> {
     const edicoes = await this.prisma.edicao.findMany({
-      where: { status: { in: [STATUS.SORTEANDO as never, STATUS.FINALIZADA as never] } },
+      where: {
+        status: { in: [StatusEdicao.SORTEANDO, StatusEdicao.FINALIZADA] },
+      },
       include: { resultado: true },
     });
     return { message: 'Sorteios listados', data: edicoes };

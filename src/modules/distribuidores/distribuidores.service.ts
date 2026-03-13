@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -23,7 +22,9 @@ export class DistribuidoresService {
     });
     if (existing) throw new ConflictException('CPF já cadastrado');
 
-    const senhaHash = dto.senha ? await bcrypt.hash(dto.senha, 10) : await bcrypt.hash('Dist@123', 10);
+    const senhaHash = dto.senha
+      ? await bcrypt.hash(dto.senha, 10)
+      : await bcrypt.hash('Dist@123', 10);
 
     return this.prisma.$transaction(async (tx) => {
       const usuario = await tx.usuario.create({
@@ -45,7 +46,9 @@ export class DistribuidoresService {
           cpf: dto.cpf,
           telefone: dto.telefone,
           email: dto.email,
-          dataNascimento: dto.dataNascimento ? new Date(dto.dataNascimento) : undefined,
+          dataNascimento: dto.dataNascimento
+            ? new Date(dto.dataNascimento)
+            : undefined,
           cep: dto.cep,
           endereco: dto.endereco,
           numero: dto.numero,
@@ -59,7 +62,9 @@ export class DistribuidoresService {
         },
       });
 
-      this.logger.log(`Distribuidor criado: ${distribuidor.nome} (${distribuidor.codigo})`);
+      this.logger.log(
+        `Distribuidor criado: ${distribuidor.nome} (${distribuidor.codigo})`,
+      );
       return distribuidor;
     });
   }
@@ -95,10 +100,13 @@ export class DistribuidoresService {
       where: { id },
       include: {
         _count: { select: { vendedores: true } },
-        vendedores: { select: { id: true, nome: true, codigo: true, status: true } },
+        vendedores: {
+          select: { id: true, nome: true, codigo: true, status: true },
+        },
       },
     });
-    if (!distribuidor) throw new NotFoundException('Distribuidor não encontrado');
+    if (!distribuidor)
+      throw new NotFoundException('Distribuidor não encontrado');
     return distribuidor;
   }
 
@@ -106,7 +114,8 @@ export class DistribuidoresService {
     const distribuidor = await this.prisma.distribuidor.findUnique({
       where: { codigo },
     });
-    if (!distribuidor) throw new NotFoundException('Distribuidor não encontrado');
+    if (!distribuidor)
+      throw new NotFoundException('Distribuidor não encontrado');
     return distribuidor;
   }
 
@@ -126,7 +135,9 @@ export class DistribuidoresService {
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
 
     if (dto.senha) {
-      const distribuidor = await this.prisma.distribuidor.findUnique({ where: { id } });
+      const distribuidor = await this.prisma.distribuidor.findUnique({
+        where: { id },
+      });
       await this.prisma.usuario.update({
         where: { id: distribuidor!.usuarioId },
         data: {

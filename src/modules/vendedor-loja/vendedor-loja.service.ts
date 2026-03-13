@@ -13,7 +13,9 @@ export class VendedorLojaService {
   constructor(private readonly prisma: PrismaService) {}
 
   private async getVendedor(vendedorId: string) {
-    const v = await this.prisma.vendedor.findUnique({ where: { id: vendedorId } });
+    const v = await this.prisma.vendedor.findUnique({
+      where: { id: vendedorId },
+    });
     if (!v) throw new NotFoundException('Vendedor não encontrado');
     return v;
   }
@@ -25,7 +27,10 @@ export class VendedorLojaService {
   }
 
   // ─── Vendas próprias (RF-V02) ─────────────────────────────────────────────
-  async getVendas(vendedorId: string, params: { page?: number; limit?: number; status?: string }) {
+  async getVendas(
+    vendedorId: string,
+    params: { page?: number; limit?: number; status?: string },
+  ) {
     const { page = 1, limit = 20, status } = params;
     const where = {
       vendedorId,
@@ -43,11 +48,17 @@ export class VendedorLojaService {
       }),
     ]);
 
-    return { message: 'Vendas do vendedor', data: { total, page, limit, vendas } };
+    return {
+      message: 'Vendas do vendedor',
+      data: { total, page, limit, vendas },
+    };
   }
 
   // ─── Comissões (RF-V03) ───────────────────────────────────────────────────
-  async getComissoes(vendedorId: string, params: { page?: number; limit?: number; status?: string }) {
+  async getComissoes(
+    vendedorId: string,
+    params: { page?: number; limit?: number; status?: string },
+  ) {
     const { page = 1, limit = 20, status } = params;
     const where = {
       vendedorId,
@@ -58,7 +69,9 @@ export class VendedorLojaService {
       this.prisma.comissao.count({ where }),
       this.prisma.comissao.findMany({
         where,
-        include: { venda: { select: { total: true, status: true, createdAt: true } } },
+        include: {
+          venda: { select: { total: true, status: true, createdAt: true } },
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -95,7 +108,8 @@ export class VendedorLojaService {
     if (Number(vendedor.saldo) < valor) {
       throw new BadRequestException('Saldo insuficiente para saque');
     }
-    if (valor <= 0) throw new BadRequestException('Valor do saque deve ser positivo');
+    if (valor <= 0)
+      throw new BadRequestException('Valor do saque deve ser positivo');
 
     const saque = await this.prisma.saque.create({
       data: { vendedorId, tipo: 'VENDEDOR', valor, status: 'SOLICITADO' },

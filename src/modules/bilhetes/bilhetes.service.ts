@@ -7,7 +7,7 @@ export class BilhetesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll() {
     this.logger.log('Listando bilhete');
     return { message: 'bilhete listados com sucesso', data: [] };
   }

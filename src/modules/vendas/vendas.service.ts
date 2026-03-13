@@ -7,7 +7,7 @@ export class VendasService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll() {
     this.logger.log('Listando venda');
     return { message: 'venda listados com sucesso', data: [] };
   }

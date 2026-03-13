@@ -7,7 +7,7 @@ export class SaquesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll() {
     this.logger.log('Listando saque');
     return { message: 'saque listados com sucesso', data: [] };
   }

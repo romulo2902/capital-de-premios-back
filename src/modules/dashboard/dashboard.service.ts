@@ -7,14 +7,13 @@ export class DashboardService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll() {
     this.logger.log('Listando dashboard');
     return { message: 'dashboard listados com sucesso', data: [] };
   }
 
-  async findOne(id: string) {
-    const item = await [];// Dashboard uses aggregated queries;
-    if (!item) throw new NotFoundException('Dashboard não encontrado');
-    return { message: 'Dashboard encontrado', data: item };
+  findOne(id: string) {
+    void id;
+    throw new NotFoundException('Dashboard não encontrado');
   }
 }

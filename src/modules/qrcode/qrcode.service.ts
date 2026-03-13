@@ -26,7 +26,10 @@ export class QrcodeService {
     const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
 
-    const appUrl = this.config.get<string>('FRONTEND_LOJA_URL', 'http://localhost:3001');
+    const appUrl = this.config.get<string>(
+      'FRONTEND_LOJA_URL',
+      'http://localhost:3001',
+    );
     const link = vendedor.link ?? `${appUrl}?ref=${vendedor.codigo}`;
 
     const buffer = await qrcode.toBuffer(link, {
@@ -41,7 +44,9 @@ export class QrcodeService {
 
     await this.prisma.vendedor.update({
       where: { id },
-      data: { qrcode: `https://${this.config.get('AWS_BUCKET_NAME')}.s3.amazonaws.com/vendedores/${id}/qrcode.png` },
+      data: {
+        qrcode: `https://${this.config.get('AWS_BUCKET_NAME')}.s3.amazonaws.com/vendedores/${id}/qrcode.png`,
+      },
     });
 
     this.logger.log(`QR Code gerado para vendedor ${id}`);
@@ -49,10 +54,16 @@ export class QrcodeService {
   }
 
   async gerarQrcodeDistribuidor(id: string): Promise<Buffer> {
-    const distribuidor = await this.prisma.distribuidor.findUnique({ where: { id } });
-    if (!distribuidor) throw new NotFoundException('Distribuidor não encontrado');
+    const distribuidor = await this.prisma.distribuidor.findUnique({
+      where: { id },
+    });
+    if (!distribuidor)
+      throw new NotFoundException('Distribuidor não encontrado');
 
-    const appUrl = this.config.get<string>('FRONTEND_LOJA_URL', 'http://localhost:3001');
+    const appUrl = this.config.get<string>(
+      'FRONTEND_LOJA_URL',
+      'http://localhost:3001',
+    );
     const link = distribuidor.link ?? `${appUrl}?dist=${id}`;
 
     const buffer = await qrcode.toBuffer(link, {
@@ -66,7 +77,9 @@ export class QrcodeService {
 
     await this.prisma.distribuidor.update({
       where: { id },
-      data: { qrcode: `https://${this.config.get('AWS_BUCKET_NAME')}.s3.amazonaws.com/distribuidores/${id}/qrcode.png` },
+      data: {
+        qrcode: `https://${this.config.get('AWS_BUCKET_NAME')}.s3.amazonaws.com/distribuidores/${id}/qrcode.png`,
+      },
     });
 
     this.logger.log(`QR Code gerado para distribuidor ${id}`);
@@ -78,15 +91,19 @@ export class QrcodeService {
     if (!bucket) return; // skip upload if not configured
 
     try {
-      await this.s3.send(new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        Body: buffer,
-        ContentType: 'image/png',
-        ACL: 'public-read',
-      }));
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: buffer,
+          ContentType: 'image/png',
+          ACL: 'public-read',
+        }),
+      );
     } catch (err) {
-      this.logger.warn(`Falha ao fazer upload do QR Code para S3: ${(err as Error).message}`);
+      this.logger.warn(
+        `Falha ao fazer upload do QR Code para S3: ${(err as Error).message}`,
+      );
     }
   }
 }
