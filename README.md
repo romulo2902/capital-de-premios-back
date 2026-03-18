@@ -114,6 +114,7 @@ Observacao: o `docker-compose.yml` atual sobe Postgres com `user/password`.
 
 - Baseie-se no `.env.example`
 - O projeto usa `.env.development` por padrao nos scripts do Prisma
+- Em homologacao/producao com PM2/AWS, exporte as variaveis no shell, no `/etc/environment`, via Parameter Store/Secrets Manager ou carregue um `.env.homolog` / `.env.production` antes de iniciar o processo
 - Ajuste `DATABASE_URL` e `REDIS_URL` conforme seu ambiente
 - Configure JWT, gateways de pagamento, AWS S3, Swagger (prod) e throttle
 
@@ -124,9 +125,15 @@ Observacao: o `docker-compose.yml` atual sobe Postgres com `user/password`.
 - `npm run lint` lint do projeto
 - `npm run format` formatacao do codigo
 - `npm run prisma:migrate` cria e aplica migrations
+- `npm run prisma:migrate:deploy` aplica migrations em homologacao/producao
 - `npm run prisma:generate` gera o Prisma Client
 - `npm run prisma:seed` popula dados de exemplo
 - `npm run prisma:studio` abre o Prisma Studio
+- `npm run pm2:start` sobe a API de homologacao via PM2
+- `npm run pm2:reload` recarrega a API de homologacao no PM2 com as variaveis atuais
+- `npm run pm2:start:prod` sobe a API de producao via PM2
+- `npm run pm2:reload:prod` recarrega a API de producao no PM2
+- `npm run pm2:logs` acompanha logs da API no PM2
 - `npm run test` tests unitarios
 - `npm run test:watch` tests com watch
 - `npm run test:cov` cobertura
@@ -221,6 +228,77 @@ npm run start:dev
 
 - API: `http://localhost:3000`
 - Swagger: `http://localhost:3000/docs`
+
+## Deploy na AWS com PM2 (Homologacao)
+
+Fluxo recomendado para EC2 com Ubuntu:
+
+1. Instale Node.js 22, `pm2` e dependencias do projeto:
+
+```bash
+npm install -g pm2
+npm ci
+```
+
+2. Prepare as variaveis de homologacao:
+
+```bash
+cp .env.homolog.example .env.homolog
+```
+
+Preencha os valores reais e carregue no shell antes de migrar/subir a API:
+
+```bash
+set -a
+source .env.homolog
+set +a
+```
+
+3. Gere o Prisma Client, aplique migrations e faça o build:
+
+```bash
+npx prisma generate
+npm run prisma:migrate:deploy
+npm run build
+```
+
+4. Inicie a API com PM2:
+
+```bash
+npm run pm2:start
+```
+
+5. Em novos deploys, depois do `git pull`, repita:
+
+```bash
+set -a
+source .env.homolog
+set +a
+npm ci
+npx prisma generate
+npm run prisma:migrate:deploy
+npm run build
+npm run pm2:reload
+```
+
+6. Para o PM2 reiniciar automaticamente apos reboot da instancia:
+
+```bash
+pm2 startup systemd -u ubuntu --hp /home/ubuntu
+npm run pm2:save
+```
+
+Comandos uteis:
+
+- `pm2 status`
+- `npm run pm2:logs`
+- `pm2 monit`
+
+Observacoes:
+
+- O arquivo `ecosystem.config.cjs` possui perfis `homolog` e `production`, ambos em `fork` com `1` instancia para evitar duplicacao de jobs/processamentos sensiveis.
+- Em homologacao e producao, o Nest usa apenas variaveis exportadas no ambiente. O `.env.homolog` e o `.env.production` servem como base para `source`, mas nao sao lidos diretamente pela aplicacao.
+- Se usar Nginx na frente da API, aponte o proxy para `http://127.0.0.1:3000`.
 
 ## Credenciais do seed
 

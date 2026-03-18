@@ -27,10 +27,16 @@ import { VendedorLojaModule } from './modules/vendedor-loja/vendedor-loja.module
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      // Em produção (EC2) as variáveis vêm do ambiente do sistema.
+      // Em produção e homologação (AWS), as variáveis vêm do ambiente do sistema.
       // Em desenvolvimento, carrega o .env.development via docker-compose.
-      envFilePath: process.env.NODE_ENV === 'production' ? [] : ['.env.development', '.env'],
-      ignoreEnvFile: process.env.NODE_ENV === 'production',
+      envFilePath:
+        process.env.NODE_ENV === 'production' ||
+        process.env.NODE_ENV === 'homolog'
+          ? []
+          : ['.env.development', '.env'],
+      ignoreEnvFile:
+        process.env.NODE_ENV === 'production' ||
+        process.env.NODE_ENV === 'homolog',
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
