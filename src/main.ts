@@ -19,6 +19,7 @@ async function bootstrap(): Promise<void> {
   const host = config.get<string>('HOST', '0.0.0.0');
   const port = config.get<number>('PORT', 3000);
   const nodeEnv = config.get<string>('NODE_ENV', 'development');
+  const isProduction = nodeEnv === 'production';
   const frontendLojaUrl = config.get<string>(
     'FRONTEND_LOJA_URL',
     'http://localhost:3001',
@@ -29,7 +30,15 @@ async function bootstrap(): Promise<void> {
   );
 
   // Security
-  app.use(helmet());
+  app.use(
+    helmet({
+      // Em homologacao/local via IP puro, HSTS/CSP podem forcar comportamento
+      // de HTTPS no navegador e atrapalhar o acesso ao Swagger e aos assets.
+      hsts: isProduction,
+      contentSecurityPolicy: isProduction ? undefined : false,
+      crossOriginResourcePolicy: isProduction ? undefined : false,
+    }),
+  );
   app.use(compression());
 
   // CORS
@@ -58,8 +67,8 @@ async function bootstrap(): Promise<void> {
   // Global Prefix
   app.setGlobalPrefix('api');
 
-  // Swagger — apenas em desenvolvimento
-  if (nodeEnv !== 'production') {
+  // Swagger — disponivel fora de producao
+  if (!isProduction) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Capital de Prêmios API')
       .setDescription(
