@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'capital-premios-api',
       cwd: __dirname,
-      script: 'dist/main.js',
+      script: 'dist/src/main.js',
       exec_mode: 'fork',
       instances: 1,
       autorestart: true,
