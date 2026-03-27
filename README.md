@@ -139,6 +139,20 @@ Observacao: o `docker-compose.yml` atual sobe Postgres com `user/password`.
 - `npm run test:cov` cobertura
 - `npm run test:e2e` tests e2e
 
+## Documentacao da API
+
+Em ambiente nao produtivo, a documentacao fica separada por contexto:
+
+- indice: `http://localhost:3000/api/docs`
+- redoc admin: `http://localhost:3000/api/docs/admin`
+- redoc geral: `http://localhost:3000/api/docs/geral`
+- swagger admin: `http://localhost:3000/api/swagger/admin`
+- swagger geral: `http://localhost:3000/api/swagger/geral`
+- json admin: `http://localhost:3000/api/docs-json/admin`
+- json geral: `http://localhost:3000/api/docs-json/geral`
+
+O indice `/api/docs` centraliza os atalhos. Use Redoc para leitura da referencia e Swagger para testes interativos das rotas.
+
 ## Comandos Prisma
 
 ```bash
