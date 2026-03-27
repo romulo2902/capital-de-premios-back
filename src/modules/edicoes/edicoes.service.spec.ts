@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { EdicoesService } from './edicoes.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -14,12 +15,16 @@ describe('EdicoesService', () => {
       delete: jest.fn(),
     },
   };
+  const mockConfig = {
+    get: jest.fn().mockReturnValue('America/Sao_Paulo'),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EdicoesService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: ConfigService, useValue: mockConfig },
       ],
     }).compile();
 

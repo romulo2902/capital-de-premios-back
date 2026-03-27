@@ -153,6 +153,43 @@ Em ambiente nao produtivo, a documentacao fica separada por contexto:
 
 O indice `/api/docs` centraliza os atalhos. Use Redoc para leitura da referencia e Swagger para testes interativos das rotas.
 
+## Edicoes e Cartelas
+
+O cadastro de edicoes/cartelas agora considera dois canais de participacao no mesmo sorteio:
+
+- `DIGITAL`: compra pela loja, inclusive via link de vendedor ou distribuidor
+- `FISICO` / `POS`: leitura de QR Code ou operacao presencial em loja fisica
+
+Cada edicao possui um ou mais `detalhes` de cartela, com:
+
+- `origemParticipacao`: `DIGITAL`, `FISICO` ou `POS` (equivale ao campo `especie`/tipo do admin)
+- `tipoCartela`: de `UMA_CHANCE` ate `DOZE_CHANCES`
+- `rangeInicio` e `rangeFinal`: minimo de 7 digitos
+- `frase`: texto exibido no sorteio/cartela no admin
+
+Regras aplicadas pela API:
+
+- ranges nao podem se sobrepor entre detalhes da mesma edicao
+- ranges nao podem ser reaproveitados entre edicoes diferentes
+- uma mesma edicao pode concorrer com canais `DIGITAL` e `FISICO`/`POS`, desde que use ranges distintos
+- quando a edicao tiver os dois canais, o `destino` deve ser `AMBOS`
+- nunca existem duas edicoes em operacao ao mesmo tempo com status `ATIVA`, `ENCERRADA` ou `SORTEANDO`
+- a edicao nasce desativada com status `RASCUNHO`
+- salvar a edicao nao ativa automaticamente o sorteio
+- a ativacao e a desativacao da edicao devem ocorrer pelos endpoints dedicados
+- `dataSorteio` e `dataEncerramento` sao tratados com precisao de minuto
+- formatos aceitos: `YYYY-MM-DDTHH:mm`, `DD/MM/YYYY HH:mm` ou ISO com fuso
+- quando a data vier sem offset/fuso, a API interpreta no fuso `America/Sao_Paulo` por padrao
+- segundos e milissegundos diferentes de zero sao rejeitados
+- `dataEncerramento` deve ser estritamente anterior a `dataSorteio`
+
+Impacto esperado no admin:
+
+- a tela deve permitir adicionar mais de um bloco de detalhe de cartela por edicao
+- cada bloco deve informar `origemParticipacao`/`especie`, `tipoCartela`, `rangeInicio` e `rangeFinal`
+- o campo `destino` pode ser omitido pela interface; a API infere automaticamente `SITE`, `LOJA_FISICA` ou `AMBOS` com base nos detalhes enviados
+- o payload de criacao pode enviar `status: RASCUNHO` para compatibilidade com o admin atual
+
 ## Comandos Prisma
 
 ```bash

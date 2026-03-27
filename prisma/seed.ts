@@ -1,4 +1,13 @@
-import { PrismaClient, Perfil, StatusUsuario, StatusEdicao, TipoChavePix } from '@prisma/client';
+import {
+  PrismaClient,
+  Perfil,
+  StatusUsuario,
+  StatusEdicao,
+  TipoChavePix,
+  DestinoEdicao,
+  OrigemParticipacao,
+  TipoCartela,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -146,8 +155,26 @@ async function main(): Promise<void> {
       rangeInicio: BigInt(1),
       rangeFinal: BigInt(100000),
       qtdPremios: 3,
-      especie: 'Dinheiro',
+      destino: DestinoEdicao.AMBOS,
+      raspadinha: false,
+      frase: 'Concorra e boa sorte',
       status: StatusEdicao.ATIVA,
+      detalhes: {
+        create: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            rangeInicio: BigInt(1),
+            rangeFinal: BigInt(50000),
+          },
+          {
+            origemParticipacao: OrigemParticipacao.FISICO,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            rangeInicio: BigInt(50001),
+            rangeFinal: BigInt(100000),
+          },
+        ],
+      },
       premios: {
         create: [
           { ordem: 1, descricao: '1º Prêmio', valor: 5000.00 },

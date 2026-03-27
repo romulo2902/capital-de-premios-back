@@ -67,6 +67,33 @@ enum TipoChavePix {
   ALEATORIA
 }
 
+enum DestinoEdicao {
+  SITE
+  LOJA_FISICA
+  AMBOS
+}
+
+enum OrigemParticipacao {
+  DIGITAL
+  FISICO
+  POS
+}
+
+enum TipoCartela {
+  UMA_CHANCE
+  DUAS_CHANCES
+  TRES_CHANCES
+  QUATRO_CHANCES
+  CINCO_CHANCES
+  SEIS_CHANCES
+  SETE_CHANCES
+  OITO_CHANCES
+  NOVE_CHANCES
+  DEZ_CHANCES
+  ONZE_CHANCES
+  DOZE_CHANCES
+}
+
 model Usuario {
   id                 String        @id @default(uuid())
   cpf                String?       @unique
@@ -173,13 +200,32 @@ model Edicao {
   rangeInicio      BigInt
   rangeFinal       BigInt
   qtdPremios       Int
-  especie          String
+  destino          DestinoEdicao @default(SITE)
+  raspadinha       Boolean       @default(false)
+  frase            String?
+  especie          String?
   imagemUrl        String?
   status           StatusEdicao @default(RASCUNHO)
   createdAt        DateTime     @default(now())
   premios          Premio[]
+  detalhes         EdicaoDetalhe[]
   vendas           Venda[]
   resultado        Resultado?
+}
+
+model EdicaoDetalhe {
+  id                 String               @id @default(uuid())
+  edicaoId           String
+  origemParticipacao OrigemParticipacao
+  tipoCartela        TipoCartela
+  rangeInicio        BigInt
+  rangeFinal         BigInt
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  edicao             Edicao               @relation(fields: [edicaoId], references: [id], onDelete: Cascade)
+
+  @@index([edicaoId])
+  @@unique([edicaoId, origemParticipacao, tipoCartela, rangeInicio, rangeFinal])
 }
 
 model Premio {
@@ -209,6 +255,7 @@ model Venda {
   quantidade     Int
   total          Decimal
   status         StatusVenda   @default(PENDENTE)
+  origemParticipacao OrigemParticipacao @default(DIGITAL)
   tipoPagamento  TipoPagamento
   gatewayId      String?
   gatewayPayload Json?
