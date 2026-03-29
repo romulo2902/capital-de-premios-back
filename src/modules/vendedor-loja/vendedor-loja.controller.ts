@@ -76,8 +76,17 @@ export class VendedorLojaController {
   // ─── Saques (RF-V04, RF-V05) ──────────────────────────────────────────────
   @Get('saques')
   @ApiOperation({ summary: 'Histórico de saques (VENDEDOR — RF-V05)' })
-  getSaques(@CurrentUser() user: RequestUser) {
-    return this.service.getSaques(this.getVendedorId(user));
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getSaques(
+    @CurrentUser() user: RequestUser,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.service.getSaques(this.getVendedorId(user), {
+      page: +page,
+      limit: +limit,
+    });
   }
 
   @Post('saques')

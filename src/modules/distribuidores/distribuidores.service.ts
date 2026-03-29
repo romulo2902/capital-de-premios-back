@@ -9,6 +9,10 @@ import { CreateDistribuidorDto } from './dto/create-distribuidor.dto';
 import { UpdateDistribuidorDto } from './dto/update-distribuidor.dto';
 import { Perfil, StatusUsuario } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
 
 @Injectable()
 export class DistribuidoresService {
@@ -70,12 +74,12 @@ export class DistribuidoresService {
   }
 
   async findAll(page = 1, limit = 20, search?: string) {
-    const skip = (page - 1) * limit;
+    const pagination = normalizePagination(page, limit);
     const where = search
       ? {
           OR: [
             { nome: { contains: search, mode: 'insensitive' as const } },
-            { documento: { contains: search } },
+            { cpf: { contains: search } },
             { email: { contains: search, mode: 'insensitive' as const } },
           ],
         }
@@ -84,15 +88,24 @@ export class DistribuidoresService {
     const [data, total] = await Promise.all([
       this.prisma.distribuidor.findMany({
         where,
-        skip,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.limit,
         orderBy: { createdAt: 'desc' },
         include: { _count: { select: { vendedores: true } } },
       }),
       this.prisma.distribuidor.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    return buildPaginatedResponse(
+      data,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Distribuidores listados com sucesso',
+        emptyMessage: 'Nenhum distribuidor encontrado',
+      },
+    );
   }
 
   async findOne(id: string) {

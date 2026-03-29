@@ -6,9 +6,10 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { EdicoesService } from './edicoes.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -32,8 +33,10 @@ export class EdicoesController {
 
   @Get()
   @ApiOperation({ summary: 'Listar edições (ADMIN)' })
-  findAll() {
-    return this.edicoesService.findAll();
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  findAll(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.edicoesService.findAll(+page, +limit);
   }
 
   @Get(':id')

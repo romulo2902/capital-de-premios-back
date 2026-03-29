@@ -9,6 +9,7 @@ describe('EdicoesService', () => {
   const mockPrisma = {
     edicao: {
       findMany: jest.fn(),
+      count: jest.fn(),
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
@@ -37,7 +38,14 @@ describe('EdicoesService', () => {
 
   it('findAll should return data array', async () => {
     mockPrisma.edicao.findMany.mockResolvedValue([]);
+    mockPrisma.edicao.count.mockResolvedValue(0);
     const result = await service.findAll();
     expect(result.data).toBeDefined();
+    expect(result.meta).toEqual({
+      total: 0,
+      page: 1,
+      limit: 20,
+      lastPage: 0,
+    });
   });
 });

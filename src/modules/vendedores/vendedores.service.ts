@@ -9,6 +9,10 @@ import { CreateVendedorDto } from './dto/create-vendedor.dto';
 import { UpdateVendedorDto } from './dto/update-vendedor.dto';
 import { Perfil, StatusUsuario } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
 
 @Injectable()
 export class VendedoresService {
@@ -83,14 +87,14 @@ export class VendedoresService {
     search?: string,
     distribuidorId?: string,
   ) {
-    const skip = (page - 1) * limit;
+    const pagination = normalizePagination(page, limit);
     const where: Record<string, unknown> = {};
 
     if (distribuidorId) where.distribuidorId = distribuidorId;
     if (search) {
       where.OR = [
         { nome: { contains: search, mode: 'insensitive' } },
-        { documento: { contains: search } },
+        { cpf: { contains: search } },
         { email: { contains: search, mode: 'insensitive' } },
       ];
     }
@@ -98,8 +102,8 @@ export class VendedoresService {
     const [data, total] = await Promise.all([
       this.prisma.vendedor.findMany({
         where,
-        skip,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.limit,
         orderBy: { createdAt: 'desc' },
         include: {
           distribuidor: { select: { id: true, nome: true, codigo: true } },
@@ -109,7 +113,16 @@ export class VendedoresService {
       this.prisma.vendedor.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    return buildPaginatedResponse(
+      data,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Vendedores listados com sucesso',
+        emptyMessage: 'Nenhum vendedor encontrado',
+      },
+    );
   }
 
   async findOne(id: string) {

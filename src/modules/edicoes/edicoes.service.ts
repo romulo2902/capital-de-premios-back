@@ -20,6 +20,10 @@ import {
   formatDateTimeForInput,
   parseBusinessDateTime,
 } from '../../common/utils/business-date-time.util';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
 import { CreateEdicaoDto } from './dto/create-edicao.dto';
 import { CreateEdicaoDetalheDto } from './dto/create-edicao-detalhe.dto';
 import { UpdateEdicaoDto } from './dto/update-edicao.dto';
@@ -133,17 +137,29 @@ export class EdicoesService {
     };
   }
 
-  async findAll() {
+  async findAll(page = 1, limit = 20) {
     this.logger.log('Listando edições');
-    const data = await this.prisma.edicao.findMany({
-      orderBy: { numero: 'desc' },
-      include: EDICAO_INCLUDE,
-    });
+    const pagination = normalizePagination(page, limit);
+    const [data, total] = await Promise.all([
+      this.prisma.edicao.findMany({
+        orderBy: { numero: 'desc' },
+        skip: pagination.skip,
+        take: pagination.limit,
+        include: EDICAO_INCLUDE,
+      }),
+      this.prisma.edicao.count(),
+    ]);
 
-    return {
-      message: 'Edições listadas com sucesso',
-      data: data.map((item) => this.serializarEdicao(item)),
-    };
+    return buildPaginatedResponse(
+      data.map((item) => this.serializarEdicao(item)),
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Edições listadas com sucesso',
+        emptyMessage: 'Nenhuma edição encontrada',
+      },
+    );
   }
 
   async findOne(id: string) {

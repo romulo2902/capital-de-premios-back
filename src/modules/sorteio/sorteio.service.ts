@@ -6,6 +6,10 @@ import {
 } from '@nestjs/common';
 import { StatusEdicao } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
 
 interface MarcarNumeroPayload {
   edicaoId: string;
@@ -144,14 +148,36 @@ export class SorteioService {
     return { ganhadores, finalizado, statusAtualizado };
   }
 
-  async findAll(): Promise<{ message: string; data: unknown }> {
-    const edicoes = await this.prisma.edicao.findMany({
-      where: {
-        status: { in: [StatusEdicao.SORTEANDO, StatusEdicao.FINALIZADA] },
+  async findAll(
+    page = 1,
+    limit = 20,
+  ): Promise<{ message: string; data: unknown; meta: unknown }> {
+    const pagination = normalizePagination(page, limit);
+    const where = {
+      status: { in: [StatusEdicao.SORTEANDO, StatusEdicao.FINALIZADA] },
+    };
+
+    const [edicoes, total] = await Promise.all([
+      this.prisma.edicao.findMany({
+        where,
+        include: { resultado: true },
+        orderBy: { dataSorteio: 'desc' },
+        skip: pagination.skip,
+        take: pagination.limit,
+      }),
+      this.prisma.edicao.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(
+      edicoes,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Sorteios listados com sucesso',
+        emptyMessage: 'Nenhum sorteio encontrado',
       },
-      include: { resultado: true },
-    });
-    return { message: 'Sorteios listados', data: edicoes };
+    );
   }
 
   async findOne(id: string): Promise<{ message: string; data: unknown }> {

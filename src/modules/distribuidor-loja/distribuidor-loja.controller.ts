@@ -46,8 +46,17 @@ export class DistribuidorLojaController {
   // ─── Vendedores (RF-D03) ──────────────────────────────────────────────────
   @Get('vendedores')
   @ApiOperation({ summary: 'Listar próprios vendedores (DISTRIBUIDOR — RF-D03)' })
-  getVendedores(@CurrentUser() user: RequestUser) {
-    return this.service.getVendedores(this.getDistribuidorId(user));
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getVendedores(
+    @CurrentUser() user: RequestUser,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.service.getVendedores(this.getDistribuidorId(user), {
+      page: +page,
+      limit: +limit,
+    });
   }
 
   @Post('vendedores')
@@ -85,8 +94,17 @@ export class DistribuidorLojaController {
   // ─── Saques ───────────────────────────────────────────────────────────────
   @Get('saques')
   @ApiOperation({ summary: 'Histórico de saques do distribuidor (DISTRIBUIDOR)' })
-  getSaques(@CurrentUser() user: RequestUser) {
-    return this.service.getSaques(this.getDistribuidorId(user));
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getSaques(
+    @CurrentUser() user: RequestUser,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.service.getSaques(this.getDistribuidorId(user), {
+      page: +page,
+      limit: +limit,
+    });
   }
 
   @Post('saques')

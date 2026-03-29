@@ -1,5 +1,5 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { PagamentosService } from './pagamentos.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -13,8 +13,10 @@ export class PagamentosController {
 
   @Get()
   @ApiOperation({ summary: 'Listar pagamento' })
-  findAll() {
-    return this.pagamentosService.findAll();
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  findAll(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.pagamentosService.findAll(+page, +limit);
   }
 
   @Get(':id')

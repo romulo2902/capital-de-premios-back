@@ -8,6 +8,7 @@ describe('ClientesService', () => {
   const mockPrisma = {
     cliente: {
       findMany: jest.fn(),
+      count: jest.fn(),
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
@@ -32,7 +33,14 @@ describe('ClientesService', () => {
 
   it('findAll should return data array', async () => {
     mockPrisma.cliente.findMany.mockResolvedValue([]);
+    mockPrisma.cliente.count.mockResolvedValue(0);
     const result = await service.findAll();
     expect(result.data).toBeDefined();
+    expect(result.meta).toEqual({
+      total: 0,
+      page: 1,
+      limit: 20,
+      lastPage: 0,
+    });
   });
 });

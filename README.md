@@ -153,6 +153,37 @@ Em ambiente nao produtivo, a documentacao fica separada por contexto:
 
 O indice `/api/docs` centraliza os atalhos. Use Redoc para leitura da referencia e Swagger para testes interativos das rotas.
 
+## Padrao de Listagem
+
+Todas as rotas de listagem paginada retornam o mesmo contrato para facilitar o consumo no frontend:
+
+```json
+{
+  "statusCode": 200,
+  "message": "Clientes listados com sucesso",
+  "data": [
+    {
+      "id": "1",
+      "nome": "Jair",
+      "email": "jair@email.com"
+    }
+  ],
+  "meta": {
+    "total": 120,
+    "page": 1,
+    "limit": 10,
+    "lastPage": 12
+  }
+}
+```
+
+Regras:
+
+- endpoints de listagem nunca devem estourar erro apenas por nao encontrar itens
+- quando nao houver registros, `data` vem vazio e `meta` continua presente
+- `page` e `limit` sao aceitos nas rotas de listagem paginada
+- `lastPage` sera `0` quando `total` for `0`
+
 ## Edicoes e Cartelas
 
 O cadastro de edicoes/cartelas agora considera dois canais de participacao no mesmo sorteio:

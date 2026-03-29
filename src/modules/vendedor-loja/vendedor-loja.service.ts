@@ -5,6 +5,10 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
 
 @Injectable()
 export class VendedorLojaService {
@@ -31,7 +35,8 @@ export class VendedorLojaService {
     vendedorId: string,
     params: { page?: number; limit?: number; status?: string },
   ) {
-    const { page = 1, limit = 20, status } = params;
+    const pagination = normalizePagination(params.page, params.limit);
+    const { status } = params;
     const where = {
       vendedorId,
       ...(status ? { status: status as never } : {}),
@@ -43,15 +48,21 @@ export class VendedorLojaService {
         where,
         include: { cliente: { select: { nome: true, cpf: true } } },
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.limit,
       }),
     ]);
 
-    return {
-      message: 'Vendas do vendedor',
-      data: { total, page, limit, vendas },
-    };
+    return buildPaginatedResponse(
+      vendas,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Vendas do vendedor listadas com sucesso',
+        emptyMessage: 'Nenhuma venda encontrada para este vendedor',
+      },
+    );
   }
 
   // ─── Comissões (RF-V03) ───────────────────────────────────────────────────
@@ -59,7 +70,8 @@ export class VendedorLojaService {
     vendedorId: string,
     params: { page?: number; limit?: number; status?: string },
   ) {
-    const { page = 1, limit = 20, status } = params;
+    const pagination = normalizePagination(params.page, params.limit);
+    const { status } = params;
     const where = {
       vendedorId,
       ...(status ? { status: status as never } : {}),
@@ -73,8 +85,8 @@ export class VendedorLojaService {
           venda: { select: { total: true, status: true, createdAt: true } },
         },
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.limit,
       }),
       this.prisma.comissao.aggregate({
         where: { vendedorId, status: 'PAGO' },
@@ -83,24 +95,50 @@ export class VendedorLojaService {
     ]);
 
     return {
-      message: 'Comissões do vendedor',
-      data: {
-        total,
-        page,
-        limit,
+      ...buildPaginatedResponse(
         comissoes,
+        total,
+        pagination.page,
+        pagination.limit,
+        {
+          successMessage: 'Comissões do vendedor listadas com sucesso',
+          emptyMessage: 'Nenhuma comissão encontrada para este vendedor',
+        },
+      ),
+      summary: {
         totalAcumuladoPago: Number(totalAcumulado._sum.valor ?? 0),
       },
     };
   }
 
   // ─── Saques (RF-V04 / RF-V05) ─────────────────────────────────────────────
-  async getSaques(vendedorId: string) {
-    const saques = await this.prisma.saque.findMany({
-      where: { vendedorId, tipo: 'VENDEDOR' },
-      orderBy: { createdAt: 'desc' },
-    });
-    return { message: 'Histórico de saques', data: saques };
+  async getSaques(
+    vendedorId: string,
+    params: { page?: number; limit?: number },
+  ) {
+    const pagination = normalizePagination(params.page, params.limit);
+    const where = { vendedorId, tipo: 'VENDEDOR' as const };
+
+    const [saques, total] = await this.prisma.$transaction([
+      this.prisma.saque.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: pagination.skip,
+        take: pagination.limit,
+      }),
+      this.prisma.saque.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(
+      saques,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Saques do vendedor listados com sucesso',
+        emptyMessage: 'Nenhum saque encontrado para este vendedor',
+      },
+    );
   }
 
   async criarSaque(vendedorId: string, valor: number) {

@@ -12,6 +12,8 @@ export interface ApiResponse<T> {
   statusCode: number;
   message: string;
   data: T | null;
+  meta?: unknown;
+  [key: string]: unknown;
 }
 
 @Injectable()
@@ -26,10 +28,28 @@ export class ResponseInterceptor<T> implements NestInterceptor<T, ApiResponse<T>
         // Arquivos binários (PNG, PDF, XLSX) devem passar sem transformação
         if (data instanceof StreamableFile) return data;
 
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          const {
+            message,
+            data: payloadData,
+            ...rest
+          } = data as Record<string, unknown>;
+
+          return {
+            statusCode,
+            message:
+              typeof message === 'string'
+                ? message
+                : 'Operação realizada com sucesso',
+            data: payloadData !== undefined ? (payloadData as T) : (data as T),
+            ...rest,
+          };
+        }
+
         return {
           statusCode,
-          message: data?.message || 'Operação realizada com sucesso',
-          data: data?.data !== undefined ? data.data : data,
+          message: 'Operação realizada com sucesso',
+          data,
         };
       }),
     );

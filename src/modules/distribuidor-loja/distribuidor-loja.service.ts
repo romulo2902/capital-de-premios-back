@@ -5,6 +5,10 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
 
 @Injectable()
 export class DistribuidorLojaService {
@@ -27,12 +31,33 @@ export class DistribuidorLojaService {
   }
 
   // ─── Vendedores ───────────────────────────────────────────────────────────
-  async getVendedores(distribuidorId: string) {
-    const vendedores = await this.prisma.vendedor.findMany({
-      where: { distribuidorId },
-      orderBy: { createdAt: 'desc' },
-    });
-    return { message: 'Vendedores do distribuidor', data: vendedores };
+  async getVendedores(
+    distribuidorId: string,
+    params: { page?: number; limit?: number },
+  ) {
+    const pagination = normalizePagination(params.page, params.limit);
+    const where = { distribuidorId };
+
+    const [vendedores, total] = await this.prisma.$transaction([
+      this.prisma.vendedor.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: pagination.skip,
+        take: pagination.limit,
+      }),
+      this.prisma.vendedor.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(
+      vendedores,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Vendedores do distribuidor listados com sucesso',
+        emptyMessage: 'Nenhum vendedor encontrado para este distribuidor',
+      },
+    );
   }
 
   async createVendedor(
@@ -100,7 +125,8 @@ export class DistribuidorLojaService {
       status?: string;
     },
   ) {
-    const { page = 1, limit = 20, status } = params;
+    const pagination = normalizePagination(params.page, params.limit);
+    const { status } = params;
 
     // Busca IDs dos vendedores do distribuidor
     const vendedores = await this.prisma.vendedor.findMany({
@@ -120,15 +146,21 @@ export class DistribuidorLojaService {
         where,
         include: { cliente: true, vendedor: { select: { nome: true } } },
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.limit,
       }),
     ]);
 
-    return {
-      message: 'Vendas do distribuidor',
-      data: { total, page, limit, vendas },
-    };
+    return buildPaginatedResponse(
+      vendas,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Vendas do distribuidor listadas com sucesso',
+        emptyMessage: 'Nenhuma venda encontrada para este distribuidor',
+      },
+    );
   }
 
   // ─── Relatório de Performance por Etapa ──────────────────────────────────
@@ -177,12 +209,33 @@ export class DistribuidorLojaService {
   }
 
   // ─── Saques ───────────────────────────────────────────────────────────────
-  async getSaques(distribuidorId: string) {
-    const saques = await this.prisma.saque.findMany({
-      where: { distribuidorId, tipo: 'DISTRIBUIDOR' },
-      orderBy: { createdAt: 'desc' },
-    });
-    return { message: 'Saques do distribuidor', data: saques };
+  async getSaques(
+    distribuidorId: string,
+    params: { page?: number; limit?: number },
+  ) {
+    const pagination = normalizePagination(params.page, params.limit);
+    const where = { distribuidorId, tipo: 'DISTRIBUIDOR' as const };
+
+    const [saques, total] = await this.prisma.$transaction([
+      this.prisma.saque.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: pagination.skip,
+        take: pagination.limit,
+      }),
+      this.prisma.saque.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(
+      saques,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Saques do distribuidor listados com sucesso',
+        emptyMessage: 'Nenhum saque encontrado para este distribuidor',
+      },
+    );
   }
 
   async criarSaque(distribuidorId: string, valor: number) {

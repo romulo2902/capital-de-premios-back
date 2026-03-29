@@ -8,6 +8,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { StatusUsuario } from '@prisma/client';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
 
 @Injectable()
 export class ClientesService {
@@ -78,7 +82,7 @@ export class ClientesService {
     vendedorId?: string,
     distribuidorId?: string,
   ) {
-    const skip = (page - 1) * limit;
+    const pagination = normalizePagination(page, limit);
     const where: Record<string, unknown> = {};
 
     if (vendedorId) where.vendedorId = vendedorId;
@@ -95,8 +99,8 @@ export class ClientesService {
     const [data, total] = await Promise.all([
       this.prisma.cliente.findMany({
         where,
-        skip,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.limit,
         orderBy: { createdAt: 'desc' },
         include: {
           vendedor: { select: { id: true, nome: true, codigo: true } },
@@ -106,7 +110,16 @@ export class ClientesService {
       this.prisma.cliente.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    return buildPaginatedResponse(
+      data,
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Clientes listados com sucesso',
+        emptyMessage: 'Nenhum cliente encontrado',
+      },
+    );
   }
 
   async findOne(id: string) {
