@@ -344,4 +344,62 @@ describe('RelatoriosService', () => {
       numeroAleatorio: '40707',
     });
   });
+
+  it('deve buscar pdf de clientes sem carregar vendas e bilhetes', async () => {
+    mockPrisma.cliente.findMany.mockResolvedValue([
+      {
+        createdAt: new Date('2026-03-12T16:13:38Z'),
+        nome: 'Cliente PDF',
+        telefone: '6193986086',
+        email: 'pdf@test.com',
+        vendedor: { nome: 'Bruna costa farias' },
+      },
+    ]);
+
+    const resultado = await (
+      service as unknown as {
+        buscarClientesRelatorioPdf: (filtros: {
+          vendedor?: string;
+          ordenarPor?: string;
+        }) => Promise<Array<{ nome: string; vendedorNome: string }>>;
+      }
+    ).buscarClientesRelatorioPdf({
+      vendedor: 'Bruna',
+      ordenarPor: 'maisRecente',
+    });
+
+    expect(resultado).toEqual([
+      {
+        createdAt: new Date('2026-03-12T16:13:38Z'),
+        nome: 'Cliente PDF',
+        telefone: '6193986086',
+        email: 'pdf@test.com',
+        vendedorNome: 'Bruna costa farias',
+      },
+    ]);
+
+    expect(mockPrisma.cliente.findMany).toHaveBeenCalledWith({
+      where: {
+        vendedor: {
+          OR: [
+            {
+              nome: {
+                contains: 'Bruna',
+                mode: 'insensitive',
+              },
+            },
+          ],
+        },
+      },
+      select: {
+        createdAt: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        vendedor: {
+          select: { nome: true },
+        },
+      },
+    });
+  });
 });

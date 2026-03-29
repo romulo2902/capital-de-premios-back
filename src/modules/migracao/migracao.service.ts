@@ -6,50 +6,30 @@ import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-
-type TipoPlanilha =
-  | 'DISTRIBUIDORES'
-  | 'VENDEDORES'
-  | 'CLIENTES'
-  | 'DESCONHECIDA';
-
-interface ContagemImportacao {
-  lidos: number;
-  criados: number;
-  atualizados: number;
-  ignorados: number;
-  erros: number;
-}
-
-interface LinhaVendedorImportacao {
-  rowNumber: number;
-  nome: string;
-  cpf: string;
-  telefone: string | null;
-  dataNascimento: Date | undefined;
-  cep: string | null;
-  endereco: string | null;
-  numero: string | null;
-  cidade: string | null;
-  bairro: string | null;
-  estado: string | null;
-  email: string;
-  distribuidorId: string;
-}
-
-export interface RelatorioImportacao {
-  distribuidores: ContagemImportacao;
-  vendedores: ContagemImportacao;
-  clientes: ContagemImportacao;
-  erros: string[];
-}
-
-export interface ArquivoXlsxUpload {
-  buffer: Uint8Array;
-  originalname?: string;
-  mimetype?: string;
-  size?: number;
-}
+import {
+  buscarRelacionamentoPorNome as buscarRelacionamentoPorNomeUtil,
+  cpf as cpfUtil,
+  data as dataUtil,
+  email as emailUtil,
+  extrairNomeRelacionamento as extrairNomeRelacionamentoUtil,
+  gerarEmailUsuarioMigradoConflito as gerarEmailUsuarioMigradoConflitoUtil,
+  gerarEmailUsuarioVendedorImportacao as gerarEmailUsuarioVendedorImportacaoUtil,
+  identificarTipoPlanilha as identificarTipoPlanilhaUtil,
+  isEmail as isEmailUtil,
+  mapearPorNome as mapearPorNomeUtil,
+  normalizar as normalizarUtil,
+  novaContagem as novaContagemUtil,
+  numero as numeroUtil,
+  quebrarEmLotes as quebrarEmLotesUtil,
+  texto as textoUtil,
+} from './migracao.util';
+import type {
+  ArquivoXlsxUpload,
+  ContagemImportacao,
+  LinhaVendedorImportacao,
+  RelatorioImportacao,
+  TipoPlanilha,
+} from './migracao.types';
 
 @Injectable()
 export class MigracaoService {
@@ -723,23 +703,7 @@ export class MigracaoService {
   }
 
   private identificarTipoPlanilha(worksheet: ExcelJS.Worksheet): TipoPlanilha {
-    const nomePlanilha = this.normalizar(worksheet.name);
-    if (nomePlanilha.includes('distribuidor')) return 'DISTRIBUIDORES';
-    if (nomePlanilha.includes('vendedor')) return 'VENDEDORES';
-    if (nomePlanilha.includes('cliente')) return 'CLIENTES';
-
-    const header = worksheet.getRow(1);
-    const headersNormalizados = new Set<string>();
-    for (let col = 1; col <= header.cellCount; col += 1) {
-      const valor = this.texto(header.getCell(col).value);
-      if (valor) headersNormalizados.add(this.normalizar(valor));
-    }
-
-    if (headersNormalizados.has('nomedistribuidor')) return 'VENDEDORES';
-    if (headersNormalizados.has('nomevendedor')) return 'CLIENTES';
-    if (headersNormalizados.has('totalvendedores')) return 'DISTRIBUIDORES';
-
-    return 'DESCONHECIDA';
+    return identificarTipoPlanilhaUtil(worksheet);
   }
 
   private async obterOuCriarUsuario(
@@ -815,66 +779,26 @@ export class MigracaoService {
   private mapearPorNome(
     registros: Array<{ id: string; nome: string }>,
   ): Map<string, string[]> {
-    const mapa = new Map<string, string[]>();
-    for (const registro of registros) {
-      const chave = this.normalizar(registro.nome);
-      if (!chave) continue;
-      const atual = mapa.get(chave) ?? [];
-      atual.push(registro.id);
-      mapa.set(chave, atual);
-    }
-    return mapa;
+    return mapearPorNomeUtil(registros);
   }
 
   private buscarRelacionamentoPorNome(
     nome: string,
     mapa: Map<string, string[]>,
   ): string | null {
-    const chave = this.normalizar(nome);
-    const ids = mapa.get(chave) ?? [];
-    if (ids.length !== 1) return null;
-    return ids[0];
+    return buscarRelacionamentoPorNomeUtil(nome, mapa);
   }
 
   private novaContagem(): ContagemImportacao {
-    return { lidos: 0, criados: 0, atualizados: 0, ignorados: 0, erros: 0 };
+    return novaContagemUtil();
   }
 
   private texto(value: ExcelJS.CellValue): string | null {
-    if (value === null || value === undefined) return null;
-    if (typeof value === 'string') {
-      const v = value.trim();
-      return v ? v : null;
-    }
-    if (typeof value === 'number') return String(value);
-    if (value instanceof Date) return value.toISOString().slice(0, 10);
-    if (typeof value === 'object') {
-      if ('text' in value && value.text) return String(value.text).trim();
-      if (
-        'result' in value &&
-        value.result !== null &&
-        value.result !== undefined
-      ) {
-        if (
-          typeof value.result === 'string' ||
-          typeof value.result === 'number' ||
-          typeof value.result === 'boolean' ||
-          typeof value.result === 'bigint'
-        ) {
-          return String(value.result).trim();
-        }
-      }
-    }
-    return null;
+    return textoUtil(value);
   }
 
   private numero(value: ExcelJS.CellValue): number | null {
-    const txt = this.texto(value);
-    if (!txt) return null;
-    const digits = txt.replace(/\D/g, '');
-    if (!digits) return null;
-    const parsed = Number(digits);
-    return Number.isFinite(parsed) ? parsed : null;
+    return numeroUtil(value);
   }
 
   private async resolverCodigoDistribuidor(
@@ -889,79 +813,46 @@ export class MigracaoService {
   }
 
   private cpf(value: ExcelJS.CellValue): string | null {
-    const txt = this.texto(value);
-    if (!txt) return null;
-    const digits = txt.replace(/\D/g, '');
-    if (!digits) return null;
-    const cpf = digits.length < 11 ? digits.padStart(11, '0') : digits;
-    return cpf.length === 11 ? cpf : null;
+    return cpfUtil(value);
   }
 
   private data(value: ExcelJS.CellValue): Date | undefined {
-    if (!value) return undefined;
-    if (value instanceof Date) return value;
-    const txt = this.texto(value);
-    if (!txt) return undefined;
-    const data = new Date(txt);
-    return Number.isNaN(data.getTime()) ? undefined : data;
+    return dataUtil(value);
   }
 
   private email(value: ExcelJS.CellValue): string | null {
-    const txt = this.texto(value);
-    if (!txt) return null;
-    const match = txt.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
-    if (!match) return null;
-    return match[0].toLowerCase();
+    return emailUtil(value);
   }
 
   private extrairNomeRelacionamento(
     campos: Array<string | null>,
   ): string | null {
-    for (const valor of campos) {
-      if (!valor) continue;
-      const semEmail = valor
-        .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      if (!semEmail || /^\d+$/.test(semEmail)) continue;
-      return semEmail;
-    }
-
-    return null;
+    return extrairNomeRelacionamentoUtil(campos);
   }
 
   private gerarEmailUsuarioVendedorImportacao(
     cpf: string,
     rowNumber: number,
   ): string {
-    return `${cpf}.${rowNumber}.${randomUUID().slice(0, 8)}@vendedor-import.local`;
+    return gerarEmailUsuarioVendedorImportacaoUtil(cpf, rowNumber);
   }
 
   private gerarEmailUsuarioMigradoConflito(
     cpf: string,
     perfil: Perfil,
   ): string {
-    return `${cpf}.${perfil.toLowerCase()}.${randomUUID().slice(0, 8)}@migracao.local`;
+    return gerarEmailUsuarioMigradoConflitoUtil(cpf, perfil);
   }
 
   private isEmail(value: string): boolean {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    return isEmailUtil(value);
   }
 
   private normalizar(value: string): string {
-    return value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '');
+    return normalizarUtil(value);
   }
 
   private quebrarEmLotes<T>(items: T[], tamanhoLote: number): T[][] {
-    const lotes: T[][] = [];
-    for (let index = 0; index < items.length; index += tamanhoLote) {
-      lotes.push(items.slice(index, index + tamanhoLote));
-    }
-    return lotes;
+    return quebrarEmLotesUtil(items, tamanhoLote);
   }
 }

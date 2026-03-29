@@ -8,7 +8,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   DestinoEdicao,
-  Edicao,
   EdicaoDetalhe,
   OrigemParticipacao,
   Prisma,
@@ -16,10 +15,7 @@ import {
   TipoCartela,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  formatDateTimeForInput,
-  parseBusinessDateTime,
-} from '../../common/utils/business-date-time.util';
+import { parseBusinessDateTime } from '../../common/utils/business-date-time.util';
 import {
   buildPaginatedResponse,
   normalizePagination,
@@ -27,39 +23,28 @@ import {
 import { CreateEdicaoDto } from './dto/create-edicao.dto';
 import { CreateEdicaoDetalheDto } from './dto/create-edicao-detalhe.dto';
 import { UpdateEdicaoDto } from './dto/update-edicao.dto';
-
-type EdicaoComRelacoes = Prisma.EdicaoGetPayload<{
-  include: {
-    detalhes: true;
-    premios: true;
-  };
-}>;
-
-interface DetalheRangeNormalizado {
-  origemParticipacao: OrigemParticipacao;
-  tipoCartela: TipoCartela;
-  rangeInicio: bigint;
-  rangeFinal: bigint;
-}
-
-const EDICAO_INCLUDE = {
-  detalhes: {
-    orderBy: [
-      { origemParticipacao: 'asc' },
-      { tipoCartela: 'asc' },
-      { rangeInicio: 'asc' },
-    ],
-  },
-  premios: {
-    orderBy: { ordem: 'asc' },
-  },
-} satisfies Prisma.EdicaoInclude;
-
-const STATUSS_EDICAO_EM_OPERACAO: StatusEdicao[] = [
-  StatusEdicao.ATIVA,
-  StatusEdicao.ENCERRADA,
-  StatusEdicao.SORTEANDO,
-];
+import {
+  EDICAO_INCLUDE,
+  STATUSS_EDICAO_EM_OPERACAO,
+} from './edicoes.constants';
+import {
+  calcularResumoDosRanges as calcularResumoDosRangesUtil,
+  inferirDestinoPorDetalhes as inferirDestinoPorDetalhesUtil,
+  isOrigemDigital as isOrigemDigitalUtil,
+  isOrigemFisica as isOrigemFisicaUtil,
+  normalizarDetalhes as normalizarDetalhesUtil,
+  normalizarDetalhesExistentes as normalizarDetalhesExistentesUtil,
+  obterDetalhesComFallback as obterDetalhesComFallbackUtil,
+  obterQuantidadeChances as obterQuantidadeChancesUtil,
+  possuiSobreposicao as possuiSobreposicaoUtil,
+  validarDestinoComDetalhes as validarDestinoComDetalhesUtil,
+  validarDetalhesInternos as validarDetalhesInternosUtil,
+} from './edicoes-range.util';
+import { serializarEdicao as serializarEdicaoUtil } from './edicoes-serialization.util';
+import type {
+  DetalheRangeNormalizado,
+  EdicaoComRelacoes,
+} from './edicoes.types';
 
 @Injectable()
 export class EdicoesService {
@@ -408,50 +393,17 @@ export class EdicoesService {
   private normalizarDetalhes(
     detalhes: CreateEdicaoDetalheDto[],
   ): DetalheRangeNormalizado[] {
-    return detalhes.map((detalhe) => ({
-      origemParticipacao: detalhe.origemParticipacao,
-      tipoCartela: detalhe.tipoCartela,
-      rangeInicio: BigInt(detalhe.rangeInicio),
-      rangeFinal: BigInt(detalhe.rangeFinal),
-    }));
+    return normalizarDetalhesUtil(detalhes);
   }
 
   private normalizarDetalhesExistentes(
     edicao: EdicaoComRelacoes,
   ): DetalheRangeNormalizado[] {
-    const detalhes = this.obterDetalhesComFallback(edicao);
-
-    return detalhes.map((detalhe) => ({
-      origemParticipacao: detalhe.origemParticipacao,
-      tipoCartela: detalhe.tipoCartela,
-      rangeInicio: detalhe.rangeInicio,
-      rangeFinal: detalhe.rangeFinal,
-    }));
+    return normalizarDetalhesExistentesUtil(edicao);
   }
 
   private validarDetalhesInternos(detalhes: DetalheRangeNormalizado[]): void {
-    for (const detalhe of detalhes) {
-      if (detalhe.rangeFinal < detalhe.rangeInicio) {
-        throw new BadRequestException(
-          'rangeFinal deve ser maior ou igual ao rangeInicio',
-        );
-      }
-    }
-
-    const ordenados = [...detalhes].sort((a, b) =>
-      a.rangeInicio < b.rangeInicio ? -1 : 1,
-    );
-
-    for (let i = 1; i < ordenados.length; i++) {
-      const anterior = ordenados[i - 1];
-      const atual = ordenados[i];
-
-      if (this.possuiSobreposicao(anterior, atual)) {
-        throw new ConflictException(
-          `Os detalhes da edição possuem ranges sobrepostos: ${anterior.rangeInicio.toString()}-${anterior.rangeFinal.toString()} e ${atual.rangeInicio.toString()}-${atual.rangeFinal.toString()}`,
-        );
-      }
-    }
+    validarDetalhesInternosUtil(detalhes);
   }
 
   private async validarConflitosGlobaisDeRange(
@@ -489,62 +441,21 @@ export class EdicoesService {
     destino: DestinoEdicao,
     detalhes: DetalheRangeNormalizado[],
   ): void {
-    const possuiDigital = detalhes.some((detalhe) =>
-      this.isOrigemDigital(detalhe.origemParticipacao),
-    );
-    const possuiFisica = detalhes.some((detalhe) =>
-      this.isOrigemFisica(detalhe.origemParticipacao),
-    );
-
-    if (possuiDigital && possuiFisica && destino !== DestinoEdicao.AMBOS) {
-      throw new BadRequestException(
-        'Quando houver participação DIGITAL e FISICA na mesma edição, o destino deve ser AMBOS',
-      );
-    }
-
-    if (possuiDigital && !possuiFisica && destino === DestinoEdicao.LOJA_FISICA) {
-      throw new BadRequestException(
-        'Destino LOJA_FISICA é incompatível com detalhes exclusivamente DIGITAIS',
-      );
-    }
-
-    if (possuiFisica && !possuiDigital && destino === DestinoEdicao.SITE) {
-      throw new BadRequestException(
-        'Destino SITE é incompatível com detalhes exclusivamente FISICOS',
-      );
-    }
+    validarDestinoComDetalhesUtil(destino, detalhes);
   }
 
   private inferirDestinoPorDetalhes(
     detalhes: DetalheRangeNormalizado[],
   ): DestinoEdicao {
-    const possuiDigital = detalhes.some((detalhe) =>
-      this.isOrigemDigital(detalhe.origemParticipacao),
-    );
-    const possuiFisica = detalhes.some((detalhe) =>
-      this.isOrigemFisica(detalhe.origemParticipacao),
-    );
-
-    if (possuiDigital && possuiFisica) {
-      return DestinoEdicao.AMBOS;
-    }
-
-    if (possuiFisica) {
-      return DestinoEdicao.LOJA_FISICA;
-    }
-
-    return DestinoEdicao.SITE;
+    return inferirDestinoPorDetalhesUtil(detalhes);
   }
 
   private isOrigemDigital(origem: OrigemParticipacao): boolean {
-    return origem === OrigemParticipacao.DIGITAL;
+    return isOrigemDigitalUtil(origem);
   }
 
   private isOrigemFisica(origem: OrigemParticipacao): boolean {
-    return (
-      origem === OrigemParticipacao.FISICO ||
-      origem === OrigemParticipacao.POS
-    );
+    return isOrigemFisicaUtil(origem);
   }
 
   private validarDatas(dataEncerramento: Date, dataSorteio: Date): void {
@@ -572,19 +483,7 @@ export class EdicoesService {
     rangeInicio: bigint;
     rangeFinal: bigint;
   } {
-    const rangeInicio = detalhes.reduce(
-      (menor, detalhe) =>
-        detalhe.rangeInicio < menor ? detalhe.rangeInicio : menor,
-      detalhes[0].rangeInicio,
-    );
-
-    const rangeFinal = detalhes.reduce(
-      (maior, detalhe) =>
-        detalhe.rangeFinal > maior ? detalhe.rangeFinal : maior,
-      detalhes[0].rangeFinal,
-    );
-
-    return { rangeInicio, rangeFinal };
+    return calcularResumoDosRangesUtil(detalhes);
   }
 
   private normalizarValorCartela(valorCartela: string): Prisma.Decimal {
@@ -643,10 +542,7 @@ export class EdicoesService {
     atual: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
     comparado: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
   ): boolean {
-    return (
-      atual.rangeInicio <= comparado.rangeFinal &&
-      comparado.rangeInicio <= atual.rangeFinal
-    );
+    return possuiSobreposicaoUtil(atual, comparado);
   }
 
   private obterDetalhesComFallback(
@@ -654,71 +550,14 @@ export class EdicoesService {
   ): Array<
     EdicaoDetalhe | (DetalheRangeNormalizado & { id: string; createdAt: Date; updatedAt: Date })
   > {
-    if (edicao.detalhes.length > 0) {
-      return edicao.detalhes;
-    }
-
-    return [
-      {
-        id: `legacy-${edicao.id}`,
-        origemParticipacao: OrigemParticipacao.DIGITAL,
-        tipoCartela: TipoCartela.UMA_CHANCE,
-        rangeInicio: edicao.rangeInicio,
-        rangeFinal: edicao.rangeFinal,
-        createdAt: edicao.createdAt,
-        updatedAt: edicao.createdAt,
-      },
-    ];
+    return obterDetalhesComFallbackUtil(edicao);
   }
 
   private serializarEdicao(edicao: EdicaoComRelacoes) {
-    const detalhes = this.obterDetalhesComFallback(edicao).map((detalhe) => ({
-      ...detalhe,
-      rangeInicio: detalhe.rangeInicio.toString(),
-      rangeFinal: detalhe.rangeFinal.toString(),
-      intervalo: (detalhe.rangeFinal - detalhe.rangeInicio + BigInt(1)).toString(),
-      quantidadeChances: this.obterQuantidadeChances(detalhe.tipoCartela),
-      legado: edicao.detalhes.length === 0,
-    }));
-
-    return {
-      ...edicao,
-      rangeInicio: edicao.rangeInicio.toString(),
-      rangeFinal: edicao.rangeFinal.toString(),
-      valorCartela: edicao.valorCartela.toString(),
-      dataSorteioLocal: formatDateTimeForInput(
-        edicao.dataSorteio,
-        this.getBusinessTimeZone(),
-      ),
-      dataEncerramentoLocal: formatDateTimeForInput(
-        edicao.dataEncerramento,
-        this.getBusinessTimeZone(),
-      ),
-      timezone: this.getBusinessTimeZone(),
-      detalhes,
-      premios: edicao.premios.map((premio) => ({
-        ...premio,
-        valor: premio.valor.toString(),
-      })),
-    };
+    return serializarEdicaoUtil(edicao, this.getBusinessTimeZone());
   }
 
   private obterQuantidadeChances(tipoCartela: TipoCartela): number {
-    const mapa: Record<TipoCartela, number> = {
-      [TipoCartela.UMA_CHANCE]: 1,
-      [TipoCartela.DUAS_CHANCES]: 2,
-      [TipoCartela.TRES_CHANCES]: 3,
-      [TipoCartela.QUATRO_CHANCES]: 4,
-      [TipoCartela.CINCO_CHANCES]: 5,
-      [TipoCartela.SEIS_CHANCES]: 6,
-      [TipoCartela.SETE_CHANCES]: 7,
-      [TipoCartela.OITO_CHANCES]: 8,
-      [TipoCartela.NOVE_CHANCES]: 9,
-      [TipoCartela.DEZ_CHANCES]: 10,
-      [TipoCartela.ONZE_CHANCES]: 11,
-      [TipoCartela.DOZE_CHANCES]: 12,
-    };
-
-    return mapa[tipoCartela];
+    return obterQuantidadeChancesUtil(tipoCartela);
   }
 }

@@ -17,14 +17,16 @@ import {
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
-  ArquivoXlsxUpload,
   MigracaoService,
-  RelatorioImportacao,
 } from './migracao.service';
 import {
   ImportarXlsxBodyDto,
   ImportarXlsxResponseDto,
 } from './dto/importar-xlsx.dto';
+import type {
+  ArquivoXlsxUpload,
+  RelatorioImportacao,
+} from './migracao.types';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';

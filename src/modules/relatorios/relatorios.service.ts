@@ -1,84 +1,36 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../../prisma/prisma.service';
-
-type PdfDocument = InstanceType<typeof PDFDocument>;
-
-type FiltrosRelatorioVendedores = {
-  dataInicio?: string;
-  dataFim?: string;
-  distribuidor?: string;
-  ordenarPor?: string;
-};
-
-type FiltrosRelatorioDistribuidores = {
-  dataInicio?: string;
-  dataFim?: string;
-  ordenarPor?: string;
-};
-
-type FiltrosRelatorioClientes = {
-  dataInicio?: string;
-  dataFim?: string;
-  vendedor?: string;
-  ordenarPor?: string;
-};
-
-type VendedorRelatorioRow = {
-  codigo: number;
-  createdAt: Date;
-  nome: string;
-  cpf: string;
-  telefone: string;
-  dataNascimento: Date | null;
-  cep: string | null;
-  endereco: string | null;
-  numero: string | null;
-  cidade: string | null;
-  bairro: string | null;
-  estado: string | null;
-  email: string;
-  distribuidorNome: string;
-  nivel: number;
-  totalClientes: number;
-};
-
-type DistribuidorRelatorioRow = {
-  codigo: number;
-  createdAt: Date;
-  nome: string;
-  cpf: string;
-  telefone: string;
-  dataNascimento: Date | null;
-  cep: string | null;
-  endereco: string | null;
-  numero: string | null;
-  cidade: string | null;
-  bairro: string | null;
-  estado: string | null;
-  email: string;
-  totalVendedores: number;
-};
-
-type ClienteRelatorioRow = {
-  codigo: number;
-  createdAt: Date;
-  nome: string;
-  cpf: string;
-  telefone: string;
-  dataNascimento: Date | null;
-  cep: string | null;
-  endereco: string | null;
-  numero: string | null;
-  cidade: string | null;
-  bairro: string | null;
-  estado: string | null;
-  email: string | null;
-  vendedorNome: string;
-  numeroAleatorio: string;
-};
+import {
+  aplicarFiltroPeriodoCadastro as aplicarFiltroPeriodoCadastroUtil,
+  aplicarFormatoTextoColunas as aplicarFormatoTextoColunasUtil,
+  formatarCodigo as formatarCodigoUtil,
+  formatarCpf as formatarCpfUtil,
+  formatarData as formatarDataUtil,
+  formatarDataHora as formatarDataHoraUtil,
+  formatarNumeroAleatorio as formatarNumeroAleatorioUtil,
+  formatarPercentual as formatarPercentualUtil,
+  parseDataRelatorio as parseDataRelatorioUtil,
+  resolverNumeroAleatorioCliente as resolverNumeroAleatorioClienteUtil,
+  valorPlanilha as valorPlanilhaUtil,
+  valorPlanilhaTexto as valorPlanilhaTextoUtil,
+} from './relatorios-formatters.util';
+import {
+  calcularAlturaLinhaTabelaPdf as calcularAlturaLinhaTabelaPdfUtil,
+  desenharLinhaTabelaPdf as desenharLinhaTabelaPdfUtil,
+} from './relatorios-pdf.util';
+import type {
+  ClienteRelatorioPdfRow,
+  ClienteRelatorioRow,
+  DistribuidorRelatorioRow,
+  FiltrosRelatorioClientes,
+  FiltrosRelatorioDistribuidores,
+  FiltrosRelatorioVendedores,
+  PdfDocument,
+  VendedorRelatorioRow,
+} from './relatorios.types';
 
 @Injectable()
 export class RelatoriosService {
@@ -647,7 +599,7 @@ export class RelatoriosService {
     filtros: FiltrosRelatorioClientes,
   ): Promise<void> {
     this.logger.log('Gerando relatório PDF de clientes');
-    const clientes = await this.buscarClientesRelatorio(filtros);
+    const clientes = await this.buscarClientesRelatorioPdf(filtros);
 
     const doc = new PDFDocument({ margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
@@ -841,51 +793,14 @@ export class RelatoriosService {
     dataInicio?: string,
     dataFim?: string,
   ): void {
-    if (!dataInicio && !dataFim) {
-      return;
-    }
-
-    where.createdAt = {};
-
-    if (dataInicio) {
-      (where.createdAt as Record<string, unknown>).gte =
-        this.parseDataRelatorio(dataInicio, 'inicio');
-    }
-
-    if (dataFim) {
-      (where.createdAt as Record<string, unknown>).lte =
-        this.parseDataRelatorio(dataFim, 'fim');
-    }
+    aplicarFiltroPeriodoCadastroUtil(where, dataInicio, dataFim);
   }
 
   private parseDataRelatorio(
     value: string,
     boundary: 'inicio' | 'fim',
   ): Date {
-    const rawValue = value.trim();
-    const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawValue);
-    if (isoDateMatch) {
-      const year = Number(isoDateMatch[1]);
-      const month = Number(isoDateMatch[2]);
-      const day = Number(isoDateMatch[3]);
-
-      return this.buildCalendarDate(year, month, day, boundary);
-    }
-
-    if (!/^\d{4}-\d{2}-\d{2}T/.test(rawValue)) {
-      throw new BadRequestException(
-        'Data de filtro inválida. Use ISO, preferencialmente YYYY-MM-DD',
-      );
-    }
-
-    const parsed = new Date(rawValue);
-    if (Number.isNaN(parsed.getTime())) {
-      throw new BadRequestException(
-        'Data de filtro inválida. Use ISO, preferencialmente YYYY-MM-DD',
-      );
-    }
-
-    return parsed;
+    return parseDataRelatorioUtil(value, boundary);
   }
 
   private buildCalendarDate(
@@ -894,32 +809,14 @@ export class RelatoriosService {
     day: number,
     boundary: 'inicio' | 'fim',
   ): Date {
-    const date = new Date(
-      year,
-      month - 1,
-      day,
-      boundary === 'inicio' ? 0 : 23,
-      boundary === 'inicio' ? 0 : 59,
-      boundary === 'inicio' ? 0 : 59,
-      boundary === 'inicio' ? 0 : 999,
+    return parseDataRelatorioUtil(
+      `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
+      boundary,
     );
-
-    if (
-      date.getFullYear() !== year ||
-      date.getMonth() !== month - 1 ||
-      date.getDate() !== day
-    ) {
-      throw new BadRequestException(
-        'Data de filtro inválida. Use ISO, preferencialmente YYYY-MM-DD',
-      );
-    }
-
-    return date;
   }
 
   private formatarPercentual(value: number): string {
-    const percentual = Number.isInteger(value) ? value.toString() : value.toFixed(2);
-    return `${percentual}%`;
+    return formatarPercentualUtil(value);
   }
 
   private async buscarDistribuidoresRelatorio(
@@ -988,38 +885,7 @@ export class RelatoriosService {
   private async buscarClientesRelatorio(
     filtros: FiltrosRelatorioClientes,
   ): Promise<ClienteRelatorioRow[]> {
-    const where: Record<string, unknown> = {};
-
-    this.aplicarFiltroPeriodoCadastro(
-      where,
-      filtros.dataInicio,
-      filtros.dataFim,
-    );
-
-    if (filtros.vendedor) {
-      const vendedorBusca = filtros.vendedor.trim();
-      const vendedorCpf = vendedorBusca.replace(/\D/g, '');
-      const termosVendedor: Array<Record<string, unknown>> = [
-        {
-          nome: {
-            contains: vendedorBusca,
-            mode: 'insensitive',
-          },
-        },
-      ];
-
-      if (vendedorCpf) {
-        termosVendedor.push({
-          cpf: {
-            contains: vendedorCpf,
-          },
-        });
-      }
-
-      where.vendedor = {
-        OR: termosVendedor,
-      };
-    }
+    const where = this.criarWhereClientesRelatorio(filtros);
 
     const clientes = await this.prisma.cliente.findMany({
       where,
@@ -1063,10 +929,78 @@ export class RelatoriosService {
     return this.ordenarClientesRelatorio(rows, filtros.ordenarPor);
   }
 
-  private ordenarClientesRelatorio(
-    rows: ClienteRelatorioRow[],
+  private async buscarClientesRelatorioPdf(
+    filtros: FiltrosRelatorioClientes,
+  ): Promise<ClienteRelatorioPdfRow[]> {
+    const where = this.criarWhereClientesRelatorio(filtros);
+
+    const clientes = await this.prisma.cliente.findMany({
+      where,
+      select: {
+        createdAt: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        vendedor: {
+          select: { nome: true },
+        },
+      },
+    });
+
+    const rows = clientes.map((cliente) => ({
+      createdAt: cliente.createdAt,
+      nome: cliente.nome,
+      telefone: cliente.telefone,
+      email: cliente.email,
+      vendedorNome: cliente.vendedor?.nome ?? '',
+    }));
+
+    return this.ordenarClientesRelatorio(rows, filtros.ordenarPor);
+  }
+
+  private criarWhereClientesRelatorio(
+    filtros: FiltrosRelatorioClientes,
+  ): Record<string, unknown> {
+    const where: Record<string, unknown> = {};
+
+    this.aplicarFiltroPeriodoCadastro(
+      where,
+      filtros.dataInicio,
+      filtros.dataFim,
+    );
+
+    if (filtros.vendedor) {
+      const vendedorBusca = filtros.vendedor.trim();
+      const vendedorCpf = vendedorBusca.replace(/\D/g, '');
+      const termosVendedor: Array<Record<string, unknown>> = [
+        {
+          nome: {
+            contains: vendedorBusca,
+            mode: 'insensitive',
+          },
+        },
+      ];
+
+      if (vendedorCpf) {
+        termosVendedor.push({
+          cpf: {
+            contains: vendedorCpf,
+          },
+        });
+      }
+
+      where.vendedor = {
+        OR: termosVendedor,
+      };
+    }
+
+    return where;
+  }
+
+  private ordenarClientesRelatorio<T extends { createdAt: Date }>(
+    rows: T[],
     ordenarPor?: string,
-  ): ClienteRelatorioRow[] {
+  ): T[] {
     const itens = [...rows];
 
     switch (ordenarPor) {
@@ -1083,65 +1017,51 @@ export class RelatoriosService {
   }
 
   private formatarCpf(cpf: string): string {
-    return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    return formatarCpfUtil(cpf);
   }
 
   private formatarCodigo(codigo: number): string {
-    return String(codigo).padStart(4, '0');
+    return formatarCodigoUtil(codigo);
   }
 
   private formatarData(data?: Date | null): string {
-    return data ? data.toLocaleDateString('pt-BR') : '';
+    return formatarDataUtil(data);
   }
 
   private formatarDataHora(data: Date): string {
-    return data.toLocaleString('pt-BR');
+    return formatarDataHoraUtil(data);
   }
 
   private valorPlanilha(
     value: string | number | null | undefined,
   ): string | number {
-    return value ?? '';
+    return valorPlanilhaUtil(value);
   }
 
   private valorPlanilhaTexto(
     value: string | number | null | undefined,
   ): string {
-    return value === null || value === undefined ? '' : String(value);
+    return valorPlanilhaTextoUtil(value);
   }
 
   private formatarNumeroAleatorio(
     value: bigint | number | string | null | undefined,
   ): string {
-    if (value === null || value === undefined) {
-      return '';
-    }
-
-    return String(value).padStart(5, '0');
+    return formatarNumeroAleatorioUtil(value);
   }
 
   private aplicarFormatoTextoColunas(
     sheet: ExcelJS.Worksheet,
     keys: string[],
   ): void {
-    for (const key of keys) {
-      const column = sheet.getColumn(key);
-      column.numFmt = '@';
-    }
+    aplicarFormatoTextoColunasUtil(sheet, keys);
   }
 
   private calcularAlturaLinhaTabelaPdf(
     doc: PdfDocument,
     cells: Array<{ text: string; width: number }>,
   ): number {
-    const heights = cells.map((cell) =>
-      doc.heightOfString(cell.text, {
-        width: cell.width - 10,
-        align: 'left',
-      }),
-    );
-
-    return Math.max(24, Math.max(...heights) + 10);
+    return calcularAlturaLinhaTabelaPdfUtil(doc, cells);
   }
 
   private desenharLinhaTabelaPdf(
@@ -1156,19 +1076,7 @@ export class RelatoriosService {
     }>,
     rowHeight: number,
   ): void {
-    let x = startX;
-
-    for (const cell of cells) {
-      doc.rect(x, y, cell.width, rowHeight).stroke();
-      doc
-        .font(cell.bold ? 'Helvetica-Bold' : 'Helvetica')
-        .fontSize(cell.bold ? 8.5 : 8.5)
-        .text(cell.text, x + 4, y + 8, {
-          width: cell.width - 8,
-          align: cell.align ?? 'left',
-        });
-      x += cell.width;
-    }
+    desenharLinhaTabelaPdfUtil(doc, startX, y, cells, rowHeight);
   }
 
   private resolverNumeroAleatorioCliente(
@@ -1178,7 +1086,6 @@ export class RelatoriosService {
       }>;
     }>,
   ): string {
-    const numero = vendas[0]?.bilhetes[0]?.numero;
-    return this.formatarNumeroAleatorio(numero);
+    return resolverNumeroAleatorioClienteUtil(vendas);
   }
 }
