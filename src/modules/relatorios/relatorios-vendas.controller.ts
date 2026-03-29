@@ -21,8 +21,18 @@ export class RelatoriosVendasController {
 
   @Get('xlsx')
   @ApiOperation({ summary: 'Exportar relatório de vendas em XLSX' })
-  @ApiQuery({ name: 'dataInicio', required: false })
-  @ApiQuery({ name: 'dataFim', required: false })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description: 'Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description: 'Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-31',
+  })
   @ApiQuery({ name: 'edicaoId', required: false })
   async exportarXlsx(
     @Res() res: Response,

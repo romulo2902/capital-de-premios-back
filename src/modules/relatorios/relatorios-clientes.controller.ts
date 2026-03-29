@@ -21,13 +21,29 @@ export class RelatoriosClientesController {
 
   @Get('xlsx')
   @ApiOperation({ summary: 'Exportar relatório de clientes em XLSX' })
-  @ApiQuery({ name: 'dataInicio', required: false })
-  @ApiQuery({ name: 'dataFim', required: false })
-  @ApiQuery({ name: 'vendedor', required: false })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description: 'Cadastro de clientes a partir desta data. Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description: 'Cadastro de clientes até esta data. Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-31',
+  })
+  @ApiQuery({
+    name: 'vendedor',
+    required: false,
+    description: 'Busca por nome ou CPF do vendedor.',
+    example: 'Nome, CPF',
+  })
   @ApiQuery({
     name: 'ordenarPor',
     required: false,
     enum: ['maisRecente', 'maisAntigo'],
+    description: 'Ordenação disponível no admin para este relatório.',
   })
   async exportarXlsx(
     @Res() res: Response,
@@ -46,13 +62,29 @@ export class RelatoriosClientesController {
 
   @Get('pdf')
   @ApiOperation({ summary: 'Exportar relatório de clientes em PDF' })
-  @ApiQuery({ name: 'dataInicio', required: false })
-  @ApiQuery({ name: 'dataFim', required: false })
-  @ApiQuery({ name: 'vendedor', required: false })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description: 'Cadastro de clientes a partir desta data. Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description: 'Cadastro de clientes até esta data. Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-31',
+  })
+  @ApiQuery({
+    name: 'vendedor',
+    required: false,
+    description: 'Busca por nome ou CPF do vendedor.',
+    example: 'Nome, CPF',
+  })
   @ApiQuery({
     name: 'ordenarPor',
     required: false,
     enum: ['maisRecente', 'maisAntigo'],
+    description: 'Ordenação disponível no admin para este relatório.',
   })
   async exportarPdf(
     @Res() res: Response,

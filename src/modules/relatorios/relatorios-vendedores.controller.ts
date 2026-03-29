@@ -21,13 +21,31 @@ export class RelatoriosVendedoresController {
 
   @Get('xlsx')
   @ApiOperation({ summary: 'Exportar relatório de vendedores em XLSX' })
-  @ApiQuery({ name: 'dataInicio', required: false })
-  @ApiQuery({ name: 'dataFim', required: false })
-  @ApiQuery({ name: 'distribuidor', required: false })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description:
+      'Cadastro de vendedores a partir desta data. Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description:
+      'Cadastro de vendedores até esta data. Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-31',
+  })
+  @ApiQuery({
+    name: 'distribuidor',
+    required: false,
+    description: 'Busca por nome ou CPF do distribuidor.',
+    example: 'Nome, CPF',
+  })
   @ApiQuery({
     name: 'ordenarPor',
     required: false,
-    enum: ['nome', 'createdAt', 'codigo', 'totalClientes'],
+    enum: ['cliente', 'nivel'],
+    description: 'Ordenação do relatório conforme o filtro do admin.',
   })
   async exportarXlsx(
     @Res() res: Response,
@@ -46,13 +64,31 @@ export class RelatoriosVendedoresController {
 
   @Get('pdf')
   @ApiOperation({ summary: 'Exportar relatório de vendedores em PDF' })
-  @ApiQuery({ name: 'dataInicio', required: false })
-  @ApiQuery({ name: 'dataFim', required: false })
-  @ApiQuery({ name: 'distribuidor', required: false })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description:
+      'Cadastro de vendedores a partir desta data. Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description:
+      'Cadastro de vendedores até esta data. Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-31',
+  })
+  @ApiQuery({
+    name: 'distribuidor',
+    required: false,
+    description: 'Busca por nome ou CPF do distribuidor.',
+    example: 'Nome, CPF',
+  })
   @ApiQuery({
     name: 'ordenarPor',
     required: false,
-    enum: ['nome', 'createdAt', 'codigo', 'totalClientes'],
+    enum: ['cliente', 'nivel'],
+    description: 'Ordenação do relatório conforme o filtro do admin.',
   })
   async exportarPdf(
     @Res() res: Response,

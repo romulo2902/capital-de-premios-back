@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
@@ -41,6 +41,7 @@ type VendedorRelatorioRow = {
   estado: string | null;
   email: string;
   distribuidorNome: string;
+  nivel: number;
   totalClientes: number;
 };
 
@@ -93,17 +94,11 @@ export class RelatoriosService {
 
     const where: Record<string, unknown> = {};
     if (filtros.edicaoId) where.edicaoId = filtros.edicaoId;
-    if (filtros.dataInicio || filtros.dataFim) {
-      where.createdAt = {};
-      if (filtros.dataInicio)
-        (where.createdAt as Record<string, unknown>).gte = new Date(
-          filtros.dataInicio,
-        );
-      if (filtros.dataFim)
-        (where.createdAt as Record<string, unknown>).lte = new Date(
-          filtros.dataFim,
-        );
-    }
+    this.aplicarFiltroPeriodoCadastro(
+      where,
+      filtros.dataInicio,
+      filtros.dataFim,
+    );
 
     const vendas = await this.prisma.venda.findMany({
       where,
@@ -250,6 +245,7 @@ export class RelatoriosService {
       { header: 'Estado', key: 'estado', width: 10 },
       { header: 'E-mail', key: 'email', width: 28 },
       { header: 'Nome Distribuidor', key: 'distribuidorNome', width: 28 },
+      { header: 'Nível', key: 'nivel', width: 12 },
       { header: 'Total Clientes', key: 'totalClientes', width: 14 },
     ];
 
@@ -288,6 +284,7 @@ export class RelatoriosService {
         estado: this.valorPlanilhaTexto(vendedor.estado),
         email: this.valorPlanilhaTexto(vendedor.email),
         distribuidorNome: vendedor.distribuidorNome,
+        nivel: this.formatarPercentual(vendedor.nivel),
         totalClientes: vendedor.totalClientes,
       });
     }
@@ -356,7 +353,11 @@ export class RelatoriosService {
         { text: vendedor.telefone, width: columns[1].width },
         { text: vendedor.email, width: columns[2].width },
         { text: vendedor.distribuidorNome, width: columns[3].width },
-        { text: '-', width: columns[4].width, align: 'center' as const },
+        {
+          text: this.formatarPercentual(vendedor.nivel),
+          width: columns[4].width,
+          align: 'center' as const,
+        },
         {
           text: String(vendedor.totalClientes),
           width: columns[5].width,
@@ -746,35 +747,34 @@ export class RelatoriosService {
   ): Promise<VendedorRelatorioRow[]> {
     const where: Record<string, unknown> = {};
 
-    if (filtros.dataInicio || filtros.dataFim) {
-      where.createdAt = {};
-      if (filtros.dataInicio) {
-        (where.createdAt as Record<string, unknown>).gte = new Date(
-          filtros.dataInicio,
-        );
-      }
-      if (filtros.dataFim) {
-        (where.createdAt as Record<string, unknown>).lte = new Date(
-          filtros.dataFim,
-        );
-      }
-    }
+    this.aplicarFiltroPeriodoCadastro(
+      where,
+      filtros.dataInicio,
+      filtros.dataFim,
+    );
 
     if (filtros.distribuidor) {
+      const distribuidorBusca = filtros.distribuidor.trim();
+      const distribuidorCpf = distribuidorBusca.replace(/\D/g, '');
+      const termosDistribuidor: Array<Record<string, unknown>> = [
+        {
+          nome: {
+            contains: distribuidorBusca,
+            mode: 'insensitive',
+          },
+        },
+      ];
+
+      if (distribuidorCpf) {
+        termosDistribuidor.push({
+          cpf: {
+            contains: distribuidorCpf,
+          },
+        });
+      }
+
       where.distribuidor = {
-        OR: [
-          {
-            nome: {
-              contains: filtros.distribuidor,
-              mode: 'insensitive',
-            },
-          },
-          {
-            cpf: {
-              contains: filtros.distribuidor.replace(/\D/g, ''),
-            },
-          },
-        ],
+        OR: termosDistribuidor,
       };
     }
 
@@ -805,6 +805,7 @@ export class RelatoriosService {
       estado: vendedor.estado,
       email: vendedor.email,
       distribuidorNome: vendedor.distribuidor.nome,
+      nivel: Number(vendedor.comissaoPercent),
       totalClientes: vendedor._count.clientes,
     }));
 
@@ -818,18 +819,107 @@ export class RelatoriosService {
     const itens = [...rows];
 
     switch (ordenarPor) {
+      case 'cliente':
+      case 'totalClientes':
+        return itens.sort((a, b) => b.totalClientes - a.totalClientes);
       case 'codigo':
         return itens.sort((a, b) => a.codigo - b.codigo);
+      case 'nivel':
+        return itens.sort((a, b) => b.nivel - a.nivel);
       case 'createdAt':
         return itens.sort(
           (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
         );
-      case 'totalClientes':
-        return itens.sort((a, b) => b.totalClientes - a.totalClientes);
       case 'nome':
       default:
         return itens.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
     }
+  }
+
+  private aplicarFiltroPeriodoCadastro(
+    where: Record<string, unknown>,
+    dataInicio?: string,
+    dataFim?: string,
+  ): void {
+    if (!dataInicio && !dataFim) {
+      return;
+    }
+
+    where.createdAt = {};
+
+    if (dataInicio) {
+      (where.createdAt as Record<string, unknown>).gte =
+        this.parseDataRelatorio(dataInicio, 'inicio');
+    }
+
+    if (dataFim) {
+      (where.createdAt as Record<string, unknown>).lte =
+        this.parseDataRelatorio(dataFim, 'fim');
+    }
+  }
+
+  private parseDataRelatorio(
+    value: string,
+    boundary: 'inicio' | 'fim',
+  ): Date {
+    const rawValue = value.trim();
+    const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawValue);
+    if (isoDateMatch) {
+      const year = Number(isoDateMatch[1]);
+      const month = Number(isoDateMatch[2]);
+      const day = Number(isoDateMatch[3]);
+
+      return this.buildCalendarDate(year, month, day, boundary);
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(rawValue)) {
+      throw new BadRequestException(
+        'Data de filtro inválida. Use ISO, preferencialmente YYYY-MM-DD',
+      );
+    }
+
+    const parsed = new Date(rawValue);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(
+        'Data de filtro inválida. Use ISO, preferencialmente YYYY-MM-DD',
+      );
+    }
+
+    return parsed;
+  }
+
+  private buildCalendarDate(
+    year: number,
+    month: number,
+    day: number,
+    boundary: 'inicio' | 'fim',
+  ): Date {
+    const date = new Date(
+      year,
+      month - 1,
+      day,
+      boundary === 'inicio' ? 0 : 23,
+      boundary === 'inicio' ? 0 : 59,
+      boundary === 'inicio' ? 0 : 59,
+      boundary === 'inicio' ? 0 : 999,
+    );
+
+    if (
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
+    ) {
+      throw new BadRequestException(
+        'Data de filtro inválida. Use ISO, preferencialmente YYYY-MM-DD',
+      );
+    }
+
+    return date;
+  }
+
+  private formatarPercentual(value: number): string {
+    const percentual = Number.isInteger(value) ? value.toString() : value.toFixed(2);
+    return `${percentual}%`;
   }
 
   private async buscarDistribuidoresRelatorio(
@@ -837,19 +927,11 @@ export class RelatoriosService {
   ): Promise<DistribuidorRelatorioRow[]> {
     const where: Record<string, unknown> = {};
 
-    if (filtros.dataInicio || filtros.dataFim) {
-      where.createdAt = {};
-      if (filtros.dataInicio) {
-        (where.createdAt as Record<string, unknown>).gte = new Date(
-          filtros.dataInicio,
-        );
-      }
-      if (filtros.dataFim) {
-        (where.createdAt as Record<string, unknown>).lte = new Date(
-          filtros.dataFim,
-        );
-      }
-    }
+    this.aplicarFiltroPeriodoCadastro(
+      where,
+      filtros.dataInicio,
+      filtros.dataFim,
+    );
 
     const distribuidores = await this.prisma.distribuidor.findMany({
       where,
@@ -887,6 +969,8 @@ export class RelatoriosService {
     const itens = [...rows];
 
     switch (ordenarPor) {
+      case 'distribuidores':
+        return itens.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
       case 'codigo':
         return itens.sort((a, b) => a.codigo - b.codigo);
       case 'createdAt':
@@ -906,36 +990,34 @@ export class RelatoriosService {
   ): Promise<ClienteRelatorioRow[]> {
     const where: Record<string, unknown> = {};
 
-    if (filtros.dataInicio || filtros.dataFim) {
-      where.createdAt = {};
-      if (filtros.dataInicio) {
-        (where.createdAt as Record<string, unknown>).gte = new Date(
-          filtros.dataInicio,
-        );
-      }
-      if (filtros.dataFim) {
-        (where.createdAt as Record<string, unknown>).lte = new Date(
-          filtros.dataFim,
-        );
-      }
-    }
+    this.aplicarFiltroPeriodoCadastro(
+      where,
+      filtros.dataInicio,
+      filtros.dataFim,
+    );
 
     if (filtros.vendedor) {
       const vendedorBusca = filtros.vendedor.trim();
+      const vendedorCpf = vendedorBusca.replace(/\D/g, '');
+      const termosVendedor: Array<Record<string, unknown>> = [
+        {
+          nome: {
+            contains: vendedorBusca,
+            mode: 'insensitive',
+          },
+        },
+      ];
+
+      if (vendedorCpf) {
+        termosVendedor.push({
+          cpf: {
+            contains: vendedorCpf,
+          },
+        });
+      }
+
       where.vendedor = {
-        OR: [
-          {
-            nome: {
-              contains: vendedorBusca,
-              mode: 'insensitive',
-            },
-          },
-          {
-            cpf: {
-              contains: vendedorBusca.replace(/\D/g, ''),
-            },
-          },
-        ],
+        OR: termosVendedor,
       };
     }
 

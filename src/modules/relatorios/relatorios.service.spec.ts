@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { RelatoriosService } from './relatorios.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -63,6 +64,7 @@ describe('RelatoriosService', () => {
         createdAt: new Date('2026-03-10T10:00:00Z'),
         nome: 'B vendedor',
         cpf: '12345678901',
+        comissaoPercent: 3,
         telefone: '61999999999',
         dataNascimento: null,
         cep: null,
@@ -80,6 +82,7 @@ describe('RelatoriosService', () => {
         createdAt: new Date('2026-03-11T10:00:00Z'),
         nome: 'A vendedor',
         cpf: '98765432100',
+        comissaoPercent: 7,
         telefone: '61888888888',
         dataNascimento: null,
         cep: null,
@@ -101,7 +104,7 @@ describe('RelatoriosService', () => {
         }) => Promise<Array<{ nome: string; totalClientes: number }>>;
       }
     ).buscarVendedoresRelatorio({
-      ordenarPor: 'totalClientes',
+      ordenarPor: 'cliente',
     });
 
     expect(resultado).toHaveLength(2);
@@ -115,7 +118,108 @@ describe('RelatoriosService', () => {
     });
   });
 
-  it('deve ordenar distribuidores por total de vendedores', async () => {
+  it('deve ordenar vendedores por nivel e aplicar filtros do print', async () => {
+    mockPrisma.vendedor.findMany.mockResolvedValue([
+      {
+        codigo: 10,
+        createdAt: new Date('2026-03-12T10:00:00Z'),
+        nome: 'Vendedor Ouro',
+        cpf: '12345678901',
+        comissaoPercent: 8.5,
+        telefone: '61999999999',
+        dataNascimento: null,
+        cep: null,
+        endereco: null,
+        numero: null,
+        cidade: null,
+        bairro: null,
+        estado: null,
+        email: 'ouro@test.com',
+        distribuidor: { nome: 'Dist 1' },
+        _count: { clientes: 2 },
+      },
+      {
+        codigo: 11,
+        createdAt: new Date('2026-03-13T10:00:00Z'),
+        nome: 'Vendedor Prata',
+        cpf: '98765432100',
+        comissaoPercent: 4,
+        telefone: '61888888888',
+        dataNascimento: null,
+        cep: null,
+        endereco: null,
+        numero: null,
+        cidade: null,
+        bairro: null,
+        estado: null,
+        email: 'prata@test.com',
+        distribuidor: { nome: 'Dist 2' },
+        _count: { clientes: 9 },
+      },
+    ]);
+
+    const resultado = await (
+      service as unknown as {
+        buscarVendedoresRelatorio: (filtros: {
+          dataInicio?: string;
+          dataFim?: string;
+          distribuidor?: string;
+          ordenarPor?: string;
+        }) => Promise<Array<{ nome: string; nivel: number }>>;
+      }
+    ).buscarVendedoresRelatorio({
+      dataInicio: '2026-03-01',
+      dataFim: '2026-03-31',
+      distribuidor: '123.456.789-00',
+      ordenarPor: 'nivel',
+    });
+
+    expect(resultado[0]).toMatchObject({
+      nome: 'Vendedor Ouro',
+      nivel: 8.5,
+    });
+    expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: expect.objectContaining({
+            gte: expect.any(Date),
+            lte: expect.any(Date),
+          }),
+          distribuidor: {
+            OR: [
+              {
+                nome: {
+                  contains: '123.456.789-00',
+                  mode: 'insensitive',
+                },
+              },
+              {
+                cpf: {
+                  contains: '12345678900',
+                },
+              },
+            ],
+          },
+        }),
+      }),
+    );
+  });
+
+  it('deve rejeitar data fora do padrao ISO nos filtros de relatorio', async () => {
+    await expect(
+      (
+        service as unknown as {
+          buscarVendedoresRelatorio: (filtros: {
+            dataInicio?: string;
+          }) => Promise<unknown>;
+        }
+      ).buscarVendedoresRelatorio({
+        dataInicio: '01/03/2026',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('deve ordenar distribuidores pelo filtro do print', async () => {
     mockPrisma.distribuidor.findMany.mockResolvedValue([
       {
         codigo: 2,
@@ -158,17 +262,15 @@ describe('RelatoriosService', () => {
         }) => Promise<Array<{ nome: string; totalVendedores: number }>>;
       }
     ).buscarDistribuidoresRelatorio({
-      ordenarPor: 'totalVendedores',
+      ordenarPor: 'distribuidores',
     });
 
     expect(resultado).toHaveLength(2);
     expect(resultado[0]).toMatchObject({
       nome: 'Dist A',
-      totalVendedores: 5,
     });
     expect(resultado[1]).toMatchObject({
       nome: 'Dist B',
-      totalVendedores: 1,
     });
   });
 

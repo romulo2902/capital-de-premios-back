@@ -21,12 +21,23 @@ export class RelatoriosDistribuidoresController {
 
   @Get('xlsx')
   @ApiOperation({ summary: 'Exportar relatório de distribuidores em XLSX' })
-  @ApiQuery({ name: 'dataInicio', required: false })
-  @ApiQuery({ name: 'dataFim', required: false })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description: 'Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description: 'Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-31',
+  })
   @ApiQuery({
     name: 'ordenarPor',
     required: false,
-    enum: ['nome', 'createdAt', 'codigo', 'totalVendedores'],
+    enum: ['distribuidores'],
+    description: 'Ordenação disponível no admin para este relatório.',
   })
   async exportarXlsx(
     @Res() res: Response,
@@ -43,12 +54,23 @@ export class RelatoriosDistribuidoresController {
 
   @Get('pdf')
   @ApiOperation({ summary: 'Exportar relatório de distribuidores em PDF' })
-  @ApiQuery({ name: 'dataInicio', required: false })
-  @ApiQuery({ name: 'dataFim', required: false })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description: 'Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description: 'Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-31',
+  })
   @ApiQuery({
     name: 'ordenarPor',
     required: false,
-    enum: ['nome', 'createdAt', 'codigo', 'totalVendedores'],
+    enum: ['distribuidores'],
+    description: 'Ordenação disponível no admin para este relatório.',
   })
   async exportarPdf(
     @Res() res: Response,
