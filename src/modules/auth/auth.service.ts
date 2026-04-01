@@ -35,9 +35,38 @@ export interface AuthTokens {
   refreshToken?: string;
 }
 
+/**
+ * ┌──────────────────────────────────────────────────────────────────┐
+ * │ REGRAS DE AUTENTICAÇÃO — Capital de Prêmios                    │
+ * ├──────────────────────────────────────────────────────────────────┤
+ * │                                                                │
+ * │  POST /auth/login   →  Painel Admin (email + senha)            │
+ * │                        Perfis: ADMIN, DISTRIBUIDOR, VENDEDOR   │
+ * │                        O frontend controla permissões via      │
+ * │                        campo `perfil` retornado no token.      │
+ * │                                                                │
+ * │  POST /auth/loja    →  Painel Cliente (CPF, sem senha)         │
+ * │                        Perfil: CLIENTE                         │
+ * │                        Auto-cria cliente se não existir.       │
+ * │                                                                │
+ * │  POST /auth/refresh →  Renovação de token (todos os perfis)   │
+ * │                                                                │
+ * │  POST /auth/redefinir-senha-primeiro-acesso                    │
+ * │                     →  Redefinir senha migrada                 │
+ * │                        Perfis: DISTRIBUIDOR, VENDEDOR          │
+ * │                                                                │
+ * └──────────────────────────────────────────────────────────────────┘
+ */
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+
+  /** Perfis que podem acessar o painel administrativo */
+  private static readonly PERFIS_ADMIN: ReadonlySet<string> = new Set([
+    'ADMIN',
+    'DISTRIBUIDOR',
+    'VENDEDOR',
+  ]);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -45,6 +74,17 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
+  /**
+   * Login do painel administrativo — `POST /auth/login`
+   *
+   * Aceita ADMIN, DISTRIBUIDOR e VENDEDOR (email + senha).
+   * O frontend diferencia as permissões pelo campo `perfil` presente
+   * no JWT e no corpo da resposta.
+   *
+   * Retorna dados do perfil específico (distribuidor/vendedor) quando
+   * aplicável, para que o frontend tenha o contexto necessário (ex.: nome,
+   * saldo, distribuidorId, vendedorId).
+   */
   async login(dto: LoginDto): Promise<{ message: string; data: unknown }> {
     const usuario = await this.prisma.usuario.findUnique({
       where: { email: dto.email },
@@ -69,14 +109,21 @@ export class AuthService {
       );
     }
 
-    // Apenas ADMIN pode acessar o painel admin
-    if (usuario.perfil !== 'ADMIN') {
+    // Apenas perfis do painel admin podem logar aqui (ADMIN, DISTRIBUIDOR, VENDEDOR)
+    if (!AuthService.PERFIS_ADMIN.has(usuario.perfil)) {
       throw new UnauthorizedException(
-        'Acesso restrito ao painel administrativo (ADMIN)',
+        'Acesso restrito ao painel administrativo',
       );
     }
 
     const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
+
+    // Monta dados adicionais do perfil para o frontend
+    const perfilData = await this.buscarDadosPerfil(
+      usuario.id,
+      usuario.perfil,
+    );
+
     this.logger.log(`Login admin: ${usuario.email} [${usuario.perfil}]`);
 
     return {
@@ -89,68 +136,23 @@ export class AuthService {
           email: usuario.email,
           perfil: usuario.perfil,
         },
+        ...perfilData,
       },
     };
   }
 
+  /**
+   * Login do painel cliente — `POST /auth/loja`
+   *
+   * Exclusivo para CLIENTE (CPF, sem senha).
+   * Se o cliente não existir, cria um registro temporário que será
+   * completado na primeira compra.
+   */
   async loginLoja(
     dto: LoginLojaDto,
   ): Promise<{ message: string; data: unknown }> {
-    // ── DISTRIBUIDOR ou VENDEDOR: email + senha ───────────────────
-    if (dto.email && dto.senha) {
-      const usuario = await this.prisma.usuario.findUnique({
-        where: { email: dto.email },
-      });
-
-      if (!usuario || !usuario.senhaHash) {
-        throw new UnauthorizedException('Credenciais inválidas');
-      }
-      if (usuario.status === 'INATIVO') {
-        throw new UnauthorizedException('Usuário inativo');
-      }
-      if (usuario.perfil !== 'VENDEDOR' && usuario.perfil !== 'DISTRIBUIDOR') {
-        throw new UnauthorizedException('Credenciais inválidas');
-      }
-
-      const senhaValida = await bcrypt.compare(dto.senha, usuario.senhaHash);
-      if (!senhaValida)
-        throw new UnauthorizedException('Credenciais inválidas');
-
-      if (usuario.deveRedefinirSenha) {
-        throw new ForbiddenException(
-          'Usuário deve redefinir a senha antes de acessar',
-        );
-      }
-
-      const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
-
-      if (usuario.perfil === 'DISTRIBUIDOR') {
-        const distribuidor = await this.prisma.distribuidor.findFirst({
-          where: { usuarioId: usuario.id },
-        });
-        this.logger.log(`Login loja DISTRIBUIDOR: ${usuario.email}`);
-        return {
-          message: 'Login realizado com sucesso',
-          data: { ...tokens, perfil: 'DISTRIBUIDOR', distribuidor },
-        };
-      }
-
-      // VENDEDOR
-      const vendedor = await this.prisma.vendedor.findFirst({
-        where: { usuarioId: usuario.id },
-      });
-      this.logger.log(`Login loja VENDEDOR: ${usuario.email}`);
-      return {
-        message: 'Login realizado com sucesso',
-        data: { ...tokens, perfil: 'VENDEDOR', vendedor },
-      };
-    }
-
-    // ── CLIENTE: CPF apenas (sem senha) ──────────────────────────
     if (!dto.cpf) {
-      throw new UnauthorizedException(
-        'Informe CPF (cliente) ou email+senha (vendedor/distribuidor)',
-      );
+      throw new UnauthorizedException('Informe o CPF para acessar');
     }
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
@@ -178,7 +180,7 @@ export class AuthService {
       this.getRefreshTokenOptions(),
     );
 
-    this.logger.log(`Login loja CLIENTE: CPF ${cpfLimpo}`);
+    this.logger.log(`Login cliente: CPF ${cpfLimpo}`);
     return {
       message: 'Login realizado com sucesso',
       data: { accessToken, refreshToken, perfil: 'CLIENTE', cliente },
@@ -264,6 +266,34 @@ export class AuthService {
       `Senha redefinida no primeiro acesso: ${usuario.email} [${usuario.perfil}]`,
     );
     return { message: 'Senha redefinida com sucesso' };
+  }
+
+  // ─── Helpers privados ───────────────────────────────────────────
+
+  /**
+   * Busca dados do perfil específico (distribuidor ou vendedor) para
+   * enriquecer a resposta de login do admin. Para ADMIN, retorna objeto vazio.
+   */
+  private async buscarDadosPerfil(
+    usuarioId: string,
+    perfil: string,
+  ): Promise<Record<string, unknown>> {
+    if (perfil === 'DISTRIBUIDOR') {
+      const distribuidor = await this.prisma.distribuidor.findFirst({
+        where: { usuarioId },
+      });
+      return { distribuidor };
+    }
+
+    if (perfil === 'VENDEDOR') {
+      const vendedor = await this.prisma.vendedor.findFirst({
+        where: { usuarioId },
+        include: { distribuidor: { select: { id: true, nome: true } } },
+      });
+      return { vendedor };
+    }
+
+    return {};
   }
 
   private gerarTokens(usuario: UsuarioRow): AuthTokens {

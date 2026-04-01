@@ -49,8 +49,11 @@ export function setupOpenApiDocs(
     [
       'Rotas do painel administrativo.',
       '',
-      '- Login admin: `POST /api/auth/login`',
+      '**Usuários**: ADMIN, DISTRIBUIDOR, VENDEDOR',
+      '',
+      '- Login admin: `POST /api/auth/login` (email + senha)',
       '- Refresh token: `POST /api/auth/refresh`',
+      '- Redefinir senha migrada: `POST /api/auth/redefinir-senha-primeiro-acesso`',
       '- Demais endpoints administrativos em `/api/admin/*`',
     ].join('\n'),
   );
@@ -59,11 +62,12 @@ export function setupOpenApiDocs(
     'geral',
     'Capital de Prêmios API - Geral',
     [
-      'Rotas da loja e demais fluxos da API.',
+      'Rotas do painel cliente e demais fluxos da API.',
       '',
-      '- Login loja: `POST /api/auth/loja`',
+      '**Usuários**: CLIENTE',
+      '',
+      '- Login cliente: `POST /api/auth/loja` (CPF, sem senha)',
       '- Refresh token: `POST /api/auth/refresh`',
-      '- Primeiro acesso migrado: `POST /api/auth/redefinir-senha-primeiro-acesso`',
     ].join('\n'),
   );
 
@@ -155,14 +159,17 @@ function getSwaggerAudience(
     return 'shared';
   }
 
-  if (path.endsWith('/auth/login')) {
+  // Login admin e redefinir-senha são do painel admin
+  // (ADMIN, DISTRIBUIDOR, VENDEDOR logam por /auth/login)
+  if (
+    path.endsWith('/auth/login') ||
+    path.endsWith('/auth/redefinir-senha-primeiro-acesso')
+  ) {
     return 'admin';
   }
 
-  if (
-    path.endsWith('/auth/loja') ||
-    path.endsWith('/auth/redefinir-senha-primeiro-acesso')
-  ) {
+  // Login cliente é do painel geral (CLIENTE loga por /auth/loja)
+  if (path.endsWith('/auth/loja')) {
     return 'geral';
   }
 

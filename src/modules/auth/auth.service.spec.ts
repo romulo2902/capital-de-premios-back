@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -19,6 +19,12 @@ describe('AuthService', () => {
     cliente: {
       findUnique: jest.fn(),
       create: jest.fn(),
+    },
+    distribuidor: {
+      findFirst: jest.fn(),
+    },
+    vendedor: {
+      findFirst: jest.fn(),
     },
   };
 
@@ -57,20 +63,68 @@ describe('AuthService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('login()', () => {
-    it('deve retornar tokens ao fazer login com credenciais válidas', async () => {
+  // ─── POST /auth/login — Painel Admin ────────────────────────────
+
+  describe('login() — painel admin', () => {
+    it('deve retornar tokens para ADMIN com credenciais válidas', async () => {
       mockPrisma.usuario.findUnique.mockResolvedValue({
         id: 'cuid-1',
         email: 'admin@test.com',
         senhaHash: 'hashed',
         perfil: 'ADMIN',
         status: 'ATIVO',
+        deveRedefinirSenha: false,
       });
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       const result = await service.login({ email: 'admin@test.com', senha: 'Admin@123' });
       expect(result.data).toHaveProperty('accessToken');
       expect(result.data).toHaveProperty('refreshToken');
+      expect(result.data).toHaveProperty('perfil', 'ADMIN');
+    });
+
+    it('deve retornar tokens para DISTRIBUIDOR com credenciais válidas', async () => {
+      mockPrisma.usuario.findUnique.mockResolvedValue({
+        id: 'cuid-2',
+        email: 'dist@test.com',
+        senhaHash: 'hashed',
+        perfil: 'DISTRIBUIDOR',
+        status: 'ATIVO',
+        deveRedefinirSenha: false,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockPrisma.distribuidor.findFirst.mockResolvedValue({
+        id: 'dist-1',
+        nome: 'Distribuidor Teste',
+        usuarioId: 'cuid-2',
+      });
+
+      const result = await service.login({ email: 'dist@test.com', senha: 'Dist@123' });
+      expect(result.data).toHaveProperty('accessToken');
+      expect(result.data).toHaveProperty('perfil', 'DISTRIBUIDOR');
+      expect(result.data).toHaveProperty('distribuidor');
+    });
+
+    it('deve retornar tokens para VENDEDOR com credenciais válidas', async () => {
+      mockPrisma.usuario.findUnique.mockResolvedValue({
+        id: 'cuid-3',
+        email: 'vend@test.com',
+        senhaHash: 'hashed',
+        perfil: 'VENDEDOR',
+        status: 'ATIVO',
+        deveRedefinirSenha: false,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        nome: 'Vendedor Teste',
+        usuarioId: 'cuid-3',
+      });
+
+      const result = await service.login({ email: 'vend@test.com', senha: 'Vend@123' });
+      expect(result.data).toHaveProperty('accessToken');
+      expect(result.data).toHaveProperty('perfil', 'VENDEDOR');
+      expect(result.data).toHaveProperty('vendedor');
     });
 
     it('deve lançar UnauthorizedException para credenciais inválidas', async () => {
@@ -87,6 +141,7 @@ describe('AuthService', () => {
         senhaHash: 'hashed',
         perfil: 'ADMIN',
         status: 'ATIVO',
+        deveRedefinirSenha: false,
       });
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
       await expect(service.login({ email: 'admin@test.com', senha: 'wrong' })).rejects.toThrow(
@@ -101,23 +156,76 @@ describe('AuthService', () => {
         senhaHash: 'hashed',
         perfil: 'ADMIN',
         status: 'INATIVO',
+        deveRedefinirSenha: false,
       });
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       await expect(service.login({ email: 'admin@test.com', senha: 'Admin@123' })).rejects.toThrow(
         UnauthorizedException,
       );
     });
+
+    it('deve lançar ForbiddenException para deveRedefinirSenha=true', async () => {
+      mockPrisma.usuario.findUnique.mockResolvedValue({
+        id: 'cuid-1',
+        email: 'admin@test.com',
+        senhaHash: 'hashed',
+        perfil: 'ADMIN',
+        status: 'ATIVO',
+        deveRedefinirSenha: true,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      await expect(service.login({ email: 'admin@test.com', senha: 'Admin@123' })).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('deve lançar UnauthorizedException para perfil CLIENTE tentando logar no admin', async () => {
+      mockPrisma.usuario.findUnique.mockResolvedValue({
+        id: 'cuid-4',
+        email: 'cliente@test.com',
+        senhaHash: 'hashed',
+        perfil: 'CLIENTE',
+        status: 'ATIVO',
+        deveRedefinirSenha: false,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      await expect(service.login({ email: 'cliente@test.com', senha: '123' })).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
   });
 
-  describe('loginLoja()', () => {
+  // ─── POST /auth/loja — Painel Cliente ──────────────────────────
+
+  describe('loginLoja() — painel cliente', () => {
     it('deve criar cliente se não existir e retornar accessToken', async () => {
       mockPrisma.cliente.findUnique.mockResolvedValue(null);
       mockPrisma.cliente.create.mockResolvedValue({ id: 'c-1', cpf: '12345678900', nome: '', telefone: '' });
-      mockPrisma.usuario.findUnique.mockResolvedValue(null);
 
       const result = await service.loginLoja({ cpf: '123.456.789-00' });
       expect(result.data).toHaveProperty('accessToken');
+      expect(result.data).toHaveProperty('perfil', 'CLIENTE');
       expect(mockPrisma.cliente.create).toHaveBeenCalled();
+    });
+
+    it('deve retornar token para cliente já existente', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValue({
+        id: 'c-2',
+        cpf: '98765432100',
+        nome: 'Fulano',
+        telefone: '11999999999',
+      });
+
+      const result = await service.loginLoja({ cpf: '987.654.321-00' });
+      expect(result.data).toHaveProperty('accessToken');
+      expect(result.data).toHaveProperty('perfil', 'CLIENTE');
+      expect(mockPrisma.cliente.create).not.toHaveBeenCalled();
+    });
+
+    it('deve lançar UnauthorizedException quando CPF não for informado', async () => {
+      await expect(service.loginLoja({})).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 });

@@ -1,34 +1,39 @@
-import { IsEmail, IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
+import { IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
- * POST /auth/loja — autenticação unificada para a loja (web)
+ * POST /auth/loja — autenticação do painel cliente
  *
- * CLIENTE  → envia { cpf }            (sem senha)
- * VENDEDOR → envia { email, senha }   (com credenciais)
+ * CLIENTE → envia { cpf } (sem senha)
+ *
+ * Nota: Distribuidores e vendedores agora logam pelo painel admin
+ * via `POST /auth/login` (email + senha). Os campos `email` e `senha`
+ * permanecem neste DTO por compatibilidade, mas são ignorados — o
+ * serviço exige apenas o CPF.
  */
 export class LoginLojaDto {
   // ── CLIENTE ─────────────────────────────────────────────
   @ApiPropertyOptional({
     example: '123.456.789-00',
-    description: 'CPF do cliente (somente números ou formatado). Usar quando for CLIENTE.',
+    description: 'CPF do cliente (somente números ou formatado).',
   })
   @IsOptional()
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
   cpf?: string;
 
-  // ── VENDEDOR ────────────────────────────────────────────
+  // ── Campos mantidos por compatibilidade (não utilizados neste endpoint) ──
   @ApiPropertyOptional({
     example: 'vendedor@email.com',
-    description: 'E-mail do vendedor. Usar quando for VENDEDOR.',
+    description: '[DEPRECIADO] E-mail — distribuidores/vendedores devem usar POST /auth/login.',
+    deprecated: true,
   })
   @IsOptional()
-  @IsEmail({}, { message: 'E-mail inválido' })
   email?: string;
 
   @ApiPropertyOptional({
     example: 'Senha@123',
-    description: 'Senha do vendedor. Obrigatório quando email for informado.',
+    description: '[DEPRECIADO] Senha — distribuidores/vendedores devem usar POST /auth/login.',
+    deprecated: true,
   })
   @ValidateIf((o: LoginLojaDto) => !!o.email)
   @IsString()
