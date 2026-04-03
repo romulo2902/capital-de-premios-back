@@ -15,6 +15,7 @@ import {
   TipoCartela,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { S3UploadService } from '../../common/s3/s3-upload.service';
 import { parseBusinessDateTime } from '../../common/utils/business-date-time.util';
 import {
   buildPaginatedResponse,
@@ -42,6 +43,7 @@ import {
 } from './edicoes-range.util';
 import { serializarEdicao as serializarEdicaoUtil } from './edicoes-serialization.util';
 import type {
+  ArquivoImagemUpload,
   DetalheRangeNormalizado,
   EdicaoComRelacoes,
 } from './edicoes.types';
@@ -53,9 +55,10 @@ export class EdicoesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly s3UploadService: S3UploadService,
   ) {}
 
-  async create(dto: CreateEdicaoDto) {
+  async create(dto: CreateEdicaoDto, imagem?: ArquivoImagemUpload) {
     await this.validarNumeroEdicaoUnico(dto.numero);
     this.validarStatusDeCriacao(dto.status);
 
@@ -75,6 +78,11 @@ export class EdicoesService {
     this.validarDatas(dataEncerramento, dataSorteio);
 
     const { rangeInicio, rangeFinal } = this.calcularResumoDosRanges(detalhes);
+    const imagemUrl = await this.resolverImagemUrl(
+      dto.imagemUrl,
+      imagem,
+      `edicoes/${dto.numero}`,
+    );
 
     const item = await this.prisma.$transaction(async (tx) => {
       const created = await tx.edicao.create({
@@ -89,7 +97,7 @@ export class EdicoesService {
           destino,
           raspadinha: dto.raspadinha,
           frase: dto.frase,
-          imagemUrl: dto.imagemUrl,
+          imagemUrl: imagemUrl ?? null,
           status,
           detalhes: {
             create: detalhes.map((detalhe) => ({
@@ -115,7 +123,9 @@ export class EdicoesService {
       throw new NotFoundException('Edição não encontrada após a criação');
     }
 
-    this.logger.log(`Edição ${item.numero} criada com ${detalhes.length} detalhe(s)`);
+    this.logger.log(
+      `Edição ${item.numero} criada com ${detalhes.length} detalhe(s)`,
+    );
     return {
       message: 'Edição criada com sucesso',
       data: this.serializarEdicao(item),
@@ -160,7 +170,7 @@ export class EdicoesService {
     };
   }
 
-  async update(id: string, dto: UpdateEdicaoDto) {
+  async update(id: string, dto: UpdateEdicaoDto, imagem?: ArquivoImagemUpload) {
     const atual = await this.obterEdicaoOuFalhar(id);
     this.validarStatusDeAtualizacao(dto.status, atual.status);
 
@@ -196,6 +206,11 @@ export class EdicoesService {
     const resumoRanges = dto.detalhes
       ? this.calcularResumoDosRanges(detalhesEfetivos)
       : undefined;
+    const imagemUrl = await this.resolverImagemUrl(
+      dto.imagemUrl,
+      imagem,
+      `edicoes/${dto.numero ?? atual.numero}`,
+    );
 
     const item = await this.prisma.$transaction(async (tx) => {
       const data: Prisma.EdicaoUpdateInput = {
@@ -209,7 +224,7 @@ export class EdicoesService {
         ...(dto.destino ? { destino: dto.destino } : {}),
         ...(dto.raspadinha !== undefined ? { raspadinha: dto.raspadinha } : {}),
         ...(dto.frase !== undefined ? { frase: dto.frase } : {}),
-        ...(dto.imagemUrl !== undefined ? { imagemUrl: dto.imagemUrl } : {}),
+        ...(imagemUrl !== undefined ? { imagemUrl } : {}),
         ...(resumoRanges ? resumoRanges : {}),
       };
 
@@ -247,6 +262,18 @@ export class EdicoesService {
       message: 'Edição atualizada com sucesso',
       data: this.serializarEdicao(item),
     };
+  }
+
+  private async resolverImagemUrl(
+    imagemUrl: string | null | undefined,
+    imagem: ArquivoImagemUpload | undefined,
+    folder: string,
+  ): Promise<string | null | undefined> {
+    if (!imagem) {
+      return imagemUrl;
+    }
+
+    return this.s3UploadService.uploadImage(imagem, folder);
   }
 
   async ativar(id: string) {
@@ -459,7 +486,10 @@ export class EdicoesService {
   }
 
   private validarDatas(dataEncerramento: Date, dataSorteio: Date): void {
-    if (Number.isNaN(dataEncerramento.getTime()) || Number.isNaN(dataSorteio.getTime())) {
+    if (
+      Number.isNaN(dataEncerramento.getTime()) ||
+      Number.isNaN(dataSorteio.getTime())
+    ) {
       throw new BadRequestException('As datas informadas são inválidas');
     }
 
@@ -548,7 +578,12 @@ export class EdicoesService {
   private obterDetalhesComFallback(
     edicao: EdicaoComRelacoes,
   ): Array<
-    EdicaoDetalhe | (DetalheRangeNormalizado & { id: string; createdAt: Date; updatedAt: Date })
+    | EdicaoDetalhe
+    | (DetalheRangeNormalizado & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+      })
   > {
     return obterDetalhesComFallbackUtil(edicao);
   }

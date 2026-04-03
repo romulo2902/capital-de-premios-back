@@ -159,6 +159,7 @@ export class VendedoresService {
     delete data.senha;
     delete data.codigo;
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
+    if (dto.link !== undefined) data.qrcode = null;
 
     if (dto.senha) {
       const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });

@@ -7,15 +7,30 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { EdicoesService } from './edicoes.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CreateEdicaoDto } from './dto/create-edicao.dto';
 import { UpdateEdicaoDto } from './dto/update-edicao.dto';
+import {
+  CreateEdicaoUploadDto,
+  UpdateEdicaoUploadDto,
+} from './dto/edicao-upload.dto';
+import type { ArquivoImagemUpload } from './edicoes.types';
 
 @ApiTags('Admin / Edições')
 @ApiBearerAuth()
@@ -26,9 +41,17 @@ export class EdicoesController {
   constructor(private readonly edicoesService: EdicoesService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Criar edição/cartela com detalhes de range (ADMIN)' })
-  create(@Body() dto: CreateEdicaoDto) {
-    return this.edicoesService.create(dto);
+  @ApiOperation({
+    summary: 'Criar edição/cartela com detalhes de range (ADMIN)',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ type: CreateEdicaoUploadDto })
+  @UseInterceptors(FileInterceptor('imagem'))
+  create(
+    @Body() dto: CreateEdicaoDto,
+    @UploadedFile() imagem?: ArquivoImagemUpload,
+  ) {
+    return this.edicoesService.create(dto, imagem);
   }
 
   @Get()
@@ -47,11 +70,15 @@ export class EdicoesController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Atualizar edição/cartela e seus detalhes (ADMIN)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ type: UpdateEdicaoUploadDto })
+  @UseInterceptors(FileInterceptor('imagem'))
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEdicaoDto,
+    @UploadedFile() imagem?: ArquivoImagemUpload,
   ) {
-    return this.edicoesService.update(id, dto);
+    return this.edicoesService.update(id, dto, imagem);
   }
 
   @Patch(':id/ativar')

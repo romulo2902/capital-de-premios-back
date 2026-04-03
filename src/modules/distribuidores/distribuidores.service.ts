@@ -146,6 +146,7 @@ export class DistribuidoresService {
     delete data.senha;
     delete data.codigo;
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
+    if (dto.link !== undefined) data.qrcode = null;
 
     if (dto.senha) {
       const distribuidor = await this.prisma.distribuidor.findUnique({

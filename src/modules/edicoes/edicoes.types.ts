@@ -1,4 +1,5 @@
 import { OrigemParticipacao, Prisma, TipoCartela } from '@prisma/client';
+import type { UploadFile } from '../../common/types/upload-file.type';
 
 export type EdicaoComRelacoes = Prisma.EdicaoGetPayload<{
   include: {
@@ -13,3 +14,5 @@ export interface DetalheRangeNormalizado {
   rangeInicio: bigint;
   rangeFinal: bigint;
 }
+
+export interface ArquivoImagemUpload extends UploadFile {}
