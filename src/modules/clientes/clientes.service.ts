@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
-import { StatusUsuario } from '@prisma/client';
+import { Prisma, StatusUsuario } from '@prisma/client';
 import {
   buildPaginatedResponse,
   normalizePagination,
@@ -19,52 +19,79 @@ export class ClientesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  private normalizeRelationId(
+    value: string | null | undefined,
+  ): string | null | undefined {
+    if (value === undefined || value === null) {
+      return value;
+    }
+
+    const normalizedValue = value.trim();
+    return normalizedValue === '' ? null : normalizedValue;
+  }
+
+  private async validateRelacionamentos(
+    vendedorId: string | null | undefined,
+    distribuidorId: string | null | undefined,
+  ): Promise<void> {
+    if (vendedorId && distribuidorId) {
+      throw new ConflictException(
+        'Informe apenas vendedorId ou distribuidorId',
+      );
+    }
+
+    if (vendedorId) {
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { id: vendedorId },
+      });
+      if (!vendedor) {
+        throw new NotFoundException('Vendedor não encontrado');
+      }
+    }
+
+    if (distribuidorId) {
+      const distribuidor = await this.prisma.distribuidor.findUnique({
+        where: { id: distribuidorId },
+      });
+      if (!distribuidor) {
+        throw new NotFoundException('Distribuidor não encontrado');
+      }
+    }
+  }
+
   async create(dto: CreateClienteDto) {
     const existing = await this.prisma.cliente.findUnique({
       where: { cpf: dto.cpf },
     });
     if (existing) throw new ConflictException('CPF já cadastrado');
 
-    if (dto.vendedorId && dto.distribuidorId) {
-      throw new ConflictException(
-        'Informe apenas vendedorId ou distribuidorId',
-      );
-    }
+    const vendedorId = this.normalizeRelationId(dto.vendedorId);
+    const distribuidorId = this.normalizeRelationId(dto.distribuidorId);
 
-    if (dto.vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: dto.vendedorId },
-      });
-      if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
-    }
-    if (dto.distribuidorId) {
-      const distribuidor = await this.prisma.distribuidor.findUnique({
-        where: { id: dto.distribuidorId },
-      });
-      if (!distribuidor)
-        throw new NotFoundException('Distribuidor não encontrado');
-    }
+    await this.validateRelacionamentos(vendedorId, distribuidorId);
+
+    const data: Prisma.ClienteUncheckedCreateInput = {
+      ...(dto.codigo ? { codigo: dto.codigo } : {}),
+      cpf: dto.cpf,
+      nome: dto.nome,
+      telefone: dto.telefone,
+      dataNascimento: dto.dataNascimento
+        ? new Date(dto.dataNascimento)
+        : undefined,
+      cep: dto.cep,
+      endereco: dto.endereco,
+      numero: dto.numero,
+      bairro: dto.bairro,
+      cidade: dto.cidade,
+      estado: dto.estado,
+      email: dto.email,
+      vendedorId: vendedorId ?? null,
+      distribuidorId: distribuidorId ?? null,
+      status: StatusUsuario.ATIVO,
+    };
 
     const cliente = await this.prisma.cliente.create({
-      data: {
-        ...(dto.codigo ? { codigo: dto.codigo } : {}),
-        cpf: dto.cpf,
-        nome: dto.nome,
-        telefone: dto.telefone,
-        dataNascimento: dto.dataNascimento
-          ? new Date(dto.dataNascimento)
-          : undefined,
-        cep: dto.cep,
-        endereco: dto.endereco,
-        numero: dto.numero,
-        bairro: dto.bairro,
-        cidade: dto.cidade,
-        estado: dto.estado,
-        email: dto.email,
-        vendedorId: dto.vendedorId ?? null,
-        distribuidorId: dto.distribuidorId ?? null,
-        status: StatusUsuario.ATIVO,
-      },
+      data,
       include: {
         vendedor: { select: { id: true, nome: true, codigo: true } },
         distribuidor: { select: { id: true, nome: true, codigo: true } },
@@ -157,29 +184,26 @@ export class ClientesService {
       if (conflict) throw new ConflictException('CPF já cadastrado');
     }
 
-    if (dto.vendedorId && dto.distribuidorId) {
-      throw new ConflictException(
-        'Informe apenas vendedorId ou distribuidorId',
-      );
-    }
+    const vendedorId = this.normalizeRelationId(dto.vendedorId);
+    const distribuidorId = this.normalizeRelationId(dto.distribuidorId);
 
-    if (dto.vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: dto.vendedorId },
-      });
-      if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
-    }
-    if (dto.distribuidorId) {
-      const distribuidor = await this.prisma.distribuidor.findUnique({
-        where: { id: dto.distribuidorId },
-      });
-      if (!distribuidor)
-        throw new NotFoundException('Distribuidor não encontrado');
-    }
+    await this.validateRelacionamentos(vendedorId, distribuidorId);
 
-    const data: Record<string, unknown> = { ...dto };
+    const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };
     delete data.codigo;
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
+    if (vendedorId !== undefined) {
+      data.vendedorId = vendedorId;
+      if (vendedorId) {
+        data.distribuidorId = null;
+      }
+    }
+    if (distribuidorId !== undefined) {
+      data.distribuidorId = distribuidorId;
+      if (distribuidorId) {
+        data.vendedorId = null;
+      }
+    }
 
     return this.prisma.cliente.update({
       where: { id },

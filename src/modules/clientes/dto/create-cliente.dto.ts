@@ -1,18 +1,30 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform, TransformFnParams } from 'class-transformer';
 import {
   IsEmail,
   IsISO8601,
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MinLength,
 } from 'class-validator';
 
+const normalizeNullableUuid = ({ value }: TransformFnParams): unknown => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const normalizedValue = value.trim();
+  return normalizedValue === '' ? null : normalizedValue;
+};
+
 export class CreateClienteDto {
   @ApiPropertyOptional({
     example: 129969,
-    description: 'Código sequencial legível. Gerado automaticamente se omitido. Informar apenas na importação de dados.',
+    description:
+      'Código sequencial legível. Gerado automaticamente se omitido. Informar apenas na importação de dados.',
   })
   @IsOptional()
   @IsInt()
@@ -20,7 +32,8 @@ export class CreateClienteDto {
 
   @ApiProperty({
     example: '200.074.694-20',
-    description: 'CPF do cliente (somente números ou formatado). Identificador único — se já existir, retorna o cadastro existente.',
+    description:
+      'CPF do cliente (somente números ou formatado). Identificador único — se já existir, retorna o cadastro existente.',
   })
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
   cpf: string;
@@ -48,17 +61,26 @@ export class CreateClienteDto {
   @IsISO8601()
   dataNascimento?: string;
 
-  @ApiPropertyOptional({ example: '70673-306', description: 'CEP do endereço.' })
+  @ApiPropertyOptional({
+    example: '70673-306',
+    description: 'CEP do endereço.',
+  })
   @IsOptional()
   @IsString()
   cep?: string;
 
-  @ApiPropertyOptional({ example: 'Quadra SQSW 303 Bloco F', description: 'Logradouro (rua, quadra, avenida, etc.).' })
+  @ApiPropertyOptional({
+    example: 'Quadra SQSW 303 Bloco F',
+    description: 'Logradouro (rua, quadra, avenida, etc.).',
+  })
   @IsOptional()
   @IsString()
   endereco?: string;
 
-  @ApiPropertyOptional({ example: 'Casa 2', description: 'Número ou complemento do endereço.' })
+  @ApiPropertyOptional({
+    example: 'Casa 2',
+    description: 'Número ou complemento do endereço.',
+  })
   @IsOptional()
   @IsString()
   numero?: string;
@@ -73,7 +95,10 @@ export class CreateClienteDto {
   @IsString()
   cidade?: string;
 
-  @ApiPropertyOptional({ example: 'DF', description: 'UF (sigla do estado com 2 letras).' })
+  @ApiPropertyOptional({
+    example: 'DF',
+    description: 'UF (sigla do estado com 2 letras).',
+  })
   @IsOptional()
   @IsString()
   estado?: string;
@@ -88,17 +113,21 @@ export class CreateClienteDto {
 
   @ApiPropertyOptional({
     example: 'uuid-do-vendedor',
-    description: 'ID UUID do vendedor ao qual este cliente está vinculado. Nulo se o cliente comprou de forma autônoma.',
+    description:
+      'ID UUID v4 do vendedor ao qual este cliente está vinculado. No update, envie string vazia para remover o vínculo.',
   })
+  @Transform(normalizeNullableUuid)
   @IsOptional()
-  @IsString()
-  vendedorId?: string;
+  @IsUUID('4', { message: 'vendedorId deve ser um UUID válido' })
+  vendedorId?: string | null;
 
   @ApiPropertyOptional({
     example: 'uuid-do-distribuidor',
-    description: 'ID UUID do distribuidor/revendedor ao qual este cliente está vinculado.',
+    description:
+      'ID UUID v4 do distribuidor/revendedor ao qual este cliente está vinculado. No update, envie string vazia para remover o vínculo.',
   })
+  @Transform(normalizeNullableUuid)
   @IsOptional()
-  @IsString()
-  distribuidorId?: string;
+  @IsUUID('4', { message: 'distribuidorId deve ser um UUID válido' })
+  distribuidorId?: string | null;
 }
