@@ -23,20 +23,25 @@ import { MigracaoModule } from './modules/migracao/migracao.module';
 import { DistribuidorLojaModule } from './modules/distribuidor-loja/distribuidor-loja.module';
 import { VendedorLojaModule } from './modules/vendedor-loja/vendedor-loja.module';
 
+const nodeEnv = process.env.NODE_ENV ?? 'development';
+const envFilePathByEnvironment: Record<string, string[]> = {
+  development: ['.env.development', '.env'],
+  homolog: ['.env.homolog', '.env'],
+  production: ['.env.production', '.env'],
+  test: ['.env.test', '.env'],
+};
+
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      // Em produção e homologação (AWS), as variáveis vêm do ambiente do sistema.
-      // Em desenvolvimento, carrega o .env.development via docker-compose.
-      envFilePath:
-        process.env.NODE_ENV === 'production' ||
-        process.env.NODE_ENV === 'homolog'
-          ? []
-          : ['.env.development', '.env'],
-      ignoreEnvFile:
-        process.env.NODE_ENV === 'production' ||
-        process.env.NODE_ENV === 'homolog',
+      // Em homologação/produção, variáveis exportadas pelo sistema continuam valendo.
+      // Quando existir um arquivo .env do ambiente, ele também será carregado.
+      envFilePath: envFilePathByEnvironment[nodeEnv] ?? [
+        `.env.${nodeEnv}`,
+        '.env',
+      ],
+      ignoreEnvFile: false,
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
