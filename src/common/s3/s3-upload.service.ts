@@ -11,6 +11,7 @@ import {
   PutObjectCommand,
   PutObjectCommandInput,
   S3Client,
+  S3ClientConfig,
 } from '@aws-sdk/client-s3';
 import { randomUUID } from 'crypto';
 import type { UploadFile } from '../types/upload-file.type';
@@ -29,14 +30,7 @@ export class S3UploadService {
   private readonly s3: S3Client;
 
   constructor(private readonly config: ConfigService) {
-    this.s3 = new S3Client({
-      region: this.getRegion(),
-      followRegionRedirects: true,
-      credentials: {
-        accessKeyId: this.config.get<string>('AWS_ACCESS_KEY_ID', ''),
-        secretAccessKey: this.config.get<string>('AWS_SECRET_ACCESS_KEY', ''),
-      },
-    });
+    this.s3 = new S3Client(this.buildS3ClientConfig());
   }
 
   async uploadImage(file: UploadFile, folder: string): Promise<string> {
@@ -189,6 +183,12 @@ export class S3UploadService {
   private handleUploadError(errorMessage: string): never {
     this.logger.error(`Falha ao enviar arquivo para o S3: ${errorMessage}`);
 
+    if (this.isCredentialsError(errorMessage)) {
+      throw new ServiceUnavailableException(
+        'Upload de imagem indisponível: credenciais AWS não configuradas',
+      );
+    }
+
     if (this.isBucketEndpointError(errorMessage)) {
       throw new InternalServerErrorException(
         'Falha ao enviar imagem para o S3. Verifique se AWS_REGION corresponde à região do bucket configurado',
@@ -210,5 +210,44 @@ export class S3UploadService {
     }
 
     return this.config.get<ObjectCannedACL>('AWS_S3_OBJECT_ACL', 'public-read');
+  }
+
+  private buildS3ClientConfig(): S3ClientConfig {
+    const accessKeyId = this.config.get<string>('AWS_ACCESS_KEY_ID', '').trim();
+    const secretAccessKey = this.config
+      .get<string>('AWS_SECRET_ACCESS_KEY', '')
+      .trim();
+
+    const clientConfig: S3ClientConfig = {
+      region: this.getRegion(),
+      followRegionRedirects: true,
+    };
+
+    if (accessKeyId && secretAccessKey) {
+      return {
+        ...clientConfig,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+        },
+      };
+    }
+
+    if (accessKeyId || secretAccessKey) {
+      this.logger.warn(
+        'Credenciais AWS do S3 incompletas. Usando provider chain padrão do SDK',
+      );
+    }
+
+    return clientConfig;
+  }
+
+  private isCredentialsError(errorMessage: string): boolean {
+    return (
+      errorMessage.includes('a non-empty Access Key (AKID) must be provided') ||
+      errorMessage.includes('Resolved credential object is not valid') ||
+      errorMessage.includes('Could not load credentials from any providers') ||
+      errorMessage.includes('Missing credentials in config')
+    );
   }
 }
