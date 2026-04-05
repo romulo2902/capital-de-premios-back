@@ -20,8 +20,8 @@ import { RelatoriosModule } from './modules/relatorios/relatorios.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { QrcodeModule } from './modules/qrcode/qrcode.module';
 import { MigracaoModule } from './modules/migracao/migracao.module';
-import { DistribuidorLojaModule } from './modules/distribuidor-loja/distribuidor-loja.module';
-import { VendedorLojaModule } from './modules/vendedor-loja/vendedor-loja.module';
+import { LojaPublicaModule } from './modules/loja-publica/loja-publica.module';
+import { ConteudoModule } from './modules/conteudo/conteudo.module';
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const envFilePathByEnvironment: Record<string, string[]> = {
@@ -82,8 +82,8 @@ const envFilePathByEnvironment: Record<string, string[]> = {
     DashboardModule,
     QrcodeModule,
     MigracaoModule,
-    DistribuidorLojaModule,
-    VendedorLojaModule,
+    LojaPublicaModule,
+    ConteudoModule,
   ],
 })
 export class AppModule {}

@@ -27,6 +27,11 @@ export class PagamentosService {
   async processarWebhookPix(body: Record<string, unknown>) {
     this.logger.log(`Webhook PIX recebido: ${JSON.stringify(body)}`);
 
+    if (!body) {
+      this.logger.warn('Webhook PIX recebido com body vazio ou nulo.');
+      return { message: 'Webhook recebido (sem dados)' };
+    }
+
     // O Inter envia o webhook com a lista de pix pagos
     const pixArray = body['pix'] as Array<Record<string, unknown>> | undefined;
 

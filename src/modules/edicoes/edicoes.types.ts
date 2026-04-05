@@ -13,6 +13,7 @@ export interface DetalheRangeNormalizado {
   tipoCartela: TipoCartela;
   rangeInicio: bigint;
   rangeFinal: bigint;
+  preco?: string;
 }
 
 export interface ArquivoImagemUpload extends UploadFile {}

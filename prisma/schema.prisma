@@ -222,6 +222,7 @@ model EdicaoDetalhe {
   tipoCartela        TipoCartela
   rangeInicio        BigInt
   rangeFinal         BigInt
+  preco              Decimal?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   edicao             Edicao               @relation(fields: [edicaoId], references: [id], onDelete: Cascade)
@@ -322,4 +323,14 @@ model Saque {
   createdAt      DateTime      @default(now())
   vendedor       Vendedor?     @relation(fields: [vendedorId], references: [id])
   distribuidor   Distribuidor? @relation(fields: [distribuidorId], references: [id])
+}
+
+model PaginaConteudo {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  titulo    String
+  conteudo  String
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

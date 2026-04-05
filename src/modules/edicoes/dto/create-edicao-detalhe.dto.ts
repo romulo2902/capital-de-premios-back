@@ -1,6 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
-import { IsEnum, IsString, Matches } from 'class-validator';
+import { IsEnum, IsOptional, IsString, Matches } from 'class-validator';
 
 const RANGE_MINIMO_REGEX = /^\d{7,}$/;
 
@@ -44,4 +44,15 @@ export class CreateEdicaoDetalheDto {
     message: 'rangeFinal deve possuir ao menos 7 dígitos numéricos',
   })
   rangeFinal: string;
+
+  @ApiPropertyOptional({
+    example: '10.00',
+    description: 'Preço deste tier de chances. Se omitido, usará o valorCartela da edição.',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d+([.,]\d{1,2})?$/, {
+    message: 'preco deve ser um valor monetário válido',
+  })
+  preco?: string;
 }

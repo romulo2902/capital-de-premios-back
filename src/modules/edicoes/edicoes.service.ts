@@ -105,6 +105,7 @@ export class EdicoesService {
               tipoCartela: detalhe.tipoCartela,
               rangeInicio: detalhe.rangeInicio,
               rangeFinal: detalhe.rangeFinal,
+              preco: detalhe.preco ? new Prisma.Decimal(detalhe.preco.replace(',', '.')) : null,
             })),
           },
         },
@@ -236,6 +237,7 @@ export class EdicoesService {
             tipoCartela: detalhe.tipoCartela,
             rangeInicio: detalhe.rangeInicio,
             rangeFinal: detalhe.rangeFinal,
+            preco: detalhe.preco ? new Prisma.Decimal(detalhe.preco.replace(',', '.')) : null,
           })),
         };
       }

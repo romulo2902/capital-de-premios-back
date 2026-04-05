@@ -160,9 +160,19 @@ export class AuthService {
       where: { cpf: cpfLimpo },
     });
     if (!cliente) {
-      // Auto-cria um registro temporário; dados completos são preenchidos na compra
+      if (!dto.nome || !dto.telefone) {
+        throw new UnauthorizedException(
+          'CPF não cadastrado. Por favor, forneça nome e telefone para realizar o primeiro acesso.',
+        );
+      }
+      
       cliente = await this.prisma.cliente.create({
-        data: { cpf: cpfLimpo, nome: '', telefone: '' },
+        data: { 
+          cpf: cpfLimpo, 
+          nome: dto.nome, 
+          telefone: dto.telefone,
+          email: dto.email || null 
+        },
       });
     }
 

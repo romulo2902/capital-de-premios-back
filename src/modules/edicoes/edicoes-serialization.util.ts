@@ -16,6 +16,7 @@ export function serializarEdicao(
     intervalo: (detalhe.rangeFinal - detalhe.rangeInicio + BigInt(1)).toString(),
     quantidadeChances: obterQuantidadeChances(detalhe.tipoCartela),
     legado: edicao.detalhes.length === 0,
+    preco: (detalhe as any).preco ? (detalhe as any).preco.toString() : edicao.valorCartela.toString(),
   }));
 
   return {

@@ -21,21 +21,18 @@ export class LoginLojaDto {
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
   cpf?: string;
 
-  // ── Campos mantidos por compatibilidade (não utilizados neste endpoint) ──
-  @ApiPropertyOptional({
-    example: 'vendedor@email.com',
-    description: '[DEPRECIADO] E-mail — distribuidores/vendedores devem usar POST /auth/login.',
-    deprecated: true,
-  })
+  @ApiPropertyOptional({ example: 'João Silva', description: 'Obrigatório no primeiro acesso se o CPF for novo.' })
   @IsOptional()
-  email?: string;
-
-  @ApiPropertyOptional({
-    example: 'Senha@123',
-    description: '[DEPRECIADO] Senha — distribuidores/vendedores devem usar POST /auth/login.',
-    deprecated: true,
-  })
-  @ValidateIf((o: LoginLojaDto) => !!o.email)
   @IsString()
-  senha?: string;
+  nome?: string;
+
+  @ApiPropertyOptional({ example: '(61) 99999-9999', description: 'Obrigatório no primeiro acesso se o CPF for novo.' })
+  @IsOptional()
+  @IsString()
+  telefone?: string;
+
+  @ApiPropertyOptional({ example: 'joao@email.com', description: 'E-mail do cliente (opcional)' })
+  @IsOptional()
+  @IsString()
+  email?: string;
 }
