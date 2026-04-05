@@ -7,29 +7,32 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { DashboardFilterDto } from './dto/filtro-dashboard.dto';
 
 @ApiBearerAuth()
-@ApiTags('Dashboard')
+@ApiTags('Admin / Dashboard')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('dashboard')
+@Controller('admin/dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   // ─── ADMIN ──────────────────────────────────────────────────
 
-  @Get('admin/visao-geral')
+  @Get('visao-geral')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Visão geral com totais do sistema (ADMIN)' })
+  @ApiOperation({
+    summary: 'Visão geral com totais do sistema (ADMIN)',
+    description: 'Endpoint de uso exclusivo do Admin. Retorna contadores globais sem qualquer limite de rede ou hierarquia.'
+  })
   getAdminVisaoGeral() {
     return this.dashboardService.getAdminVisaoGeral();
   }
 
-  @Get('admin/vendas-por-edicao')
+  @Get('vendas-por-edicao')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Faturamento agregado por edição (ADMIN)' })
   getAdminVendasPorEdicao() {
     return this.dashboardService.getAdminVendasPorEdicao();
   }
 
-  @Get('admin/analise')
+  @Get('analise')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Análise de vendas combinadas e timeline diária (ADMIN)' })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
@@ -43,7 +46,10 @@ export class DashboardController {
 
   @Get('distribuidor/timeline-vendas')
   @Roles('DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Vendas diárias agregadas da equipe do distribuidor' })
+  @ApiOperation({
+    summary: 'Vendas diárias agregadas da equipe (DISTRIBUIDOR)',
+    description: 'Retorna a timeline de vendas (somas diárias) estritamente limitadas às vendas que foram originadas pela rede de vendedores deste distribuidor logado.'
+  })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
@@ -67,7 +73,10 @@ export class DashboardController {
 
   @Get('distribuidor/comissoes')
   @Roles('DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Valor total agregado (comissões/vendas) no período ou edição' })
+  @ApiOperation({
+    summary: 'Comissões líquidas adquiridas pelo Distribuidor',
+    description: 'Soma o dinheiro ganho pelo Distribuidor (Spread). Retorna os lucros com base na sobra percentual da sua rede transacionada na ComissaoDistribuidor, respeitando seu perfil Auth.'
+  })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
@@ -79,7 +88,10 @@ export class DashboardController {
 
   @Get('vendedor/timeline-vendas')
   @Roles('VENDEDOR')
-  @ApiOperation({ summary: 'Vendas diárias acumuladas do próprio vendedor' })
+  @ApiOperation({
+    summary: 'Vendas diárias acumuladas do próprio vendedor (VENDEDOR)',
+    description: 'Apresenta as vendas filtradas cirurgicamente e conectadas ao vendedor logado via JWT. Bloqueia dados de outros vendedores e da hierarquia superior.'
+  })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
