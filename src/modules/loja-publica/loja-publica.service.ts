@@ -4,6 +4,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
 import { ComprarLojaDto } from './dto/comprar-loja.dto';
@@ -26,6 +27,7 @@ export class LojaPublicaService {
     private readonly prisma: PrismaService,
     private readonly vendasService: VendasService,
     private readonly conteudoService: ConteudoService,
+    private readonly config: ConfigService,
   ) {}
 
   async getHome() {
@@ -152,6 +154,61 @@ export class LojaPublicaService {
       }
     });
 
+    const mockPagamentoAprovado = this.isMockPagamentoAprovado();
+
+    if (mockPagamentoAprovado) {
+      const gatewayIdMock = `mockpix${venda.id.replace(/-/g, '').slice(0, 27)}`;
+
+      await this.prisma.venda.update({
+        where: { id: venda.id },
+        data: {
+          gatewayId: gatewayIdMock,
+          gatewayPayload: {
+            mock: true,
+            ambiente: this.config.get<string>('NODE_ENV', 'development'),
+            motivo: 'Aprovação automática habilitada por flag de ambiente',
+          },
+        },
+      });
+
+      await this.vendasService.confirmarPagamento(venda.id, {
+        mock: true,
+        txid: gatewayIdMock,
+        horario: new Date().toISOString(),
+        valor: total.toFixed(2),
+      });
+
+      const vendaAprovada = await this.prisma.venda.findUnique({
+        where: { id: venda.id },
+        select: {
+          id: true,
+          total: true,
+          status: true,
+          gatewayId: true,
+        },
+      });
+
+      this.logger.log(
+        `Pagamento mock autoaprovado para venda ${venda.id}`,
+      );
+
+      return {
+        message: 'Pedido criado e aprovado com sucesso (mock)',
+        data: {
+          vendaId: venda.id,
+          total: vendaAprovada?.total.toString() ?? venda.total.toString(),
+          quantidadeCartelas,
+          status: vendaAprovada?.status ?? StatusVenda.APROVADO,
+          pagamento: {
+            mock: true,
+            gatewayId: vendaAprovada?.gatewayId ?? gatewayIdMock,
+            status: 'APROVADO',
+            pixCopiaECola: 'MOCK_PIX_APROVADO',
+          },
+        },
+      };
+    }
+
     // Create PIX charge
     let dadosPagamento = {};
     const paymentGatewayFactory = (this.vendasService as any).paymentGatewayFactory; // Accessing internal for now, should ideally be public or injected
@@ -193,6 +250,10 @@ export class LojaPublicaService {
         pagamento: dadosPagamento
       }
     };
+  }
+
+  private isMockPagamentoAprovado(): boolean {
+    return this.config.get<string>('MOCK_PIX_AUTO_APPROVE', 'false') === 'true';
   }
 
   async consultarNumeros(cpf: string) {
