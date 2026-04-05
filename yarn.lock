@@ -128,10 +128,10 @@
     "@smithy/util-utf8" "^2.0.0"
     tslib "^2.6.2"
 
-"@aws-sdk/client-s3@^3.997.0":
-  version "3.1022.0"
-  resolved "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1022.0.tgz"
-  integrity sha512-PhdIW0LxjzcMlBiCldRefnyZk84wtYGnEV0sNGOD55DZTvZsibG2XHvQiL1aFliKugfAhuIpNmFkctI2n2I3Dg==
+"@aws-sdk/client-s3@^3.1024.0":
+  version "3.1024.0"
+  resolved "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1024.0.tgz"
+  integrity sha512-8qdO5aLCzaf9l0RdrSBW1iIroRKP2QBqtZ6lkrtHKiaaH0B18xEn+lrEgiN/eCf3uRAYk4cqbnI2XcWzm+7dDQ==
   dependencies:
     "@aws-crypto/sha1-browser" "5.2.0"
     "@aws-crypto/sha256-browser" "5.2.0"
@@ -334,10 +334,10 @@
     "@smithy/types" "^4.13.1"
     tslib "^2.6.2"
 
-"@aws-sdk/lib-storage@^3.997.0":
-  version "3.1022.0"
-  resolved "https://registry.npmjs.org/@aws-sdk/lib-storage/-/lib-storage-3.1022.0.tgz"
-  integrity sha512-RozYW8R0O+Ld+qLYtIgOSt9iD31rC+G1vGmPkZN9aGf9FqGCwt0Fumsaa8CNLbzcI/O6PyL4g4OJgsCpmSTX4Q==
+"@aws-sdk/lib-storage@^3.1024.0":
+  version "3.1024.0"
+  resolved "https://registry.npmjs.org/@aws-sdk/lib-storage/-/lib-storage-3.1024.0.tgz"
+  integrity sha512-5zZSYI8VncyiatvEn+UqElvgX14NKEc+3a+aeMyMzqKuYgDCFd97KGdbqAXEgnfEiTNK0QgSecFC6PUMAsE3xg==
   dependencies:
     "@smithy/middleware-endpoint" "^4.4.28"
     "@smithy/protocol-http" "^5.3.12"
@@ -908,24 +908,24 @@
     "@jridgewell/trace-mapping" "0.3.9"
 
 "@emnapi/core@^1.4.3":
-  version "1.9.1"
-  resolved "https://registry.yarnpkg.com/@emnapi/core/-/core-1.9.1.tgz#2143069c744ca2442074f8078462e51edd63c7bd"
-  integrity sha512-mukuNALVsoix/w1BJwFzwXBN/dHeejQtuVzcDsfOEsdpCumXb/E9j8w11h5S54tT1xhifGfbbSm/ICrObRb3KA==
+  version "1.9.2"
+  resolved "https://registry.yarnpkg.com/@emnapi/core/-/core-1.9.2.tgz#3870265ecffc7352d01ead62d8d83d8358a2d034"
+  integrity sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA==
   dependencies:
-    "@emnapi/wasi-threads" "1.2.0"
+    "@emnapi/wasi-threads" "1.2.1"
     tslib "^2.4.0"
 
 "@emnapi/runtime@^1.4.3":
-  version "1.9.1"
-  resolved "https://registry.yarnpkg.com/@emnapi/runtime/-/runtime-1.9.1.tgz#115ff2a0d589865be6bd8e9d701e499c473f2a8d"
-  integrity sha512-VYi5+ZVLhpgK4hQ0TAjiQiZ6ol0oe4mBx7mVv7IflsiEp0OWoVsp/+f9Vc1hOhE0TtkORVrI1GvzyreqpgWtkA==
+  version "1.9.2"
+  resolved "https://registry.yarnpkg.com/@emnapi/runtime/-/runtime-1.9.2.tgz#8b469a3db160817cadb1de9050211a9d1ea84fa2"
+  integrity sha512-3U4+MIWHImeyu1wnmVygh5WlgfYDtyf0k8AbLhMFxOipihf6nrWC4syIm/SwEeec0mNSafiiNnMJwbza/Is6Lw==
   dependencies:
     tslib "^2.4.0"
 
-"@emnapi/wasi-threads@1.2.0":
-  version "1.2.0"
-  resolved "https://registry.yarnpkg.com/@emnapi/wasi-threads/-/wasi-threads-1.2.0.tgz#a19d9772cc3d195370bf6e2a805eec40aa75e18e"
-  integrity sha512-N10dEJNSsUx41Z6pZsXU8FjPjpBEplgH24sfkmITrBED1/U2Esum9F3lfLrMjKHHjmi557zQn7kR9R+XWXu5Rg==
+"@emnapi/wasi-threads@1.2.1":
+  version "1.2.1"
+  resolved "https://registry.yarnpkg.com/@emnapi/wasi-threads/-/wasi-threads-1.2.1.tgz#28fed21a1ba1ce797c44a070abc94d42f3ae8548"
+  integrity sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w==
   dependencies:
     tslib "^2.4.0"
 
@@ -1595,13 +1595,13 @@
     webpack "5.105.4"
     webpack-node-externals "3.0.0"
 
-"@nestjs/common@^11.1.14":
-  version "11.1.17"
-  resolved "https://registry.npmjs.org/@nestjs/common/-/common-11.1.17.tgz"
-  integrity sha512-hLODw5Abp8OQgA+mUO4tHou4krKgDtUcM9j5Ihxncst9XeyxYBTt2bwZm4e4EQr5E352S4Fyy6V3iFx9ggxKAg==
+"@nestjs/common@^11.1.18":
+  version "11.1.18"
+  resolved "https://registry.npmjs.org/@nestjs/common/-/common-11.1.18.tgz"
+  integrity sha512-0sLq8Z+TIjLnz1Tqp0C/x9BpLbqpt1qEu0VcH4/fkE0y3F5JxhfK1AdKQ/SPbKhKgwqVDoY4gS8GQr2G6ujaWg==
   dependencies:
     uid "2.0.2"
-    file-type "21.3.2"
+    file-type "21.3.4"
     iterare "1.2.1"
     load-esm "1.0.3"
     tslib "2.8.1"
@@ -1615,16 +1615,16 @@
     dotenv-expand "12.0.3"
     lodash "4.17.23"
 
-"@nestjs/core@^11.1.14":
-  version "11.1.17"
-  resolved "https://registry.npmjs.org/@nestjs/core/-/core-11.1.17.tgz"
-  integrity sha512-lD5mAYekTTurF3vDaa8C2OKPnjiz4tsfxIc5XlcSUzOhkwWf6Ay3HKvt6FmvuWQam6uIIHX52Clg+e6tAvf/cg==
+"@nestjs/core@^11.1.18":
+  version "11.1.18"
+  resolved "https://registry.npmjs.org/@nestjs/core/-/core-11.1.18.tgz"
+  integrity sha512-wR3DtGyk/LUAiPtbXDuWJJwVkWElKBY0sqnTzf9d4uM3+X18FRZhK7WFc47czsIGOdWuRsMeLYV+1Z9dO4zDEQ==
   dependencies:
     uid "2.0.2"
     "@nuxt/opencollective" "0.4.1"
     fast-safe-stringify "2.1.1"
     iterare "1.2.1"
-    path-to-regexp "8.3.0"
+    path-to-regexp "8.4.2"
     tslib "2.8.1"
 
 "@nestjs/jwt@^11.0.2":
@@ -1645,15 +1645,15 @@
   resolved "https://registry.npmjs.org/@nestjs/passport/-/passport-11.0.5.tgz"
   integrity sha512-ulQX6mbjlws92PIM15Naes4F4p2JoxGnIJuUsdXQPT+Oo2sqQmENEZXM7eYuimocfHnKlcfZOuyzbA33LwUlOQ==
 
-"@nestjs/platform-express@^11.1.14":
-  version "11.1.17"
-  resolved "https://registry.npmjs.org/@nestjs/platform-express/-/platform-express-11.1.17.tgz"
-  integrity sha512-mAf4eOsSBsTOn/VbrUO1gsjW6dVh91qqXPMXun4dN8SnNjf7PTQagM9o8d6ab8ZBpNe6UdZftdrZoDetU+n4Qg==
+"@nestjs/platform-express@^11.1.18":
+  version "11.1.18"
+  resolved "https://registry.npmjs.org/@nestjs/platform-express/-/platform-express-11.1.18.tgz"
+  integrity sha512-s6GdHMTa3qx0fJewR74Xa30ysPHfBEqxIwZ7BGSTLoAEQ1vTP24urNl+b6+s49NFLEIOyeNho5fN/9/I17QlOw==
   dependencies:
     cors "2.8.6"
     express "5.2.1"
     multer "2.1.1"
-    path-to-regexp "8.3.0"
+    path-to-regexp "8.4.2"
     tslib "2.8.1"
 
 "@nestjs/schematics@^11.0.1", "@nestjs/schematics@^11.0.9":
@@ -1679,10 +1679,10 @@
     path-to-regexp "8.3.0"
     swagger-ui-dist "5.31.0"
 
-"@nestjs/testing@^11.1.14":
-  version "11.1.17"
-  resolved "https://registry.npmjs.org/@nestjs/testing/-/testing-11.1.17.tgz"
-  integrity sha512-lNffw+z+2USewmw4W0tsK+Rq94A2N4PiHbcqoRUu5y8fnqxQeIWGHhjo5BFCqj7eivqJBhT7WdRydxVq4rAHzg==
+"@nestjs/testing@^11.1.18":
+  version "11.1.18"
+  resolved "https://registry.npmjs.org/@nestjs/testing/-/testing-11.1.18.tgz"
+  integrity sha512-frzwNlpBgtAzI3hp/qo57DZoRO4RMTH1wST3QUYEhRTHyfPkLpzkWz3jV/mhApXjD0yT56Ptlzn6zuYPLh87Lw==
   dependencies:
     tslib "2.8.1"
 
@@ -1720,7 +1720,7 @@
   resolved "https://registry.npmjs.org/@pkgr/core/-/core-0.2.9.tgz"
   integrity sha512-QNqXyfVS2wm9hweSYD2O7F0G06uurj9kZ96TRQE5Y9hU7+tgdZwIkbAKc5Ocy1HxEY2kuDQa6cQ1WRs/O5LFKA==
 
-"@prisma/client@^6.19.2":
+"@prisma/client@^6.19.3":
   version "6.19.3"
   resolved "https://registry.npmjs.org/@prisma/client/-/client-6.19.3.tgz"
   integrity sha512-mKq3jQFhjvko5LTJFHGilsuQs+W+T3Gm451NzuTDGQxwCzwXHYnIu2zGkRoW+Exq3Rob7yp2MfzSrdIiZVhrBg==
@@ -2501,10 +2501,10 @@
   resolved "https://registry.npmjs.org/@types/ms/-/ms-2.1.0.tgz"
   integrity sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==
 
-"@types/node@*", "@types/node@^22.0.0":
-  version "22.19.15"
-  resolved "https://registry.npmjs.org/@types/node/-/node-22.19.15.tgz"
-  integrity sha512-F0R/h2+dsy5wJAUe3tAU6oqa2qbWY5TpNfL/RGmo1y38hiyO1w3x2jPtt76wmuaJI4DQnOBu21cNXQ2STIUUWg==
+"@types/node@*", "@types/node@^22.19.17":
+  version "22.19.17"
+  resolved "https://registry.npmjs.org/@types/node/-/node-22.19.17.tgz"
+  integrity sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==
   dependencies:
     undici-types "~6.21.0"
 
@@ -3402,10 +3402,10 @@ buffers@~0.1.1:
   resolved "https://registry.npmjs.org/buffers/-/buffers-0.1.1.tgz"
   integrity sha512-9q/rDEGSb/Qsvv2qvzIzdluL5k7AaJOTrw23z9reQthrbF7is4CtlT0DXyO1oei2DCp4uojjzQ7igaSHp1kAEQ==
 
-bullmq@^5.70.1:
-  version "5.72.0"
-  resolved "https://registry.npmjs.org/bullmq/-/bullmq-5.72.0.tgz"
-  integrity sha512-1Wmfym7bC8BFxDjKcF4iZNZmqXYo0rgPFlxfi8ET3AaP/vOY/MY33iWsWqAKwe8v/QO/8osipjwTAcFB7egINA==
+bullmq@^5.73.0:
+  version "5.73.0"
+  resolved "https://registry.npmjs.org/bullmq/-/bullmq-5.73.0.tgz"
+  integrity sha512-uX8RbQaBbzk0H9JYXKGrNxpDqFcDBQFFKCyKarMjtfYHuct5X48M2LUq3Q9FXt/P2kWzPrqYlNnNqsico7ty5A==
   dependencies:
     cron-parser "4.9.0"
     ioredis "5.10.1"
@@ -4396,10 +4396,10 @@ file-entry-cache@^8.0.0:
   dependencies:
     flat-cache "^4.0.0"
 
-file-type@21.3.2:
-  version "21.3.2"
-  resolved "https://registry.npmjs.org/file-type/-/file-type-21.3.2.tgz"
-  integrity sha512-DLkUvGwep3poOV2wpzbHCOnSKGk1LzyXTv+aHFgN2VFl96wnp8YA9YjO2qPzg5PuL8q/SW9Pdi6WTkYOIh995w==
+file-type@21.3.4:
+  version "21.3.4"
+  resolved "https://registry.npmjs.org/file-type/-/file-type-21.3.4.tgz"
+  integrity sha512-Ievi/yy8DS3ygGvT47PjSfdFoX+2isQueoYP1cntFW1JLYAuS4GD7NUPGg4zv2iZfV52uDyk5w5Z0TdpRS6Q1g==
   dependencies:
     "@tokenizer/inflate" "^0.4.1"
     strtok3 "^10.3.4"
@@ -6152,10 +6152,10 @@ path-to-regexp@8.3.0:
   resolved "https://registry.yarnpkg.com/path-to-regexp/-/path-to-regexp-8.3.0.tgz#aa818a6981f99321003a08987d3cec9c3474cd1f"
   integrity sha512-7jdwVIRtsP8MYpdXSwOS0YdD0Du+qOoF/AEPIt88PcCFrZCzx41oxku1jD88hZBwbNUIEfpqvuhjFaMAqMTWnA==
 
-path-to-regexp@^8.0.0:
-  version "8.4.1"
-  resolved "https://registry.yarnpkg.com/path-to-regexp/-/path-to-regexp-8.4.1.tgz#1dbe9c340367a44340e5bc114f515b56c7210f19"
-  integrity sha512-fvU78fIjZ+SBM9YwCknCvKOUKkLVqtWDVctl0s7xIqfmfb38t2TT4ZU2gHm+Z8xGwgW+QWEU3oQSAzIbo89Ggw==
+path-to-regexp@8.4.2, path-to-regexp@^8.0.0:
+  version "8.4.2"
+  resolved "https://registry.yarnpkg.com/path-to-regexp/-/path-to-regexp-8.4.2.tgz#795c420c4f7ca45c5b887366f622ee0c9852cccd"
+  integrity sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA==
 
 path-type@^4.0.0:
   version "4.0.0"
@@ -6270,7 +6270,7 @@ pretty-format@30.3.0, pretty-format@^30.0.0:
     ansi-styles "^5.2.0"
     react-is "^18.3.1"
 
-prisma@^6.19.2:
+prisma@^6.19.3:
   version "6.19.3"
   resolved "https://registry.npmjs.org/prisma/-/prisma-6.19.3.tgz"
   integrity sha512-++ZJ0ijLrDJF6hNB4t4uxg2br3fC4H9Yc9tcbjr2fcNFP3rh/SBNrAgjhsqBU4Ght8JPrVofG/ZkXfnSfnYsFg==
@@ -6984,10 +6984,10 @@ ts-jest@^29.4.6:
     type-fest "^4.41.0"
     yargs-parser "^21.1.1"
 
-ts-loader@^9.5.4:
-  version "9.5.4"
-  resolved "https://registry.npmjs.org/ts-loader/-/ts-loader-9.5.4.tgz"
-  integrity sha512-nCz0rEwunlTZiy6rXFByQU1kVVpCIgUpc/psFiKVrUwrizdnIbRFu8w7bxhUF0X613DYwT4XzrZHpVyMe758hQ==
+ts-loader@^9.5.7:
+  version "9.5.7"
+  resolved "https://registry.npmjs.org/ts-loader/-/ts-loader-9.5.7.tgz"
+  integrity sha512-/ZNrKgA3K3PtpMYOC71EeMWIloGw3IYEa5/t1cyz2r5/PyUwTXGzYJvcD3kfUvmhlfpz1rhV8B2O6IVTQ0avsg==
   dependencies:
     chalk "^4.1.0"
     enhanced-resolve "^5.0.0"

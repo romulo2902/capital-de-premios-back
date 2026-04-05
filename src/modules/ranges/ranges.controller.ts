@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger'
 import { RangesService } from './ranges.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { FiltroRangesDto } from './dto/filtro-ranges.dto';
 
 @ApiTags('Ranges')
 @ApiBearerAuth()
@@ -15,8 +16,12 @@ export class RangesController {
   @ApiOperation({ summary: 'Listar range' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  findAll(@Query('page') page = 1, @Query('limit') limit = 20) {
-    return this.rangesService.findAll(+page, +limit);
+  @ApiQuery({ name: 'edicaoId', required: false, type: String })
+  @ApiQuery({ name: 'numeroInicio', required: false, type: Number })
+  @ApiQuery({ name: 'numeroFim', required: false, type: Number })
+  @ApiQuery({ name: 'disponivel', required: false, type: Boolean })
+  findAll(@Query() filtros: FiltroRangesDto) {
+    return this.rangesService.findAll(filtros);
   }
 
   @Get(':id')

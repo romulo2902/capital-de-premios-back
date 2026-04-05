@@ -13,8 +13,10 @@ import {
   TipoPagamento,
   OrigemParticipacao,
   Prisma,
+  TipoCartela,
 } from '@prisma/client';
 import { ConteudoService } from '../conteudo/conteudo.service';
+import { obterQuantidadeChances } from '../edicoes/edicoes-range.util';
 
 @Injectable()
 export class LojaPublicaService {
@@ -62,6 +64,7 @@ export class LojaPublicaService {
           imagemUrl: edicaoAtiva.imagemUrl,
           status: edicaoAtiva.status,
           valorCartela: edicaoAtiva.valorCartela.toString(),
+          qtdNumerosCartela: edicaoAtiva.qtdNumerosCartela,
         },
         premios: edicaoAtiva.premios.map(p => ({
           ordem: p.ordem,
@@ -102,6 +105,8 @@ export class LojaPublicaService {
       throw new BadRequestException('Tipo de cartela não está disponível para esta edição');
     }
 
+    const quantidadeCartelas = obterQuantidadeChances(dto.tipoCartela) * dto.quantidade;
+
     // Calcula total
     const precoUnitario = (detalheSelecionado as any).preco ? Number((detalheSelecionado as any).preco) : Number(edicao.valorCartela);
     const total = precoUnitario * dto.quantidade;
@@ -138,7 +143,8 @@ export class LojaPublicaService {
       data: {
         edicaoId: edicao.id,
         clienteId: cliente.id,
-        quantidade: dto.quantidade, // Need a way to represent the quantity of the 'chances'. It reflects 'quantity' of this specific chance tier.
+        quantidade: quantidadeCartelas,
+        tipoCartela: dto.tipoCartela,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao: OrigemParticipacao.DIGITAL,
@@ -183,6 +189,7 @@ export class LojaPublicaService {
       data: {
         vendaId: venda.id,
         total: venda.total.toString(),
+        quantidadeCartelas,
         pagamento: dadosPagamento
       }
     };
@@ -243,6 +250,10 @@ export class LojaPublicaService {
           tipoPagamentoLabel: this.mapearTipoPagamento(v.tipoPagamento),
           quantidade: v.quantidade,
           quantidadeBilhetes: v.bilhetes.length,
+          tipoCartela: v.tipoCartela,
+          quantidadeChances: v.tipoCartela
+            ? obterQuantidadeChances(v.tipoCartela)
+            : v.quantidade,
           total: v.total.toString(),
           totalFormatado: this.formatarMoeda(v.total),
           dataCompra: v.createdAt,
@@ -264,8 +275,10 @@ export class LojaPublicaService {
             frase: v.edicao.frase,
             valorCartela: v.edicao.valorCartela.toString(),
             valorCartelaFormatado: this.formatarMoeda(v.edicao.valorCartela),
+            qtdNumerosCartela: v.edicao.qtdNumerosCartela,
             opcoesCompra: v.edicao.detalhes.map((detalhe) => ({
               tipoCartela: detalhe.tipoCartela,
+              quantidadeCartelas: obterQuantidadeChances(detalhe.tipoCartela),
               preco: (detalhe.preco ?? v.edicao.valorCartela).toString(),
               precoFormatado: this.formatarMoeda(
                 detalhe.preco ?? v.edicao.valorCartela,
@@ -280,7 +293,7 @@ export class LojaPublicaService {
           },
           resumo: {
             titulo: `EDIÇÃO ${String(v.edicao.numero).padStart(2, '0')} | ${this.formatarData(v.edicao.dataSorteio)}`,
-            subtitulo: `${v.bilhetes.length} número(s) gerado(s)`,
+            subtitulo: `${v.bilhetes.length} cartela(s) com ${v.edicao.qtdNumerosCartela} número(s) cada`,
           },
           bilhetes: v.bilhetes.map(b => ({
             numero: b.numero.toString(),

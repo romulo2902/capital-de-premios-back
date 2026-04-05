@@ -21,6 +21,7 @@ export const VENDA_INCLUDE = {
       numero: true,
       dataSorteio: true,
       valorCartela: true,
+      qtdNumerosCartela: true,
       status: true,
       imagemUrl: true,
     },

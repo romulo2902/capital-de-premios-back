@@ -8,10 +8,14 @@ describe('RangesService', () => {
   const mockPrisma = {
     range: {
       findMany: jest.fn(),
+      count: jest.fn(),
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+    },
+    edicao: {
+      findUnique: jest.fn(),
     },
   };
 
@@ -32,6 +36,7 @@ describe('RangesService', () => {
 
   it('findAll should return data array', async () => {
     mockPrisma.range.findMany.mockResolvedValue([]);
+    mockPrisma.range.count.mockResolvedValue(0);
     const result = await service.findAll();
     expect(result.data).toBeDefined();
   });

@@ -5,7 +5,9 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
+import { Queue } from 'bullmq';
 import {
   DestinoEdicao,
   EdicaoDetalhe,
@@ -28,6 +30,11 @@ import {
   EDICAO_INCLUDE,
   STATUSS_EDICAO_EM_OPERACAO,
 } from './edicoes.constants';
+import {
+  EDICAO_RANGES_JOB_NAME,
+  EDICOES_RANGES_QUEUE,
+} from './edicoes-ranges.constants';
+import { obterTotalCombinacoesCartela } from './edicoes-sequencia.util';
 import {
   calcularResumoDosRanges as calcularResumoDosRangesUtil,
   inferirDestinoPorDetalhes as inferirDestinoPorDetalhesUtil,
@@ -56,6 +63,8 @@ export class EdicoesService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly s3UploadService: S3UploadService,
+    @InjectQueue(EDICOES_RANGES_QUEUE)
+    private readonly edicoesRangesQueue: Queue,
   ) {}
 
   async create(dto: CreateEdicaoDto, imagem?: ArquivoImagemUpload) {
@@ -64,6 +73,7 @@ export class EdicoesService {
 
     const detalhes = this.normalizarDetalhes(dto.detalhes);
     this.validarDetalhesInternos(detalhes);
+    this.validarCapacidadeCartelas(detalhes, dto.qtdNumerosCartela);
     await this.validarConflitosGlobaisDeRange(detalhes);
 
     const status = StatusEdicao.RASCUNHO;
@@ -91,6 +101,7 @@ export class EdicoesService {
           dataSorteio,
           dataEncerramento,
           valorCartela: this.normalizarValorCartela(dto.valorCartela),
+          qtdNumerosCartela: dto.qtdNumerosCartela,
           rangeInicio,
           rangeFinal,
           qtdPremios: dto.qtdPremios,
@@ -124,12 +135,14 @@ export class EdicoesService {
       throw new NotFoundException('Edição não encontrada após a criação');
     }
 
+    await this.enfileirarGeracaoRanges(item.id);
+
     this.logger.log(
       `Edição ${item.numero} criada com ${detalhes.length} detalhe(s)`,
     );
     return {
-      message: 'Edição criada com sucesso',
-      data: this.serializarEdicao(item),
+      message: 'Edição criada com sucesso. Geração de ranges enfileirada.',
+      data: await this.serializarEdicaoComEstoque(item),
     };
   }
 
@@ -146,8 +159,12 @@ export class EdicoesService {
       this.prisma.edicao.count(),
     ]);
 
+    const serialized = await Promise.all(
+      data.map((item) => this.serializarEdicaoComEstoque(item)),
+    );
+
     return buildPaginatedResponse(
-      data.map((item) => this.serializarEdicao(item)),
+      serialized,
       total,
       pagination.page,
       pagination.limit,
@@ -167,7 +184,7 @@ export class EdicoesService {
 
     return {
       message: 'Edição encontrada com sucesso',
-      data: this.serializarEdicao(item),
+      data: await this.serializarEdicaoComEstoque(item),
     };
   }
 
@@ -185,6 +202,10 @@ export class EdicoesService {
 
     if (dto.detalhes) {
       this.validarDetalhesInternos(detalhesEfetivos);
+      this.validarCapacidadeCartelas(
+        detalhesEfetivos,
+        dto.qtdNumerosCartela ?? atual.qtdNumerosCartela,
+      );
       await this.validarConflitosGlobaisDeRange(detalhesEfetivos, id);
     }
 
@@ -220,6 +241,9 @@ export class EdicoesService {
         ...(dto.dataEncerramento !== undefined ? { dataEncerramento } : {}),
         ...(dto.valorCartela
           ? { valorCartela: this.normalizarValorCartela(dto.valorCartela) }
+          : {}),
+        ...(dto.qtdNumerosCartela !== undefined
+          ? { qtdNumerosCartela: dto.qtdNumerosCartela }
           : {}),
         ...(dto.qtdPremios !== undefined ? { qtdPremios: dto.qtdPremios } : {}),
         ...(dto.destino ? { destino: dto.destino } : {}),
@@ -259,10 +283,16 @@ export class EdicoesService {
 
     if (!item) throw new NotFoundException('Edição não encontrada');
 
+    if (dto.detalhes) {
+      await this.enfileirarGeracaoRanges(item.id);
+    }
+
     this.logger.log(`Edição ${item.numero} atualizada`);
     return {
-      message: 'Edição atualizada com sucesso',
-      data: this.serializarEdicao(item),
+      message: dto.detalhes
+        ? 'Edição atualizada com sucesso. Geração de ranges enfileirada.'
+        : 'Edição atualizada com sucesso',
+      data: await this.serializarEdicaoComEstoque(item),
     };
   }
 
@@ -298,6 +328,7 @@ export class EdicoesService {
       );
     }
 
+    await this.validarEstoqueProntoParaAtivacao(edicao);
     await this.validarEdicaoEmOperacaoUnica(StatusEdicao.ATIVA, id);
 
     const atualizada = await this.prisma.edicao.update({
@@ -309,7 +340,7 @@ export class EdicoesService {
     this.logger.log(`Edição ${atualizada.numero} ativada`);
     return {
       message: 'Edição ativada com sucesso',
-      data: this.serializarEdicao(atualizada),
+      data: await this.serializarEdicaoComEstoque(atualizada),
     };
   }
 
@@ -342,7 +373,17 @@ export class EdicoesService {
     this.logger.log(`Edição ${atualizada.numero} desativada`);
     return {
       message: 'Edição desativada com sucesso',
-      data: this.serializarEdicao(atualizada),
+      data: await this.serializarEdicaoComEstoque(atualizada),
+    };
+  }
+
+  async gerarRanges(id: string) {
+    const edicao = await this.obterEdicaoOuFalhar(id);
+    await this.enfileirarGeracaoRanges(id, true);
+
+    return {
+      message: 'Geração de ranges enfileirada com sucesso',
+      data: await this.serializarEdicaoComEstoque(edicao),
     };
   }
 
@@ -435,6 +476,24 @@ export class EdicoesService {
     validarDetalhesInternosUtil(detalhes);
   }
 
+  private validarCapacidadeCartelas(
+    detalhes: DetalheRangeNormalizado[],
+    qtdNumerosCartela: number,
+  ): void {
+    const totalCartelas = detalhes.reduce(
+      (total, detalhe) =>
+        total + (detalhe.rangeFinal - detalhe.rangeInicio + BigInt(1)),
+      0n,
+    );
+    const totalCombinacoes = obterTotalCombinacoesCartela(qtdNumerosCartela);
+
+    if (totalCartelas > totalCombinacoes) {
+      throw new BadRequestException(
+        `A edição exige ${totalCartelas.toString()} cartelas, mas só existem ${totalCombinacoes.toString()} combinações únicas possíveis com ${qtdNumerosCartela} números entre 1 e 50`,
+      );
+    }
+  }
+
   private async validarConflitosGlobaisDeRange(
     detalhes: DetalheRangeNormalizado[],
     ignoreEdicaoId?: string,
@@ -509,6 +568,131 @@ export class EdicoesService {
 
   private getBusinessTimeZone(): string {
     return this.config.get<string>('APP_TIMEZONE', 'America/Sao_Paulo');
+  }
+
+  private async serializarEdicaoComEstoque(edicao: EdicaoComRelacoes) {
+    const base = this.serializarEdicao(edicao);
+    const inventario = await this.obterInventarioRanges(edicao);
+
+    return {
+      ...base,
+      inventarioRanges: inventario,
+    };
+  }
+
+  private async validarEstoqueProntoParaAtivacao(
+    edicao: EdicaoComRelacoes,
+  ): Promise<void> {
+    const inventario = await this.obterInventarioRanges(edicao);
+
+    if (!inventario.pronto) {
+      await this.enfileirarGeracaoRanges(edicao.id);
+
+      throw new BadRequestException(
+        `A edição ${edicao.numero} ainda não está pronta para ativação. Estoque atual: ${inventario.existentes}/${inventario.esperados} ranges. Aguarde a geração terminar e tente novamente.`,
+      );
+    }
+  }
+
+  private async obterInventarioRanges(edicao: EdicaoComRelacoes): Promise<{
+    esperados: number;
+    existentes: number;
+    faltantes: number;
+    pronto: boolean;
+    geracaoEmAndamento: boolean;
+  }> {
+    const detalhes = this.normalizarDetalhesExistentes(edicao);
+    const esperadosBigInt = detalhes.reduce(
+      (total, detalhe) =>
+        total + (detalhe.rangeFinal - detalhe.rangeInicio + BigInt(1)),
+      BigInt(0),
+    );
+    const esperados = Number(esperadosBigInt);
+
+    if (detalhes.length === 0) {
+      return {
+        esperados: 0,
+        existentes: 0,
+        faltantes: 0,
+        pronto: true,
+        geracaoEmAndamento: false,
+      };
+    }
+
+    const existentes = await this.prisma.range.count({
+      where: {
+        OR: detalhes.map((detalhe) => ({
+          numero: {
+            gte: detalhe.rangeInicio,
+            lte: detalhe.rangeFinal,
+          },
+        })),
+      },
+    });
+
+    const geracaoEmAndamento = await this.isGeracaoRangesEmAndamento(edicao.id);
+    const faltantes = Math.max(esperados - existentes, 0);
+
+    return {
+      esperados,
+      existentes,
+      faltantes,
+      pronto: faltantes === 0,
+      geracaoEmAndamento,
+    };
+  }
+
+  private async enfileirarGeracaoRanges(
+    edicaoId: string,
+    force = false,
+  ): Promise<void> {
+    const jobId = this.getGeracaoRangesJobId(edicaoId);
+
+    if (!force) {
+      const emAndamento = await this.isGeracaoRangesEmAndamento(edicaoId);
+      if (emAndamento) {
+        return;
+      }
+    }
+
+    try {
+      await this.edicoesRangesQueue.add(
+        EDICAO_RANGES_JOB_NAME,
+        { edicaoId },
+        {
+          jobId,
+          removeOnComplete: 10,
+          removeOnFail: 20,
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+        },
+      );
+      this.logger.log(`Geração de ranges enfileirada para edição ${edicaoId}`);
+    } catch (error) {
+      this.logger.warn(
+        `Não foi possível enfileirar a geração de ranges da edição ${edicaoId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async isGeracaoRangesEmAndamento(edicaoId: string): Promise<boolean> {
+    const job = await this.edicoesRangesQueue.getJob(
+      this.getGeracaoRangesJobId(edicaoId),
+    );
+
+    if (!job) {
+      return false;
+    }
+
+    const state = await job.getState();
+    return ['waiting', 'active', 'delayed', 'prioritized'].includes(state);
+  }
+
+  private getGeracaoRangesJobId(edicaoId: string): string {
+    return `edicao:${edicaoId}:ranges`;
   }
 
   private calcularResumoDosRanges(detalhes: DetalheRangeNormalizado[]): {

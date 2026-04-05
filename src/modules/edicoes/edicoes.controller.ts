@@ -92,4 +92,10 @@ export class EdicoesController {
   desativar(@Param('id', ParseUUIDPipe) id: string) {
     return this.edicoesService.desativar(id);
   }
+
+  @Patch(':id/gerar-ranges')
+  @ApiOperation({ summary: 'Enfileirar geração de ranges da edição (ADMIN)' })
+  gerarRanges(@Param('id', ParseUUIDPipe) id: string) {
+    return this.edicoesService.gerarRanges(id);
+  }
 }

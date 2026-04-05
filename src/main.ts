@@ -2,12 +2,16 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { NestFactory } from '@nestjs/core';
+import { randomUUID } from 'node:crypto';
+import type { NextFunction, Request, Response } from 'express';
 import compression from 'compression';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { setupOpenApiDocs } from './common/docs/openapi-docs.util';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { RequestContextInterceptor } from './common/interceptors/request-context.interceptor';
+import { runWithRequestContext } from './common/request-context/request-context.util';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -39,6 +43,21 @@ async function bootstrap(): Promise<void> {
     }),
   );
   app.use(compression());
+  app.use((request: Request, _response: Response, next: NextFunction) => {
+    runWithRequestContext(
+      {
+        requestId: randomUUID(),
+        method: request.method,
+        path: request.originalUrl ?? request.url,
+        ip: request.ip,
+        userAgent:
+          typeof request.headers['user-agent'] === 'string'
+            ? request.headers['user-agent']
+            : undefined,
+      },
+      next,
+    );
+  });
 
   app.enableCors({
     origin: [frontendLojaUrl, frontendAdminUrl],
@@ -56,6 +75,7 @@ async function bootstrap(): Promise<void> {
   );
 
   app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new RequestContextInterceptor());
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.setGlobalPrefix('api');
 

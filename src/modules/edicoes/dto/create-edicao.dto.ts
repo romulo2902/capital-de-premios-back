@@ -125,6 +125,16 @@ export class CreateEdicaoDto {
   @Min(1)
   qtdPremios: number;
 
+  @ApiProperty({
+    example: 15,
+    description:
+      'Quantidade de números exibidos em cada cartela da edição. Os números serão gerados no universo de 1 a 50.',
+  })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  qtdNumerosCartela: number;
+
   @ApiPropertyOptional({
     enum: DestinoEdicao,
     example: DestinoEdicao.AMBOS,

@@ -20,6 +20,7 @@ import {
   VENDA_INCLUDE_DETALHES,
   PIX_EXPIRACAO_SEGUNDOS,
 } from './vendas.constants';
+import { obterQuantidadeChances } from '../edicoes/edicoes-range.util';
 
 @Injectable()
 export class VendasService {

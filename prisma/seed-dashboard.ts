@@ -83,6 +83,7 @@ async function main() {
         dataSorteio: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7 * i),
         dataEncerramento: new Date(Date.now() + 1000 * 60 * 60 * 24 * 6 * i),
         valorCartela: 10,
+        qtdNumerosCartela: 15,
         rangeInicio: 1,
         rangeFinal: 100000,
         qtdPremios: 5,

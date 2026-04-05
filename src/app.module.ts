@@ -22,6 +22,7 @@ import { QrcodeModule } from './modules/qrcode/qrcode.module';
 import { MigracaoModule } from './modules/migracao/migracao.module';
 import { LojaPublicaModule } from './modules/loja-publica/loja-publica.module';
 import { ConteudoModule } from './modules/conteudo/conteudo.module';
+import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const envFilePathByEnvironment: Record<string, string[]> = {
@@ -84,6 +85,7 @@ const envFilePathByEnvironment: Record<string, string[]> = {
     MigracaoModule,
     LojaPublicaModule,
     ConteudoModule,
+    AuditoriaModule,
   ],
 })
 export class AppModule {}

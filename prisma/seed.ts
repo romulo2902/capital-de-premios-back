@@ -9,6 +9,7 @@ import {
   TipoCartela,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { gerarSequenciaLoterica } from '../src/modules/edicoes/edicoes-sequencia.util';
 
 const prisma = new PrismaClient();
 
@@ -152,6 +153,7 @@ async function main(): Promise<void> {
       dataSorteio: new Date('2025-03-01T20:00:00.000Z'),
       dataEncerramento: new Date('2025-02-28T23:59:59.000Z'),
       valorCartela: 10.00,
+      qtdNumerosCartela: 15,
       rangeInicio: BigInt(1),
       rangeFinal: BigInt(100000),
       qtdPremios: 3,
@@ -200,7 +202,7 @@ async function main(): Promise<void> {
       const ranges = [];
       for (let i = 0; i < BATCH_SIZE; i++) {
         const numero = startNum + batch * BATCH_SIZE + i;
-        const sequenciaBolas = gerarSequenciaBolas();
+        const sequenciaBolas = gerarSequenciaLoterica(BigInt(numero - 1), 15);
         ranges.push({ numero: BigInt(numero), sequenciaBolas, disponivel: true });
       }
       await prisma.range.createMany({ data: ranges, skipDuplicates: true });
@@ -216,17 +218,6 @@ async function main(): Promise<void> {
   console.log('  Distribuidor: distribuidor@capitalpremios.com / Dist@123');
   console.log('  Vendedor 1:   vendedor1@capitalpremios.com / Vend@123');
   console.log('  Vendedor 2:   vendedor2@capitalpremios.com / Vend@123');
-}
-
-function gerarSequenciaBolas(): number[] {
-  const bolas: number[] = [];
-  let num = Math.floor(Math.random() * 10000);
-  while (num > 0) {
-    bolas.unshift(num % 10);
-    num = Math.floor(num / 10);
-  }
-  while (bolas.length < 2) bolas.unshift(0);
-  return bolas;
 }
 
 main()
