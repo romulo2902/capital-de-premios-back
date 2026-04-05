@@ -1,12 +1,25 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
 import { ComprarLojaDto } from './dto/comprar-loja.dto';
-import { StatusEdicao, StatusVenda, TipoPagamento, OrigemParticipacao, Prisma } from '@prisma/client';
+import {
+  StatusEdicao,
+  StatusVenda,
+  TipoPagamento,
+  OrigemParticipacao,
+  Prisma,
+} from '@prisma/client';
 import { ConteudoService } from '../conteudo/conteudo.service';
 
 @Injectable()
 export class LojaPublicaService {
+  private readonly logger = new Logger(LojaPublicaService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly vendasService: VendasService,
@@ -178,53 +191,101 @@ export class LojaPublicaService {
   async consultarNumeros(cpf: string) {
     const cpfLimpo = cpf.replace(/\D/g, '');
     const cliente = await this.prisma.cliente.findUnique({ where: { cpf: cpfLimpo } });
-    
+
     if (!cliente) throw new NotFoundException('Nenhum cadastro encontrado para este CPF');
 
     const vendas = await this.prisma.venda.findMany({
-      where: { 
+      where: {
         clienteId: cliente.id,
-        status: StatusVenda.APROVADO 
+        status: StatusVenda.APROVADO
       },
       include: {
         edicao: {
-          include: { 
-            premios: { orderBy: { ordem: 'asc' } }
+          include: {
+            premios: { orderBy: { ordem: 'asc' } },
+            detalhes: {
+              where: { origemParticipacao: OrigemParticipacao.DIGITAL },
+              orderBy: { tipoCartela: 'asc' },
+            },
           }
         },
-        bilhetes: true
+        bilhetes: {
+          orderBy: { numero: 'asc' },
+        },
       },
       orderBy: { createdAt: 'desc' }
     });
 
-    const mascararCPF = (c: string) => c.substring(0, 3) + '.***.***-' + c.substring(9, 11);
-    const mascararEmail = (e: string | null) => e ? e.substring(0, 3) + '***@' + e.split('@')[1] : null;
+    this.logger.log(
+      `Consulta pública de bilhetes para CPF ${cpfLimpo} retornou ${vendas.length} compra(s) aprovada(s)`,
+    );
+
+    const cpfMascarado = this.mascararCPF(cliente.cpf);
+    const emailMascarado = this.mascararEmail(cliente.email);
 
     return {
       message: 'Bilhetes encontrados',
       data: {
         cliente: {
           nome: cliente.nome,
-          cpfMascarado: mascararCPF(cliente.cpf),
-          emailMascarado: mascararEmail(cliente.email),
-          telefone: cliente.telefone, // Perhaps mask this too, but we return it fully for now
+          cpf: cpfMascarado,
+          cpfMascarado,
+          email: emailMascarado,
+          emailMascarado,
+          telefone: cliente.telefone,
         },
         compras: vendas.map(v => ({
           vendaId: v.id,
+          numeroPedido: v.id,
+          status: v.status,
+          statusLabel: this.mapearStatusVenda(v.status),
+          tipoPagamento: v.tipoPagamento,
+          tipoPagamentoLabel: this.mapearTipoPagamento(v.tipoPagamento),
+          quantidade: v.quantidade,
+          quantidadeBilhetes: v.bilhetes.length,
           total: v.total.toString(),
+          totalFormatado: this.formatarMoeda(v.total),
           dataCompra: v.createdAt,
+          dataCompraFormatada: this.formatarDataHora(v.createdAt),
+          titular: {
+            nome: cliente.nome,
+            cpf: cpfMascarado,
+            email: emailMascarado,
+            telefone: cliente.telefone,
+          },
           edicao: {
+            id: v.edicao.id,
             numero: v.edicao.numero,
             dataSorteio: v.edicao.dataSorteio,
+            dataSorteioFormatada: this.formatarData(v.edicao.dataSorteio),
+            dataEncerramento: v.edicao.dataEncerramento,
+            dataEncerramentoFormatada: this.formatarDataHora(v.edicao.dataEncerramento),
+            imagemUrl: v.edicao.imagemUrl,
+            frase: v.edicao.frase,
+            valorCartela: v.edicao.valorCartela.toString(),
+            valorCartelaFormatado: this.formatarMoeda(v.edicao.valorCartela),
+            opcoesCompra: v.edicao.detalhes.map((detalhe) => ({
+              tipoCartela: detalhe.tipoCartela,
+              preco: (detalhe.preco ?? v.edicao.valorCartela).toString(),
+              precoFormatado: this.formatarMoeda(
+                detalhe.preco ?? v.edicao.valorCartela,
+              ),
+            })),
             premios: v.edicao.premios.map(p => ({
               ordem: p.ordem,
               descricao: p.descricao,
+              valor: p.valor.toString(),
+              valorFormatado: this.formatarMoeda(p.valor),
             }))
+          },
+          resumo: {
+            titulo: `EDIÇÃO ${String(v.edicao.numero).padStart(2, '0')} | ${this.formatarData(v.edicao.dataSorteio)}`,
+            subtitulo: `${v.bilhetes.length} número(s) gerado(s)`,
           },
           bilhetes: v.bilhetes.map(b => ({
             numero: b.numero.toString(),
-            sequenciaBolas: b.sequenciaBolas
-          }))
+            sequenciaBolas: b.sequenciaBolas,
+          })),
         }))
       }
     };
@@ -251,5 +312,66 @@ export class LojaPublicaService {
 
   async getPagina(slug: string) {
     return this.conteudoService.findBySlug(slug);
+  }
+
+  private mapearStatusVenda(status: StatusVenda): string {
+    const labels: Record<StatusVenda, string> = {
+      [StatusVenda.PENDENTE]: 'Pendente',
+      [StatusVenda.APROVADO]: 'Pago',
+      [StatusVenda.RECUSADO]: 'Recusado',
+      [StatusVenda.CANCELADO]: 'Cancelado',
+    };
+
+    return labels[status];
+  }
+
+  private mapearTipoPagamento(tipoPagamento: TipoPagamento): string {
+    const labels: Record<TipoPagamento, string> = {
+      [TipoPagamento.PIX]: 'PIX',
+      [TipoPagamento.CARTAO]: 'Cartão',
+    };
+
+    return labels[tipoPagamento];
+  }
+
+  private mascararCPF(cpf: string): string {
+    return `${cpf.substring(0, 3)}.***.***-${cpf.substring(9, 11)}`;
+  }
+
+  private mascararEmail(email: string | null): string | null {
+    if (!email) {
+      return null;
+    }
+
+    const [usuario, dominio] = email.split('@');
+    const prefixo = usuario.substring(0, 3);
+    return `${prefixo}***@${dominio}`;
+  }
+
+  private formatarMoeda(valor: Prisma.Decimal | number): string {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    }).format(Number(valor));
+  }
+
+  private formatarData(data: Date): string {
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(data);
+  }
+
+  private formatarDataHora(data: Date): string {
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(data);
   }
 }
