@@ -18,6 +18,7 @@ interface GerarRangesEdicaoJobData {
 }
 
 const RANGE_BATCH_SIZE = 5000n;
+const POSTGRES_SAFE_PARAMETER_LIMIT = 60000;
 
 @Processor(EDICOES_RANGES_QUEUE)
 export class EdicoesRangesProcessor extends WorkerHost {
@@ -65,9 +66,13 @@ export class EdicoesRangesProcessor extends WorkerHost {
     const contextoSequencia = criarContextoSequenciaLotericaDeterministico(
       `${edicao.id}:${edicao.numero}:${edicao.qtdNumerosCartela}`,
     );
+    const tamanhoLote = calcularTamanhoLoteSeguro(edicao.qtdNumerosCartela);
 
     this.logger.log(
       `Geração auditável da edição ${edicao.numero}: sorteioId=${contextoSequencia.sorteioId} timestamp=${contextoSequencia.timestamp}`,
+    );
+    this.logger.log(
+      `Tamanho de lote calculado para edição ${edicao.numero}: ${tamanhoLote.toString()}`,
     );
 
     for (const detalhe of edicao.detalhes) {
@@ -80,8 +85,8 @@ export class EdicoesRangesProcessor extends WorkerHost {
 
       while (inicioLote <= detalhe.rangeFinal) {
         const fimLote =
-          inicioLote + RANGE_BATCH_SIZE - BigInt(1) <= detalhe.rangeFinal
-            ? inicioLote + RANGE_BATCH_SIZE - BigInt(1)
+          inicioLote + tamanhoLote - BigInt(1) <= detalhe.rangeFinal
+            ? inicioLote + tamanhoLote - BigInt(1)
             : detalhe.rangeFinal;
 
         const valores: Prisma.Sql[] = [];
@@ -117,4 +122,17 @@ export class EdicoesRangesProcessor extends WorkerHost {
 
     this.logger.log(`Geração de ranges concluída para edição ${edicao.numero}`);
   }
+}
+
+function calcularTamanhoLoteSeguro(qtdNumerosCartela: number): bigint {
+  const parametrosPorLinha = qtdNumerosCartela + 1;
+  const tamanhoLote = Math.floor(
+    POSTGRES_SAFE_PARAMETER_LIMIT / parametrosPorLinha,
+  );
+
+  if (tamanhoLote < 1) {
+    return 1n;
+  }
+
+  return BigInt(Math.min(Number(RANGE_BATCH_SIZE), tamanhoLote));
 }
