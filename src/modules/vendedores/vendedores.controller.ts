@@ -18,6 +18,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { VendedoresService } from './vendedores.service';
 import { CreateVendedorDto } from './dto/create-vendedor.dto';
 import { UpdateVendedorDto } from './dto/update-vendedor.dto';
+import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
 
 @ApiTags('Admin / Vendedores')
 @ApiBearerAuth()
@@ -47,6 +48,25 @@ export class VendedoresController {
     @Query('distribuidorId') distribuidorId?: string,
   ) {
     return this.vendedoresService.findAll(+page, +limit, search, distribuidorId);
+  }
+
+  @Get('performance')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Performance de vendas dos vendedores — Top 10 + listagem (ADMIN)',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'edicaoId', required: false, type: String })
+  @ApiQuery({ name: 'dataInicio', required: false, type: String })
+  @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  performanceVendas(
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+    @Query() filtros: FiltroPerformanceDto,
+  ) {
+    return this.vendedoresService.performanceVendas(+page, +limit, filtros);
   }
 
   @Get(':id')

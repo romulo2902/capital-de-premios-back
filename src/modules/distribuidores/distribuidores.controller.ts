@@ -18,6 +18,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { DistribuidoresService } from './distribuidores.service';
 import { CreateDistribuidorDto } from './dto/create-distribuidor.dto';
 import { UpdateDistribuidorDto } from './dto/update-distribuidor.dto';
+import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
 
 @ApiTags('Admin / Distribuidores')
 @ApiBearerAuth()
@@ -45,6 +46,26 @@ export class DistribuidoresController {
     @Query('search') search?: string,
   ) {
     return this.distribuidoresService.findAll(+page, +limit, search);
+  }
+
+  @Get('performance')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Performance de vendas dos distribuidores — Top 10 + listagem (ADMIN)',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'edicaoId', required: false, type: String })
+  @ApiQuery({ name: 'dataInicio', required: false, type: String })
+  @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  performanceVendas(
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+    @Query() filtros: FiltroPerformanceDto,
+  ) {
+    return this.distribuidoresService.performanceVendas(+page, +limit, filtros);
   }
 
   @Get(':id')

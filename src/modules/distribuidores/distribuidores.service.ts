@@ -4,11 +4,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Perfil, Prisma, StatusUsuario, StatusVenda } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDistribuidorDto } from './dto/create-distribuidor.dto';
 import { UpdateDistribuidorDto } from './dto/update-distribuidor.dto';
-import { Perfil, StatusUsuario } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
 import {
   buildPaginatedResponse,
   normalizePagination,
@@ -170,5 +171,163 @@ export class DistribuidoresService {
       where: { id },
       data: { status: StatusUsuario.INATIVO },
     });
+  }
+
+  // ─── PERFORMANCE DE VENDAS ────────────────────────────
+
+  async performanceVendas(
+    page = 1,
+    limit = 20,
+    filtros?: FiltroPerformanceDto,
+  ) {
+    this.logger.log('Consultando performance de vendas dos distribuidores');
+
+    const vendaWhere = this.buildVendaWhere(filtros);
+    const comissaoWhere = this.buildComissaoWhere(filtros);
+    const searchWhere: Prisma.DistribuidorWhereInput = filtros?.search
+      ? {
+          OR: [
+            { nome: { contains: filtros.search, mode: 'insensitive' } },
+            { cpf: { contains: filtros.search } },
+            { email: { contains: filtros.search, mode: 'insensitive' } },
+          ],
+        }
+      : {};
+
+    const pagination = normalizePagination(page, limit);
+
+    const distribuidores = await this.prisma.distribuidor.findMany({
+      where: searchWhere,
+      select: {
+        id: true,
+        codigo: true,
+        nome: true,
+        tipoChavePix: true,
+        chavePix: true,
+        vendedores: {
+          select: {
+            vendas: {
+              where: { ...vendaWhere, status: StatusVenda.APROVADO },
+              select: {
+                quantidade: true,
+                total: true,
+              },
+            },
+            comissoes: {
+              where: comissaoWhere,
+              select: {
+                valor: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { nome: 'asc' },
+    });
+
+    // Agregar dados (somar vendas de todos os vendedores do distribuidor)
+    const performance = distribuidores.map((d) => {
+      let qtdCartelas = 0;
+      let totalVendas = 0;
+      let comissao = 0;
+
+      for (const vendedor of d.vendedores) {
+        for (const venda of vendedor.vendas) {
+          qtdCartelas += venda.quantidade;
+          totalVendas += Number(venda.total);
+        }
+        for (const c of vendedor.comissoes) {
+          comissao += Number(c.valor);
+        }
+      }
+
+      return {
+        id: d.id,
+        codigo: d.codigo,
+        nome: d.nome,
+        tipoChavePix: d.tipoChavePix,
+        chavePix: d.chavePix,
+        qtdCartelas,
+        totalVendas,
+        comissao,
+      };
+    });
+
+    // Ordenar por totalVendas desc
+    performance.sort((a, b) => b.totalVendas - a.totalVendas);
+
+    // Top 10 (para gráfico)
+    const top10 = performance.slice(0, 10).map((item) => ({
+      id: item.id,
+      nome: item.nome,
+      totalVendas: item.totalVendas,
+    }));
+
+    // Paginar
+    const total = performance.length;
+    const paginatedData = performance.slice(
+      pagination.skip,
+      pagination.skip + pagination.limit,
+    );
+
+    return {
+      message:
+        paginatedData.length > 0
+          ? 'Performance de distribuidores consultada com sucesso'
+          : 'Nenhum distribuidor encontrado',
+      top10,
+      data: paginatedData,
+      meta: {
+        total,
+        page: pagination.page,
+        limit: pagination.limit,
+        lastPage: total > 0 ? Math.ceil(total / pagination.limit) : 0,
+      },
+    };
+  }
+
+  // ─── HELPERS PRIVADOS ─────────────────────────────────
+
+  private buildVendaWhere(
+    filtros?: FiltroPerformanceDto,
+  ): Prisma.VendaWhereInput {
+    const where: Prisma.VendaWhereInput = {};
+    if (!filtros) return where;
+
+    if (filtros.edicaoId) where.edicaoId = filtros.edicaoId;
+
+    if (filtros.dataInicio || filtros.dataFim) {
+      where.createdAt = {};
+      if (filtros.dataInicio) {
+        where.createdAt.gte = new Date(filtros.dataInicio);
+      }
+      if (filtros.dataFim) {
+        const dataFim = new Date(filtros.dataFim);
+        dataFim.setHours(23, 59, 59, 999);
+        where.createdAt.lte = dataFim;
+      }
+    }
+
+    return where;
+  }
+
+  private buildComissaoWhere(
+    filtros?: FiltroPerformanceDto,
+  ): Prisma.ComissaoWhereInput {
+    if (!filtros?.dataInicio && !filtros?.dataFim) return {};
+
+    const where: Prisma.ComissaoWhereInput = {};
+    where.createdAt = {};
+
+    if (filtros.dataInicio) {
+      where.createdAt.gte = new Date(filtros.dataInicio);
+    }
+    if (filtros.dataFim) {
+      const dataFim = new Date(filtros.dataFim);
+      dataFim.setHours(23, 59, 59, 999);
+      where.createdAt.lte = dataFim;
+    }
+
+    return where;
   }
 }
