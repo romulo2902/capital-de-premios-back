@@ -113,6 +113,14 @@ export class CreateDistribuidorDto {
   link?: string;
 
   @ApiPropertyOptional({
+    example: 20,
+    description: 'Porcentagem de comissão deste Distribuidor configurada pelo Admin (0 a 100).',
+  })
+  @IsOptional()
+  @IsInt()
+  comissaoPercent?: number;
+
+  @ApiPropertyOptional({
     example: 'Senha@123',
     description: 'Senha de acesso ao painel admin. Se omitida, usa "Dist@123" como padrão.',
     minLength: 6,

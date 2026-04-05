@@ -281,32 +281,66 @@ export class VendasService {
         venda.quantidade,
       );
 
-      // 2. Criar comissão se houver vendedor
-      if (venda.vendedorId && venda.vendedor) {
-        const percentComissao = Number(venda.vendedor.comissaoPercent);
-        if (percentComissao > 0) {
-          const valorComissao = Number(venda.total) * (percentComissao / 100);
+      // 2. Criar comissões (Macro p/ Distribuidor e Micro p/ Vendedor)
+      if (venda.distribuidorId) {
+        const distribuidor = await tx.distribuidor.findUnique({
+          where: { id: venda.distribuidorId },
+          select: { comissaoPercent: true }
+        });
+        if (distribuidor) {
+          const distPercent = Number(distribuidor.comissaoPercent);
+          if (distPercent > 0) {
+            const fatiaBrutaDistribuidor = Number(venda.total) * (distPercent / 100);
+          let comissaoVendedor = 0;
 
-          await tx.comissao.create({
-            data: {
-              vendedorId: venda.vendedorId,
-              vendaId: venda.id,
-              valor: new Prisma.Decimal(valorComissao.toFixed(2)),
-              status: StatusComissao.PENDENTE,
-            },
-          });
+          // Se houver vendedor envolvido, ele fica com a fatia dele acordada com o distribuidor
+          if (venda.vendedorId && venda.vendedor) {
+            const vendPercentDaFatia = Number(venda.vendedor.comissaoPercent) || 0; // 0 to 100
+            comissaoVendedor = fatiaBrutaDistribuidor * (vendPercentDaFatia / 100);
 
-          // Atualizar saldo do vendedor
-          await tx.vendedor.update({
-            where: { id: venda.vendedorId },
-            data: {
-              saldo: { increment: new Prisma.Decimal(valorComissao.toFixed(2)) },
-            },
-          });
+            if (comissaoVendedor > 0) {
+              await tx.comissao.create({
+                data: {
+                  vendedorId: venda.vendedorId,
+                  vendaId: venda.id,
+                  valor: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
+                  status: StatusComissao.PENDENTE,
+                },
+              });
 
-          this.logger.log(
-            `Comissão de R$ ${valorComissao.toFixed(2)} criada para vendedor ${venda.vendedorId}`,
-          );
+              await tx.vendedor.update({
+                where: { id: venda.vendedorId },
+                data: {
+                  saldo: { increment: new Prisma.Decimal(comissaoVendedor.toFixed(2)) },
+                },
+              });
+
+              this.logger.log(`Comissão Vendedor (R$ ${comissaoVendedor.toFixed(2)}) creditada -> ${venda.vendedorId}`);
+            }
+          }
+
+          // O saldo remanescente da fatia distribuída vai para o próprio Distribuidor (Spread)
+          const comissaoLiquidaDistribuidor = fatiaBrutaDistribuidor - comissaoVendedor;
+          if (comissaoLiquidaDistribuidor > 0) {
+            await tx.comissaoDistribuidor.create({
+              data: {
+                distribuidorId: venda.distribuidorId,
+                vendaId: venda.id,
+                valor: new Prisma.Decimal(comissaoLiquidaDistribuidor.toFixed(2)),
+                status: StatusComissao.PENDENTE,
+              },
+            });
+
+            await tx.distribuidor.update({
+              where: { id: venda.distribuidorId },
+              data: {
+                saldo: { increment: new Prisma.Decimal(comissaoLiquidaDistribuidor.toFixed(2)) },
+              },
+            });
+
+            this.logger.log(`Comissão Distribuidor Líquida (R$ ${comissaoLiquidaDistribuidor.toFixed(2)}) creditada -> ${venda.distribuidorId}`);
+          }
+          }
         }
       }
 

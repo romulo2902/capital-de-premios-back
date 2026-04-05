@@ -128,6 +128,14 @@ export class CreateVendedorDto {
   link?: string;
 
   @ApiPropertyOptional({
+    example: 50,
+    description: 'Porcentagem repassada a este vendedor (0 a 100), referente à fatia que o Distribuidor logado ganha do Admin.',
+  })
+  @IsOptional()
+  @IsInt()
+  comissaoPercent?: number;
+
+  @ApiPropertyOptional({
     example: 'Vend@123',
     description: 'Senha de acesso à loja. Se omitida, usa "Vend@123" como padrão.',
     minLength: 6,

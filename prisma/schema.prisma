@@ -123,6 +123,7 @@ model Distribuidor {
   email          String
   tipoChavePix   TipoChavePix?
   chavePix       String?
+  comissaoPercent Decimal        @default(0)
   saldo          Decimal        @default(0)
   link           String?
   qrcode         String?
@@ -132,6 +133,7 @@ model Distribuidor {
   vendedores     Vendedor[]
   clientes       Cliente[]
   saques         Saque[]
+  comissoesDistribuidor ComissaoDistribuidor[]
 }
 
 model Vendedor {
@@ -265,6 +267,7 @@ model Venda {
   vendedor       Vendedor?     @relation(fields: [vendedorId], references: [id])
   bilhetes       Bilhete[]
   comissao       Comissao?
+  comissaoDistribuidor ComissaoDistribuidor?
 }
 
 model Bilhete {
@@ -296,6 +299,17 @@ model Comissao {
   createdAt  DateTime       @default(now())
   vendedor   Vendedor       @relation(fields: [vendedorId], references: [id])
   venda      Venda          @relation(fields: [vendaId], references: [id])
+}
+
+model ComissaoDistribuidor {
+  id             String         @id @default(uuid())
+  distribuidorId String
+  vendaId        String         @unique
+  valor          Decimal
+  status         StatusComissao @default(PENDENTE)
+  createdAt      DateTime       @default(now())
+  distribuidor   Distribuidor   @relation(fields: [distribuidorId], references: [id])
+  venda          Venda          @relation(fields: [vendaId], references: [id])
 }
 
 model Saque {

@@ -62,6 +62,7 @@ export class DistribuidoresService {
           estado: dto.estado,
           tipoChavePix: dto.tipoChavePix,
           chavePix: dto.chavePix,
+          comissaoPercent: dto.comissaoPercent !== undefined ? dto.comissaoPercent : 0,
           link: dto.link,
           status: StatusUsuario.ATIVO,
         },

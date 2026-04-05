@@ -70,6 +70,7 @@ export class VendedoresService {
           estado: dto.estado,
           tipoChavePix: dto.tipoChavePix,
           chavePix: dto.chavePix,
+          comissaoPercent: dto.comissaoPercent !== undefined ? Math.min(dto.comissaoPercent, 100) : 0,
           link: dto.link,
           status: StatusUsuario.ATIVO,
         },
@@ -161,6 +162,7 @@ export class VendedoresService {
     delete data.codigo;
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
     if (dto.link !== undefined) data.qrcode = null;
+    if (dto.comissaoPercent !== undefined) data.comissaoPercent = Math.min(dto.comissaoPercent, 100);
 
     if (dto.senha) {
       const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });

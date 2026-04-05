@@ -360,13 +360,14 @@ describe('VendasService', () => {
       id: 'venda-1',
       edicaoId: 'edicao-1',
       vendedorId: 'vendedor-1',
+      distribuidorId: 'distribuidor-1',
       status: StatusVenda.PENDENTE,
       total: new Prisma.Decimal('60.00'),
       quantidade: 2,
       tipoPagamento: TipoPagamento.PIX,
       vendedor: {
         id: 'vendedor-1',
-        comissaoPercent: new Prisma.Decimal('10'),
+        comissaoPercent: new Prisma.Decimal('50'),
       },
       edicao: {
         rangeInicio: BigInt(1000000),
@@ -413,6 +414,16 @@ describe('VendasService', () => {
         bilhete: {
           createMany: jest.fn().mockResolvedValue({ count: 2 }),
         },
+        distribuidor: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'distribuidor-1',
+            comissaoPercent: new Prisma.Decimal('20'), // 20% macro fatia
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        comissaoDistribuidor: {
+          create: jest.fn().mockResolvedValue({}),
+        },
         comissao: {
           create: jest.fn().mockResolvedValue({ id: 'comissao-1' }),
         },
@@ -439,9 +450,17 @@ describe('VendasService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             vendedorId: 'vendedor-1',
-            valor: new Prisma.Decimal('6.00'), // 10% of 60.00
+            valor: new Prisma.Decimal('6.00'), // 50% de 20% de 60.00
           }),
         }),
+      );
+      expect(txMock.comissaoDistribuidor.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            distribuidorId: 'distribuidor-1',
+            valor: new Prisma.Decimal('6.00'), // Os outros 50% de 20% de 60.00
+          })
+        })
       );
       expect(txMock.venda.update).toHaveBeenCalledWith(
         expect.objectContaining({

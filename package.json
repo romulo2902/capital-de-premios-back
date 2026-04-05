@@ -22,6 +22,7 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:generate": "dotenv -e .env.development -- prisma generate",
     "prisma:seed": "dotenv -e .env.development -- ts-node prisma/seed.ts",
+    "seed:dashboard": "dotenv -e .env.development -- ts-node prisma/seed-dashboard.ts",
     "prisma:studio": "dotenv -e .env.development -- prisma studio",
     "prisma:reset": "dotenv -e .env.development -- prisma migrate reset --force",
     "pm2:start": "pm2 start ecosystem.config.cjs --env homolog",
@@ -125,7 +126,8 @@
     }
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed.ts",
+    "seed:dashboard": "ts-node prisma/seed-dashboard.ts"
   },
   "overrides": {
     "minimatch": "^10.2.1",
