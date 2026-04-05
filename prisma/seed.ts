@@ -202,7 +202,13 @@ async function main(): Promise<void> {
       const ranges = [];
       for (let i = 0; i < BATCH_SIZE; i++) {
         const numero = startNum + batch * BATCH_SIZE + i;
-        const sequenciaBolas = gerarSequenciaLoterica(BigInt(numero - 1), 15);
+        const sequenciaBolas = gerarSequenciaLoterica(
+          BigInt(numero - 1),
+          15,
+          {
+            seed: 'seed-ranges-default',
+          },
+        ).numeros;
         ranges.push({ numero: BigInt(numero), sequenciaBolas, disponivel: true });
       }
       await prisma.range.createMany({ data: ranges, skipDuplicates: true });

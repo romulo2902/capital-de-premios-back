@@ -8,6 +8,7 @@ import {
   EDICOES_RANGES_QUEUE,
 } from './edicoes-ranges.constants';
 import {
+  criarContextoSequenciaLotericaDeterministico,
   gerarSequenciaLoterica,
   obterTotalCombinacoesCartela,
 } from './edicoes-sequencia.util';
@@ -61,6 +62,13 @@ export class EdicoesRangesProcessor extends WorkerHost {
     }
 
     let indiceGlobal = 0n;
+    const contextoSequencia = criarContextoSequenciaLotericaDeterministico(
+      `${edicao.id}:${edicao.numero}:${edicao.qtdNumerosCartela}`,
+    );
+
+    this.logger.log(
+      `Geração auditável da edição ${edicao.numero}: sorteioId=${contextoSequencia.sorteioId} timestamp=${contextoSequencia.timestamp}`,
+    );
 
     for (const detalhe of edicao.detalhes) {
       const totalDetalhe = detalhe.rangeFinal - detalhe.rangeInicio + BigInt(1);
@@ -82,7 +90,8 @@ export class EdicoesRangesProcessor extends WorkerHost {
           const sequencia = gerarSequenciaLoterica(
             indiceGlobal,
             edicao.qtdNumerosCartela,
-          );
+            { contexto: contextoSequencia },
+          ).numeros;
           valores.push(
             Prisma.sql`(gen_random_uuid(), ${numero}, ARRAY[${Prisma.join(sequencia)}]::int[], true)`,
           );
