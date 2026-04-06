@@ -126,7 +126,7 @@ export class DashboardService {
     };
 
     if (filtros.edicaoIds) {
-      const ids = Array.isArray(filtros.edicaoIds) ? filtros.edicaoIds : filtros.edicaoIds.split(',');
+      const ids = filtros.edicaoIds;
       if (ids.length > 0) {
         where.venda = { edicaoId: { in: ids } };
       }
@@ -183,7 +183,7 @@ export class DashboardService {
     const where: Prisma.VendaWhereInput = { status: StatusVenda.APROVADO };
 
     if (filtros.edicaoIds) {
-      const ids = Array.isArray(filtros.edicaoIds) ? filtros.edicaoIds : filtros.edicaoIds.split(',');
+      const ids = filtros.edicaoIds;
       if (ids.length > 0) {
         where.edicaoId = { in: ids };
       }

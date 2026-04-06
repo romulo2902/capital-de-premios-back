@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import { IsArray, IsISO8601, IsOptional, IsString } from 'class-validator';
 
 export class DashboardFilterDto {
@@ -8,10 +8,23 @@ export class DashboardFilterDto {
     description: 'Array ou string separada por vírgula de IDs de edições.',
   })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+
+    const values = Array.isArray(value) ? value : [value];
+
+    return values
+      .flatMap((item) =>
+        typeof item === 'string' ? item.split(',') : [String(item)],
+      )
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  })
   @IsArray()
   @IsString({ each: true })
-  @Type(() => String)
-  edicaoIds?: string[] | string;
+  edicaoIds?: string[];
 
   @ApiPropertyOptional({
     example: '2026-01-01',
