@@ -224,6 +224,7 @@ model Edicao {
   detalhes         EdicaoDetalhe[]
   vendas           Venda[]
   resultado        Resultado?
+  resultadosPremio ResultadoPremio[]
 }
 
 model EdicaoDetalhe {
@@ -243,13 +244,14 @@ model EdicaoDetalhe {
 }
 
 model Premio {
-  id                String   @id @default(uuid())
+  id                String           @id @default(uuid())
   edicaoId          String
   ordem             Int
   descricao         String
   valor             Decimal
   ganhadorBilheteId String?
-  edicao            Edicao   @relation(fields: [edicaoId], references: [id])
+  edicao            Edicao           @relation(fields: [edicaoId], references: [id])
+  resultadoPremio   ResultadoPremio?
 }
 
 model Range {
@@ -301,6 +303,20 @@ model Resultado {
   numerosApurados Int[]
   createdAt       DateTime @default(now())
   edicao          Edicao   @relation(fields: [edicaoId], references: [id])
+}
+
+model ResultadoPremio {
+  id                String   @id @default(uuid())
+  premioId          String   @unique
+  edicaoId          String
+  numerosMarcados   Int[]
+  ganhadorBilheteId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  premio            Premio   @relation(fields: [premioId], references: [id])
+  edicao            Edicao   @relation(fields: [edicaoId], references: [id])
+
+  @@index([edicaoId])
 }
 
 model Comissao {

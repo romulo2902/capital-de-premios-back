@@ -23,6 +23,7 @@ import { MigracaoModule } from './modules/migracao/migracao.module';
 import { LojaPublicaModule } from './modules/loja-publica/loja-publica.module';
 import { ConteudoModule } from './modules/conteudo/conteudo.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
+import { FirebaseModule } from './common/firebase/firebase.module';
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const envFilePathByEnvironment: Record<string, string[]> = {
@@ -66,6 +67,7 @@ const envFilePathByEnvironment: Record<string, string[]> = {
       }),
     }),
     PrismaModule,
+    FirebaseModule,
     AuthModule,
     UsuariosModule,
     ClientesModule,
