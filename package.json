@@ -23,6 +23,8 @@
     "prisma:generate": "dotenv -e .env.development -- prisma generate",
     "prisma:seed": "dotenv -e .env.development -- ts-node prisma/seed.ts",
     "seed:vendas": "dotenv -e .env.development -- ts-node prisma/seed-vendas.ts",
+    "seed:vendas:homolog": "dotenv -e .env.homolog -- ts-node prisma/seed-vendas.ts",
+    "seed:vendas:prod": "dotenv -e .env.production -- ts-node prisma/seed-vendas.ts",
     "seed:dashboard": "dotenv -e .env.development -- ts-node prisma/seed-dashboard.ts",
     "prisma:studio": "dotenv -e .env.development -- prisma studio",
     "prisma:reset": "dotenv -e .env.development -- prisma migrate reset --force",
@@ -136,6 +138,8 @@
   "prisma": {
     "seed": "ts-node prisma/seed.ts",
     "seed:vendas": "ts-node prisma/seed-vendas.ts",
+    "seed:vendas:homolog": "ts-node prisma/seed-vendas.ts",
+    "seed:vendas:prod": "ts-node prisma/seed-vendas.ts",
     "seed:dashboard": "ts-node prisma/seed-dashboard.ts"
   },
   "overrides": {
