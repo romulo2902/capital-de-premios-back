@@ -119,12 +119,9 @@ export class AuthService {
     const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);
 
     // Monta dados adicionais do perfil para o frontend
-    const perfilData = await this.buscarDadosPerfil(
-      usuario.id,
-      usuario.perfil,
-    );
+    const perfilData = await this.buscarDadosPerfil(usuario.id, usuario.perfil);
 
-    this.logger.log(`Login admin: ${usuario.email} [${usuario.perfil}]`);
+    this.logger.log(`Login painel: ${usuario.email} [${usuario.perfil}]`);
 
     return {
       message: 'Login realizado com sucesso',
@@ -165,13 +162,13 @@ export class AuthService {
           'CPF não cadastrado. Por favor, forneça nome e telefone para realizar o primeiro acesso.',
         );
       }
-      
+
       cliente = await this.prisma.cliente.create({
-        data: { 
-          cpf: cpfLimpo, 
-          nome: dto.nome, 
+        data: {
+          cpf: cpfLimpo,
+          nome: dto.nome,
           telefone: dto.telefone,
-          email: dto.email || null 
+          email: dto.email || null,
         },
       });
     }

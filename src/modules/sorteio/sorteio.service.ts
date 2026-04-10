@@ -16,6 +16,17 @@ import {
 const SORTEIO_COLLECTION = 'sorteios';
 const PREMIOS_SUBCOLLECTION = 'premios';
 
+type SorteioListItem = Prisma.EdicaoGetPayload<{
+  include: {
+    resultado: true;
+    premios: {
+      orderBy: {
+        ordem: 'asc';
+      };
+    };
+  };
+}>;
+
 // ─── Interfaces ──────────────────────────────────────────
 
 export interface GanhadorInfo {
@@ -107,7 +118,12 @@ export class SorteioService {
     });
 
     // Sincronizar com Firestore
-    await this.syncStatusFirestore(edicaoId, 'em_andamento', edicao.numero, edicao.premios.length);
+    await this.syncStatusFirestore(
+      edicaoId,
+      'em_andamento',
+      edicao.numero,
+      edicao.premios.length,
+    );
 
     for (const premio of edicao.premios) {
       await this.syncPremioFirestore(edicaoId, premio.id, {
@@ -119,7 +135,9 @@ export class SorteioService {
       });
     }
 
-    this.logger.log(`Sorteio iniciado para edição ${edicaoId} (${edicao.premios.length} prêmios)`);
+    this.logger.log(
+      `Sorteio iniciado para edição ${edicaoId} (${edicao.premios.length} prêmios)`,
+    );
 
     const estado = await this.obterEstadoSorteio(edicaoId);
     return { message: 'Sorteio iniciado', data: estado };
@@ -147,9 +165,7 @@ export class SorteioService {
     });
 
     if (!premio || premio.edicaoId !== edicaoId) {
-      throw new NotFoundException(
-        'Prêmio não encontrado nesta edição',
-      );
+      throw new NotFoundException('Prêmio não encontrado nesta edição');
     }
 
     if (premio.ganhadorBilheteId) {
@@ -162,9 +178,7 @@ export class SorteioService {
     });
 
     if (!resultado) {
-      throw new BadRequestException(
-        'Sorteio não iniciado para este prêmio',
-      );
+      throw new BadRequestException('Sorteio não iniciado para este prêmio');
     }
 
     if (resultado.numerosMarcados.includes(numero)) {
@@ -196,7 +210,10 @@ export class SorteioService {
       numerosMarcados: resultadoAtualizado.numerosMarcados,
       ultimoNumero: numero,
       ganhador: ganhador
-        ? { bilheteNumero: ganhador.bilheteNumero, clienteNome: ganhador.clienteNome }
+        ? {
+            bilheteNumero: ganhador.bilheteNumero,
+            clienteNome: ganhador.clienteNome,
+          }
         : null,
     });
 
@@ -259,7 +276,9 @@ export class SorteioService {
     }
 
     // 3. Remover número
-    const novosNumeros = resultado.numerosMarcados.filter((n: number) => n !== numero);
+    const novosNumeros = resultado.numerosMarcados.filter(
+      (n: number) => n !== numero,
+    );
 
     const resultadoAtualizado = await this.prisma.resultadoPremio.update({
       where: { premioId },
@@ -402,7 +421,7 @@ export class SorteioService {
     ]);
 
     return buildPaginatedResponse(
-      edicoes,
+      edicoes.map((edicao) => this.serializarSorteioListItem(edicao)),
       total,
       pagination.page,
       pagination.limit,
@@ -450,13 +469,27 @@ export class SorteioService {
     });
 
     return {
-      message: bilhetes.length > 0
-        ? 'Bilhetes encontrados'
-        : 'Nenhum bilhete encontrado para esta edição',
+      message:
+        bilhetes.length > 0
+          ? 'Bilhetes encontrados'
+          : 'Nenhum bilhete encontrado para esta edição',
       data: bilhetes.map((b) => ({
         bilheteId: b.id,
         numero: b.numero.toString(),
         sequenciaBolas: b.sequenciaBolas,
+      })),
+    };
+  }
+
+  private serializarSorteioListItem(edicao: SorteioListItem) {
+    return {
+      ...edicao,
+      valorCartela: edicao.valorCartela.toString(),
+      rangeInicio: edicao.rangeInicio.toString(),
+      rangeFinal: edicao.rangeFinal.toString(),
+      premios: edicao.premios.map((premio) => ({
+        ...premio,
+        valor: premio.valor.toString(),
       })),
     };
   }
