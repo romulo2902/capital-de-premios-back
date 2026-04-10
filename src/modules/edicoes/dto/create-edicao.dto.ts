@@ -18,7 +18,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { DestinoEdicao, StatusEdicao } from '@prisma/client';
+import { DestinoEdicao } from '@prisma/client';
 import { CreateEdicaoDetalheDto } from './create-edicao-detalhe.dto';
 
 const VALOR_CARTELA_REGEX = /^\d+([.,]\d{1,2})?$/;
@@ -67,15 +67,6 @@ const parseDetalhesInput = ({ value }: TransformFnParams): unknown => {
   return Array.isArray(parsedValue)
     ? plainToInstance(CreateEdicaoDetalheDto, parsedValue)
     : parsedValue;
-};
-
-const normalizeNullableString = ({ value }: TransformFnParams): unknown => {
-  if (typeof value !== 'string') {
-    return value;
-  }
-
-  const normalizedValue = value.trim();
-  return normalizedValue === '' ? null : normalizedValue;
 };
 
 export class CreateEdicaoDto {
@@ -145,16 +136,6 @@ export class CreateEdicaoDto {
   @IsEnum(DestinoEdicao)
   destino?: DestinoEdicao;
 
-  @ApiPropertyOptional({
-    example: 'https://cdn.capitalpremios.com.br/edicoes/125/banner.jpg',
-    description:
-      'URL pública da imagem principal da cartela/sorteio. Quando um arquivo `imagem` for enviado em multipart, a API sobe o arquivo para o S3 e preenche este campo automaticamente.',
-  })
-  @Transform(normalizeNullableString)
-  @IsOptional()
-  @IsString()
-  imagemUrl?: string | null;
-
   @ApiProperty({
     example: false,
     description: 'Indica se a cartela possui raspadinha.',
@@ -170,16 +151,6 @@ export class CreateEdicaoDto {
   @IsOptional()
   @IsString()
   frase?: string;
-
-  @ApiPropertyOptional({
-    enum: StatusEdicao,
-    example: StatusEdicao.RASCUNHO,
-    description:
-      'Status enviado pelo admin. Na criação, apenas RASCUNHO é aceito; ativação/desativação ocorre por endpoints dedicados.',
-  })
-  @IsOptional()
-  @IsEnum(StatusEdicao)
-  status?: StatusEdicao;
 
   @ApiProperty({
     type: [CreateEdicaoDetalheDto],

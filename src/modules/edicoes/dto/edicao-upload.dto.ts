@@ -21,7 +21,7 @@ export class CreateEdicaoUploadDto extends OmitType(CreateEdicaoDto, [
     type: 'string',
     format: 'binary',
     description:
-      'Imagem principal da edição. Quando enviada, a API faz upload para o S3 e salva a URL pública em `imagemUrl`.',
+      'Imagem principal da edição. Quando enviada, a API faz upload para o S3 e salva a URL pública em `imagemUrl` internamente.',
   })
   imagem?: unknown;
 }

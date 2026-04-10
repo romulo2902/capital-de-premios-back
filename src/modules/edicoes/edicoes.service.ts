@@ -69,7 +69,6 @@ export class EdicoesService {
 
   async create(dto: CreateEdicaoDto, imagem?: ArquivoImagemUpload) {
     await this.validarNumeroEdicaoUnico(dto.numero);
-    this.validarStatusDeCriacao(dto.status);
 
     const detalhes = this.normalizarDetalhes(dto.detalhes);
     this.validarDetalhesInternos(detalhes);
@@ -89,7 +88,6 @@ export class EdicoesService {
 
     const { rangeInicio, rangeFinal } = this.calcularResumoDosRanges(detalhes);
     const imagemUrl = await this.resolverImagemUrl(
-      dto.imagemUrl,
       imagem,
       `edicoes/${dto.numero}`,
     );
@@ -116,7 +114,9 @@ export class EdicoesService {
               tipoCartela: detalhe.tipoCartela,
               rangeInicio: detalhe.rangeInicio,
               rangeFinal: detalhe.rangeFinal,
-              preco: detalhe.preco ? new Prisma.Decimal(detalhe.preco.replace(',', '.')) : null,
+              preco: detalhe.preco
+                ? new Prisma.Decimal(detalhe.preco.replace(',', '.'))
+                : null,
             })),
           },
         },
@@ -190,7 +190,6 @@ export class EdicoesService {
 
   async update(id: string, dto: UpdateEdicaoDto, imagem?: ArquivoImagemUpload) {
     const atual = await this.obterEdicaoOuFalhar(id);
-    this.validarStatusDeAtualizacao(dto.status, atual.status);
 
     if (dto.numero !== undefined) {
       await this.validarNumeroEdicaoUnico(dto.numero, id);
@@ -229,7 +228,6 @@ export class EdicoesService {
       ? this.calcularResumoDosRanges(detalhesEfetivos)
       : undefined;
     const imagemUrl = await this.resolverImagemUrl(
-      dto.imagemUrl,
       imagem,
       `edicoes/${dto.numero ?? atual.numero}`,
     );
@@ -261,7 +259,9 @@ export class EdicoesService {
             tipoCartela: detalhe.tipoCartela,
             rangeInicio: detalhe.rangeInicio,
             rangeFinal: detalhe.rangeFinal,
-            preco: detalhe.preco ? new Prisma.Decimal(detalhe.preco.replace(',', '.')) : null,
+            preco: detalhe.preco
+              ? new Prisma.Decimal(detalhe.preco.replace(',', '.'))
+              : null,
           })),
         };
       }
@@ -297,12 +297,11 @@ export class EdicoesService {
   }
 
   private async resolverImagemUrl(
-    imagemUrl: string | null | undefined,
     imagem: ArquivoImagemUpload | undefined,
     folder: string,
-  ): Promise<string | null | undefined> {
+  ): Promise<string | undefined> {
     if (!imagem) {
-      return imagemUrl;
+      return undefined;
     }
 
     return this.s3UploadService.uploadImage(imagem, folder);
@@ -437,25 +436,6 @@ export class EdicoesService {
     if (conflito) {
       throw new ConflictException(
         `A edição ${conflito.numero} já está em operação com status ${conflito.status}`,
-      );
-    }
-  }
-
-  private validarStatusDeCriacao(status?: StatusEdicao): void {
-    if (status && status !== StatusEdicao.RASCUNHO) {
-      throw new BadRequestException(
-        'Na criação de edição, apenas o status RASCUNHO é aceito. Use o endpoint de ativação para ativar a edição.',
-      );
-    }
-  }
-
-  private validarStatusDeAtualizacao(
-    statusInformado: StatusEdicao | undefined,
-    statusAtual: StatusEdicao,
-  ): void {
-    if (statusInformado && statusInformado !== statusAtual) {
-      throw new BadRequestException(
-        'O status da edição deve ser alterado pelos endpoints dedicados de ativar/desativar.',
       );
     }
   }
@@ -761,9 +741,7 @@ export class EdicoesService {
     return possuiSobreposicaoUtil(atual, comparado);
   }
 
-  private obterDetalhesComFallback(
-    edicao: EdicaoComRelacoes,
-  ): Array<
+  private obterDetalhesComFallback(edicao: EdicaoComRelacoes): Array<
     | EdicaoDetalhe
     | (DetalheRangeNormalizado & {
         id: string;
