@@ -11,13 +11,19 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ClientesService } from './clientes.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
+import { FiltroClientesDto } from './dto/filtro-clientes.dto';
 
 /**
  * CRUD de Clientes — Painel Administrativo
@@ -55,19 +61,13 @@ export class ClientesController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'vendedorId', required: false, type: String })
   @ApiQuery({ name: 'distribuidorId', required: false, type: String })
-  findAll(
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
-    @Query('search') search?: string,
-    @Query('vendedorId') vendedorId?: string,
-    @Query('distribuidorId') distribuidorId?: string,
-  ) {
+  findAll(@Query() filtros: FiltroClientesDto) {
     return this.clientesService.findAll(
-      +page,
-      +limit,
-      search,
-      vendedorId,
-      distribuidorId,
+      filtros.page,
+      filtros.limit,
+      filtros.search,
+      filtros.vendedorId,
+      filtros.distribuidorId,
     );
   }
 

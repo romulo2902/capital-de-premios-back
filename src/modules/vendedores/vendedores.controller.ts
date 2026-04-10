@@ -11,7 +11,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -19,6 +24,7 @@ import { VendedoresService } from './vendedores.service';
 import { CreateVendedorDto } from './dto/create-vendedor.dto';
 import { UpdateVendedorDto } from './dto/update-vendedor.dto';
 import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
+import { FiltroVendedoresDto } from './dto/filtro-vendedores.dto';
 
 @ApiTags('Admin / Vendedores')
 @ApiBearerAuth()
@@ -41,13 +47,13 @@ export class VendedoresController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'distribuidorId', required: false, type: String })
-  findAll(
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
-    @Query('search') search?: string,
-    @Query('distribuidorId') distribuidorId?: string,
-  ) {
-    return this.vendedoresService.findAll(+page, +limit, search, distribuidorId);
+  findAll(@Query() filtros: FiltroVendedoresDto) {
+    return this.vendedoresService.findAll(
+      filtros.page,
+      filtros.limit,
+      filtros.search,
+      filtros.distribuidorId,
+    );
   }
 
   @Get('performance')
@@ -61,12 +67,12 @@ export class VendedoresController {
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
   @ApiQuery({ name: 'search', required: false, type: String })
-  performanceVendas(
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
-    @Query() filtros: FiltroPerformanceDto,
-  ) {
-    return this.vendedoresService.performanceVendas(+page, +limit, filtros);
+  performanceVendas(@Query() filtros: FiltroPerformanceDto) {
+    return this.vendedoresService.performanceVendas(
+      filtros.page,
+      filtros.limit,
+      filtros,
+    );
   }
 
   @Get(':id')

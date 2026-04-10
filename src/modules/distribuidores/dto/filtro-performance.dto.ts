@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO8601, IsOptional, IsString, IsUUID } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
-export class FiltroPerformanceDto {
+export class FiltroPerformanceDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     example: 'uuid-da-edicao',
     description: 'Filtrar por edição específica.',

@@ -22,6 +22,7 @@ import { VendasService } from './vendas.service';
 import { CreateVendaDto } from './dto/create-venda.dto';
 import { UpdateVendaStatusDto } from './dto/update-venda-status.dto';
 import { FiltroVendasDto } from './dto/filtro-vendas.dto';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 /**
  * CRUD de Vendas — Painel Administrativo
@@ -60,17 +61,17 @@ export class VendasController {
   @ApiQuery({ name: 'clienteId', required: false, type: String })
   @ApiQuery({ name: 'vendedorId', required: false, type: String })
   @ApiQuery({ name: 'distribuidorId', required: false, type: String })
-  @ApiQuery({ name: 'status', required: false, enum: ['PENDENTE', 'APROVADO', 'RECUSADO', 'CANCELADO'] })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PENDENTE', 'APROVADO', 'RECUSADO', 'CANCELADO'],
+  })
   @ApiQuery({ name: 'tipoPagamento', required: false, enum: ['PIX', 'CARTAO'] })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
-  findAll(
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
-    @Query() filtros: FiltroVendasDto,
-  ) {
-    return this.vendasService.findAll(+page, +limit, filtros);
+  findAll(@Query() filtros: FiltroVendasDto) {
+    return this.vendasService.findAll(filtros.page, filtros.limit, filtros);
   }
 
   @Get('cliente/:cpf')
@@ -80,10 +81,13 @@ export class VendasController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   findByCliente(
     @Param('cpf') cpf: string,
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
+    @Query() pagination: PaginationQueryDto,
   ) {
-    return this.vendasService.findByCliente(cpf, +page, +limit);
+    return this.vendasService.findByCliente(
+      cpf,
+      pagination.page,
+      pagination.limit,
+    );
   }
 
   @Get(':id')

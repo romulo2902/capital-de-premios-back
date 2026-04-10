@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { MarcarNumeroDto } from './dto/marcar-numero.dto';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @ApiTags('Admin / Sorteio')
 @ApiBearerAuth()
@@ -32,8 +33,8 @@ export class SorteioController {
   @ApiOperation({ summary: 'Listar sorteios (ADMIN)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  findAll(@Query('page') page = 1, @Query('limit') limit = 20) {
-    return this.sorteioService.findAll(+page, +limit);
+  findAll(@Query() pagination: PaginationQueryDto) {
+    return this.sorteioService.findAll(pagination.page, pagination.limit);
   }
 
   @Get(':edicaoId')
@@ -46,7 +47,9 @@ export class SorteioController {
 
   @Get(':edicaoId/estado')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Obter estado atual do sorteio em tempo real (ADMIN)' })
+  @ApiOperation({
+    summary: 'Obter estado atual do sorteio em tempo real (ADMIN)',
+  })
   @ApiParam({ name: 'edicaoId', description: 'ID da edição (UUID)' })
   obterEstado(@Param('edicaoId') edicaoId: string) {
     return this.sorteioService.obterEstadoSorteio(edicaoId);
@@ -62,7 +65,9 @@ export class SorteioController {
 
   @Post(':edicaoId/premio/:premioId/marcar')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Marcar número sorteado em um prêmio (ADMIN apenas)' })
+  @ApiOperation({
+    summary: 'Marcar número sorteado em um prêmio (ADMIN apenas)',
+  })
   @ApiParam({ name: 'edicaoId', description: 'ID da edição (UUID)' })
   @ApiParam({ name: 'premioId', description: 'ID do prêmio (UUID)' })
   marcarNumero(

@@ -1,22 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsUUID } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
-export class FiltroRangesDto {
-  @ApiPropertyOptional({ example: 1, description: 'Página da listagem' })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @ApiPropertyOptional({ example: 20, description: 'Quantidade por página' })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number = 20;
-
+export class FiltroRangesDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     example: '17e2520d-97ae-4cd1-8fa6-a3c906c962b5',
     description: 'Filtrar ranges pertencentes ao intervalo de uma edição',

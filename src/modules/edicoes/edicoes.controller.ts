@@ -31,6 +31,7 @@ import {
   UpdateEdicaoUploadDto,
 } from './dto/edicao-upload.dto';
 import type { ArquivoImagemUpload } from './edicoes.types';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @ApiTags('Admin / Edições')
 @ApiBearerAuth()
@@ -58,8 +59,8 @@ export class EdicoesController {
   @ApiOperation({ summary: 'Listar edições (ADMIN)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  findAll(@Query('page') page = 1, @Query('limit') limit = 20) {
-    return this.edicoesService.findAll(+page, +limit);
+  findAll(@Query() pagination: PaginationQueryDto) {
+    return this.edicoesService.findAll(pagination.page, pagination.limit);
   }
 
   @Get(':id')

@@ -11,7 +11,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -19,6 +24,7 @@ import { DistribuidoresService } from './distribuidores.service';
 import { CreateDistribuidorDto } from './dto/create-distribuidor.dto';
 import { UpdateDistribuidorDto } from './dto/update-distribuidor.dto';
 import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
+import { FiltroDistribuidoresDto } from './dto/filtro-distribuidores.dto';
 
 @ApiTags('Admin / Distribuidores')
 @ApiBearerAuth()
@@ -40,12 +46,12 @@ export class DistribuidoresController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
-  findAll(
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
-    @Query('search') search?: string,
-  ) {
-    return this.distribuidoresService.findAll(+page, +limit, search);
+  findAll(@Query() filtros: FiltroDistribuidoresDto) {
+    return this.distribuidoresService.findAll(
+      filtros.page,
+      filtros.limit,
+      filtros.search,
+    );
   }
 
   @Get('performance')
@@ -60,12 +66,12 @@ export class DistribuidoresController {
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
   @ApiQuery({ name: 'search', required: false, type: String })
-  performanceVendas(
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
-    @Query() filtros: FiltroPerformanceDto,
-  ) {
-    return this.distribuidoresService.performanceVendas(+page, +limit, filtros);
+  performanceVendas(@Query() filtros: FiltroPerformanceDto) {
+    return this.distribuidoresService.performanceVendas(
+      filtros.page,
+      filtros.limit,
+      filtros,
+    );
   }
 
   @Get(':id')
@@ -77,7 +83,9 @@ export class DistribuidoresController {
 
   @Get('codigo/:codigo')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Buscar distribuidor por código sequencial (ADMIN)' })
+  @ApiOperation({
+    summary: 'Buscar distribuidor por código sequencial (ADMIN)',
+  })
   findByCodigo(@Param('codigo', ParseIntPipe) codigo: number) {
     return this.distribuidoresService.findByCodigo(codigo);
   }

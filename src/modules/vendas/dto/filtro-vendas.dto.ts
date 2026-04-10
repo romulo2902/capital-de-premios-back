@@ -7,8 +7,9 @@ import {
   IsUUID,
 } from 'class-validator';
 import { StatusVenda, TipoPagamento } from '@prisma/client';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
-export class FiltroVendasDto {
+export class FiltroVendasDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     example: 'uuid-da-edicao',
     description: 'Filtrar por edição.',

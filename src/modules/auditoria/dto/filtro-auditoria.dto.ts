@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 const AUDIT_ACTIONS = [
   'CREATE',
@@ -14,21 +14,7 @@ const AUDIT_ACTIONS = [
 
 export type AuditActionValue = (typeof AUDIT_ACTIONS)[number];
 
-export class FiltroAuditoriaDto {
-  @ApiPropertyOptional({ example: 1 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @ApiPropertyOptional({ example: 20 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number = 20;
-
+export class FiltroAuditoriaDto extends PaginationQueryDto {
   @ApiPropertyOptional({ example: 'Venda' })
   @IsOptional()
   @IsString()
