@@ -15,8 +15,7 @@ import { expandirSetoresDosDetalhes } from '../edicoes/edicoes-range.util';
 import { FiltroRangesDto } from './dto/filtro-ranges.dto';
 import { Readable } from 'stream';
 import * as readline from 'readline';
-import * as XLSX from 'xlsx';
-import ExcelJS from 'exceljs';
+import * as ExcelJS from 'exceljs';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
 
 const MATRIZ_BATCH_SIZE = 5000;
@@ -125,51 +124,6 @@ export class RangesService {
     );
   }
 
-  private parseXlsx(buffer: Buffer): MatrizLinha[] {
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    // Exporta como array de arrays (valores brutos)
-    const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, {
-      header: 1,
-      raw: true,
-      defval: '',
-    });
-
-    const linhas: MatrizLinha[] = [];
-    let linhaAtual = 0;
-
-    for (const row of rows) {
-      linhaAtual++;
-      if (!row || row.length < 2) continue;
-
-      try {
-        const colA = String(row[0] ?? '').trim();
-        const colB = String(row[1] ?? '').trim();
-
-        if (!colA || !colB) continue;
-
-        // Ignora cabeçalhos textuais
-        if (isNaN(Number(colA))) continue;
-
-        const numero = BigInt(Math.round(Number(colA)));
-        const sequenciaBolas = colB
-          .split('-')
-          .map((b) => parseInt(b.trim(), 10))
-          .filter((n) => !isNaN(n) && n >= 1 && n <= 50);
-
-        if (sequenciaBolas.length === 0) continue;
-
-        linhas.push({ numero, sequenciaBolas });
-      } catch {
-        this.logger.warn(`Linha XLSX ${linhaAtual} inválida, ignorada`);
-      }
-    }
-
-    this.logger.log(`XLSX parseado: ${linhas.length} linhas válidas`);
-    return linhas;
-  }
 
   // Insere em lotes de MATRIZ_BATCH_SIZE — usado pelo fluxo XLSX
   private async inserirEmLotes(linhas: MatrizLinha[]): Promise<number> {
