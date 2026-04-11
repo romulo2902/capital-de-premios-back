@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, BadRequestException } from '@nestjs/common';
 import {
   DestinoEdicao,
   OrigemParticipacao,
@@ -28,6 +28,31 @@ describe('EdicoesService', () => {
     },
     edicaoDetalhe: {
       findMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
+    premio: {
+      deleteMany: jest.fn(),
+      findMany: jest.fn(),
+      create: jest.fn(),
+    },
+    resultado: {
+      deleteMany: jest.fn(),
+    },
+    resultadoPremio: {
+      deleteMany: jest.fn(),
+    },
+    venda: {
+      findMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
+    bilhete: {
+      deleteMany: jest.fn(),
+    },
+    comissao: {
+      deleteMany: jest.fn(),
+    },
+    comissaoDistribuidor: {
+      deleteMany: jest.fn(),
     },
     matrizRange: {
       findFirst: jest.fn().mockResolvedValue({
@@ -232,5 +257,105 @@ describe('EdicoesService', () => {
         ],
       }),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it('remove should delete edicao in cascade when status is RASCUNHO', async () => {
+    const edicao = {
+      id: 'edicao-1',
+      numero: 125,
+      status: StatusEdicao.RASCUNHO,
+      detalhes: [],
+      premios: [],
+      createdAt: new Date(),
+      dataSorteio: new Date(),
+      dataEncerramento: new Date(),
+      valorCartela: new Prisma.Decimal('10.00'),
+      qtdNumerosCartela: 15,
+      rangeInicio: BigInt(950000),
+      rangeFinal: BigInt(2949999),
+      qtdPremios: 1,
+      destino: DestinoEdicao.SITE,
+      raspadinha: false,
+      frase: null,
+      especie: null,
+      imagemUrl: null,
+      resultadosPremio: [],
+      resultado: null,
+      vendas: [],
+    };
+
+    const tx = {
+      venda: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'venda-1' }]),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      bilhete: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+      comissao: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      comissaoDistribuidor: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      resultadoPremio: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      resultado: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      premio: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      edicaoDetalhe: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      edicao: {
+        delete: jest.fn().mockResolvedValue({ id: 'edicao-1' }),
+      },
+    };
+
+    mockPrisma.edicao.findUnique.mockResolvedValue(edicao);
+    mockPrisma.$transaction.mockImplementation(async (callback) => callback(tx));
+
+    const result = await service.remove('edicao-1');
+
+    expect(result.message).toBe('Edição excluída com sucesso');
+    expect(tx.venda.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { edicaoId: 'edicao-1' } }),
+    );
+    expect(tx.edicao.delete).toHaveBeenCalledWith({
+      where: { id: 'edicao-1' },
+    });
+  });
+
+  it('remove should reject when status is not RASCUNHO', async () => {
+    mockPrisma.edicao.findUnique.mockResolvedValue({
+      id: 'edicao-1',
+      numero: 125,
+      status: StatusEdicao.ATIVA,
+      detalhes: [],
+      premios: [],
+      createdAt: new Date(),
+      dataSorteio: new Date(),
+      dataEncerramento: new Date(),
+      valorCartela: new Prisma.Decimal('10.00'),
+      qtdNumerosCartela: 15,
+      rangeInicio: BigInt(950000),
+      rangeFinal: BigInt(2949999),
+      qtdPremios: 1,
+      destino: DestinoEdicao.SITE,
+      raspadinha: false,
+      frase: null,
+      especie: null,
+      imagemUrl: null,
+      resultadosPremio: [],
+      resultado: null,
+      vendas: [],
+    });
+
+    await expect(service.remove('edicao-1')).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });

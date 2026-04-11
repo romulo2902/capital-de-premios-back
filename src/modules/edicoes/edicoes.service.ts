@@ -363,6 +363,56 @@ export class EdicoesService {
     };
   }
 
+  async remove(id: string) {
+    const edicao = await this.obterEdicaoOuFalhar(id);
+
+    if (edicao.status !== StatusEdicao.RASCUNHO) {
+      throw new BadRequestException(
+        `Só é permitido excluir edições em RASCUNHO. Status atual: ${edicao.status}`,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const vendas = await tx.venda.findMany({
+        where: { edicaoId: id },
+        select: { id: true },
+      });
+      const vendaIds = vendas.map((v) => v.id);
+
+      if (vendaIds.length > 0) {
+        await tx.bilhete.deleteMany({
+          where: { vendaId: { in: vendaIds } },
+        });
+        await tx.comissao.deleteMany({
+          where: { vendaId: { in: vendaIds } },
+        });
+        await tx.comissaoDistribuidor.deleteMany({
+          where: { vendaId: { in: vendaIds } },
+        });
+        await tx.venda.deleteMany({
+          where: { id: { in: vendaIds } },
+        });
+      }
+
+      // Segurança extra: se por algum motivo existir bilhete ligado à edição sem venda válida
+      await tx.bilhete.deleteMany({ where: { edicaoId: id } });
+
+      await tx.resultadoPremio.deleteMany({ where: { edicaoId: id } });
+      await tx.resultado.deleteMany({ where: { edicaoId: id } });
+      await tx.premio.deleteMany({ where: { edicaoId: id } });
+      await tx.edicaoDetalhe.deleteMany({ where: { edicaoId: id } });
+
+      await tx.edicao.delete({ where: { id } });
+    });
+
+    this.logger.log(`Edição ${edicao.numero} excluída em cascata (id=${id})`);
+
+    return {
+      message: 'Edição excluída com sucesso',
+      data: { id },
+    };
+  }
+
   private async obterEdicaoOuFalhar(id: string): Promise<EdicaoComRelacoes> {
     const item = await this.prisma.edicao.findUnique({
       where: { id },

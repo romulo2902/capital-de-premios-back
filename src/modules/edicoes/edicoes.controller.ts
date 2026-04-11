@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -94,5 +95,14 @@ export class EdicoesController {
   @ApiOperation({ summary: 'Desativar edição (ADMIN)' })
   desativar(@Param('id', ParseUUIDPipe) id: string) {
     return this.edicoesService.desativar(id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary:
+      'Excluir edição e remover dados relacionados em cascata (ADMIN). Permitido apenas para edições em RASCUNHO.',
+  })
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.edicoesService.remove(id);
   }
 }
