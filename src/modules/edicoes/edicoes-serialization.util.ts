@@ -32,11 +32,13 @@ export function serializarEdicao(
     const quantidadeBilhetes = calcularTotalBilhetesDosDetalhes(grupo.detalhes);
     const quantidadeCombos = primeiroSetor?.quantidadeCombos ?? 0n;
     const precoConfigurado = grupo.detalhes.find((detalhe) => detalhe.preco)?.preco;
+    const quantidadeChances = obterQuantidadeChances(grupo.tipoCartela);
+    const isManualPorChance = grupo.detalhes.length === quantidadeChances;
 
     return {
       origemParticipacao: grupo.origemParticipacao,
       tipoCartela: grupo.tipoCartela,
-      quantidadeChances: obterQuantidadeChances(grupo.tipoCartela),
+      quantidadeChances,
       quantidadeCombos: quantidadeCombos.toString(),
       quantidadeBilhetes: quantidadeBilhetes.toString(),
       passoEntreChances: primeiroSetor && segundoSetor
@@ -51,8 +53,9 @@ export function serializarEdicao(
         rangeInicio: setor.rangeInicio.toString(),
         rangeFinal: setor.rangeFinal.toString(),
       })),
-      rangesConfigurados: grupo.detalhes.map((detalhe) => ({
-        indiceChance: detalhe.indiceChance ?? null,
+      rangesConfigurados: grupo.detalhes.map((detalhe, index) => ({
+        indiceChance:
+          detalhe.indiceChance ?? (isManualPorChance ? index + 1 : null),
         rangeInicio: detalhe.rangeInicio.toString(),
         rangeFinal: detalhe.rangeFinal.toString(),
         intervalo: (detalhe.rangeFinal - detalhe.rangeInicio + 1n).toString(),
