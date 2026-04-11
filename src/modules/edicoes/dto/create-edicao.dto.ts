@@ -164,6 +164,7 @@ export class CreateEdicaoDto {
       'Detalhes dos ranges totais da edição. Cada tipo de cartela é dividido em setores determinísticos dentro do intervalo informado, preservando a sequência da matriz.',
   })
   @Transform(parseDetalhesInput)
+  @Type(() => CreateEdicaoDetalheDto)
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
@@ -175,6 +176,7 @@ export class CreateEdicaoDto {
       'Prêmios da edição na ordem em que serão sorteados. A API deriva `qtdPremios` a partir deste array.',
   })
   @Transform(parsePremiosInput)
+  @Type(() => CreateEdicaoPremioDto)
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

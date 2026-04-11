@@ -10,6 +10,7 @@ import {
   plainToInstance,
   Transform,
   TransformFnParams,
+  Type,
 } from 'class-transformer';
 import { CreateEdicaoDto } from './create-edicao.dto';
 import { CreateEdicaoDetalheDto } from './create-edicao-detalhe.dto';
@@ -70,6 +71,7 @@ export class UpdateEdicaoDto extends PartialType(CreateEdicaoDto) {
       'Novo conjunto de detalhes/ranges totais da edição. Quando informado, substitui integralmente os detalhes existentes e revalida os setores determinísticos de cada chance.',
   })
   @Transform(parseDetalhesInput)
+  @Type(() => CreateEdicaoDetalheDto)
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
@@ -82,6 +84,7 @@ export class UpdateEdicaoDto extends PartialType(CreateEdicaoDto) {
       'Novo conjunto de prêmios da edição. Quando informado, substitui integralmente os prêmios existentes e recalcula `qtdPremios`.',
   })
   @Transform(parsePremiosInput)
+  @Type(() => CreateEdicaoPremioDto)
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
