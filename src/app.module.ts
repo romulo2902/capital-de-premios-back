@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
@@ -55,15 +54,6 @@ const envFilePathByEnvironment: Record<string, string[]> = {
             limit: config.get<number>('THROTTLE_LIMIT', 100),
           },
         ],
-      }),
-    }),
-    BullModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        connection: {
-          url: config.get<string>('REDIS_URL', 'redis://localhost:6379'),
-        },
       }),
     }),
     PrismaModule,

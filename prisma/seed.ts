@@ -188,35 +188,17 @@ async function main(): Promise<void> {
   });
   console.log('✅ Edição #1 criada (ATIVA)');
 
-  // 6. Ranges
-  console.log('⏳ Criando 1.000 ranges...');
-  const TOTAL_RANGES = 1000;
-  const BATCH_SIZE = 100;
-
-  const existingCount = await prisma.range.count();
-  if (existingCount < TOTAL_RANGES) {
-    const lastExisting = await prisma.range.findFirst({ orderBy: { numero: 'desc' } });
-    const startNum = lastExisting ? Number(lastExisting.numero) + 1 : 1;
-
-    for (let batch = 0; batch < TOTAL_RANGES / BATCH_SIZE; batch++) {
-      const ranges = [];
-      for (let i = 0; i < BATCH_SIZE; i++) {
-        const numero = startNum + batch * BATCH_SIZE + i;
-        const sequenciaBolas = gerarSequenciaLoterica(
-          BigInt(numero - 1),
-          15,
-          {
-            seed: 'seed-ranges-default',
-          },
-        ).numeros;
-        ranges.push({ numero: BigInt(numero), sequenciaBolas, disponivel: true });
-      }
-      await prisma.range.createMany({ data: ranges, skipDuplicates: true });
-    }
-    console.log(`✅ ${TOTAL_RANGES} ranges criados`);
+  // 6. Matriz de Ranges
+  // A matriz global de ranges agora é carregada via upload de CSV.
+  // Use o endpoint POST /admin/ranges/matriz/upload com um arquivo CSV
+  // no formato: numero;bola1-bola2-bola3-...-bola15 (ex: 1000000;05-07-09-21-24-31-32-35-36-39-41-42-46-47-50)
+  const matrizCount = await prisma.matrizRange.count();
+  if (matrizCount === 0) {
+    console.log('ℹ️  MatrizRange vazia. Para popular, faça upload do CSV via POST /admin/ranges/matriz/upload');
   } else {
-    console.log('ℹ️  Ranges já existem, pulando...');
+    console.log(`ℹ️  MatrizRange já possui ${matrizCount} registros.`);
   }
+
 
   console.log('\n🎉 Seed concluído com sucesso!');
   console.log('\n📋 Credenciais de acesso:');

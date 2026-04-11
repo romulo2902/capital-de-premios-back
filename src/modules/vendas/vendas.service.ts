@@ -5,7 +5,16 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, StatusEdicao, StatusVenda, StatusComissao } from '@prisma/client';
+import {
+  EdicaoDetalhe,
+  OrigemParticipacao,
+  Prisma,
+  PrismaClient,
+  StatusComissao,
+  StatusEdicao,
+  StatusVenda,
+  TipoCartela,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   buildPaginatedResponse,
@@ -20,7 +29,24 @@ import {
   VENDA_INCLUDE_DETALHES,
   PIX_EXPIRACAO_SEGUNDOS,
 } from './vendas.constants';
-import { obterQuantidadeChances } from '../edicoes/edicoes-range.util';
+import {
+  calcularPassoEntreChancesDoDetalhe,
+  expandirSetoresDoDetalhe,
+  obterQuantidadeChances,
+} from '../edicoes/edicoes-range.util';
+
+type DetalheVenda = Pick<
+  EdicaoDetalhe,
+  'origemParticipacao' | 'tipoCartela' | 'rangeInicio' | 'rangeFinal' | 'preco'
+>;
+
+type MatrizDisponivel = {
+  id: string;
+  numero: bigint;
+  sequenciaBolas: number[];
+};
+
+type DirecaoCombo = 'PROXIMO' | 'ANTERIOR';
 
 @Injectable()
 export class VendasService {
@@ -37,6 +63,9 @@ export class VendasService {
     // 1. Validar edição
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: dto.edicaoId },
+      include: {
+        detalhes: true,
+      },
     });
 
     if (!edicao) {
@@ -48,6 +77,14 @@ export class VendasService {
         `A edição ${edicao.numero} não está ativa (status: ${edicao.status})`,
       );
     }
+
+    const origemParticipacao =
+      dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
+    const detalheVenda = this.resolverDetalheDaVenda(
+      edicao.detalhes,
+      origemParticipacao,
+      dto.tipoCartela,
+    );
 
     // 2. Buscar ou criar cliente por CPF
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
@@ -80,7 +117,7 @@ export class VendasService {
     }
 
     // 4. Calcular total
-    const valorCartela = Number(edicao.valorCartela);
+    const valorCartela = Number(detalheVenda?.preco ?? edicao.valorCartela);
     const total = valorCartela * dto.quantidade;
 
     // 5. Criar venda com status PENDENTE
@@ -91,9 +128,10 @@ export class VendasService {
         vendedorId: dto.vendedorId ?? null,
         distribuidorId: dto.distribuidorId ?? null,
         quantidade: dto.quantidade,
+        tipoCartela: detalheVenda?.tipoCartela ?? dto.tipoCartela ?? null,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
-        origemParticipacao: dto.origemParticipacao ?? 'DIGITAL',
+        origemParticipacao,
         tipoPagamento: dto.tipoPagamento,
       },
       include: VENDA_INCLUDE,
@@ -112,10 +150,13 @@ export class VendasService {
 
     try {
       const gateway = this.paymentGatewayFactory.getGateway(dto.tipoPagamento);
+      const descricaoCartela = detalheVenda?.tipoCartela ?? dto.tipoCartela;
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
-        descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${dto.quantidade}x cartela`,
+        descricao: descricaoCartela
+          ? `Capital de Prêmios — Edição ${edicao.numero} — ${dto.quantidade}x ${descricaoCartela}`
+          : `Capital de Prêmios — Edição ${edicao.numero} — ${dto.quantidade}x cartela`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
         expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
@@ -158,6 +199,105 @@ export class VendasService {
       data: {
         ...vendaCompleta,
         pagamento: dadosPagamento,
+      },
+    };
+  }
+
+  async listarCombosDisponiveis(params: {
+    edicaoId: string;
+    origemParticipacao?: OrigemParticipacao;
+    tipoCartela: TipoCartela;
+    cursorNumeroBase?: string;
+    direcao?: DirecaoCombo;
+    limit?: number;
+  }) {
+    const edicao = await this.prisma.edicao.findUnique({
+      where: { id: params.edicaoId },
+      select: {
+        id: true,
+        numero: true,
+        status: true,
+        rangeInicio: true,
+        rangeFinal: true,
+        detalhes: {
+          select: {
+            origemParticipacao: true,
+            tipoCartela: true,
+            rangeInicio: true,
+            rangeFinal: true,
+            preco: true,
+          },
+          orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
+        },
+      },
+    });
+
+    if (!edicao) {
+      throw new NotFoundException('Edição não encontrada');
+    }
+
+    if (edicao.status !== StatusEdicao.ATIVA) {
+      throw new BadRequestException('Edição não está ativa para navegação');
+    }
+
+    const origemParticipacao =
+      params.origemParticipacao ?? OrigemParticipacao.DIGITAL;
+    const detalheVenda = this.resolverDetalheDaVenda(
+      edicao.detalhes,
+      origemParticipacao,
+      params.tipoCartela,
+    );
+
+    if (!detalheVenda) {
+      throw new BadRequestException('Detalhe da edição não encontrado');
+    }
+
+    const quantidadeChances = this.obterQuantidadeChancesDaVenda(
+      detalheVenda.tipoCartela,
+    );
+    const setores = expandirSetoresDoDetalhe(detalheVenda);
+    const grupos = await this.selecionarGruposDisponiveisParaVenda(
+      this.prisma,
+      edicao.id,
+      detalheVenda,
+      Math.min(Math.max(params.limit ?? 12, 1), 24),
+      {
+        cursorNumeroBase: params.cursorNumeroBase
+          ? BigInt(params.cursorNumeroBase)
+          : undefined,
+        direcao: params.direcao ?? 'PROXIMO',
+        strict: false,
+      },
+    );
+
+    return {
+      message: 'Combos disponíveis listados com sucesso',
+      data: {
+        edicaoId: edicao.id,
+        edicaoNumero: edicao.numero,
+        status: edicao.status,
+        origemParticipacao,
+        tipoCartela: detalheVenda.tipoCartela,
+        quantidadeChances,
+        passoEntreChances:
+          calcularPassoEntreChancesDoDetalhe(detalheVenda).toString(),
+        rangeTotalInicio: detalheVenda.rangeInicio.toString(),
+        rangeTotalFinal: detalheVenda.rangeFinal.toString(),
+        setores: setores.map((setor) => ({
+          indiceChance: setor.indiceChance,
+          rangeInicio: setor.rangeInicio.toString(),
+          rangeFinal: setor.rangeFinal.toString(),
+        })),
+        combos: grupos.map((grupo, index) => ({
+          ordemSequencia: index + 1,
+          numeroBase: grupo[0]?.numero.toString() ?? null,
+          bilhetes: grupo.map((bilhete, bilheteIndex) => ({
+            ordem: bilheteIndex + 1,
+            matrizId: bilhete.id,
+            numero: bilhete.numero.toString(),
+            sequenciaBolas: bilhete.sequenciaBolas,
+          })),
+        })),
       },
     };
   }
@@ -275,72 +415,85 @@ export class VendasService {
 
     const resultado = await this.prisma.$transaction(async (tx) => {
       // 1. Alocar bilhetes (ranges disponíveis)
-      const bilhetesAlocados = await this.alocarBilhetes(
-        tx,
-        venda.id,
-        venda.edicaoId,
-        venda.quantidade,
-      );
+      const bilhetesAlocados = await this.alocarBilhetes(tx, venda);
 
       // 2. Criar comissões (Macro p/ Distribuidor e Micro p/ Vendedor)
       if (venda.distribuidorId) {
         const distribuidor = await tx.distribuidor.findUnique({
           where: { id: venda.distribuidorId },
-          select: { comissaoPercent: true }
+          select: { comissaoPercent: true },
         });
         if (distribuidor) {
           const distPercent = Number(distribuidor.comissaoPercent);
           if (distPercent > 0) {
-            const fatiaBrutaDistribuidor = Number(venda.total) * (distPercent / 100);
-          let comissaoVendedor = 0;
+            const fatiaBrutaDistribuidor =
+              Number(venda.total) * (distPercent / 100);
+            let comissaoVendedor = 0;
 
-          // Se houver vendedor envolvido, ele fica com a fatia dele acordada com o distribuidor
-          if (venda.vendedorId && venda.vendedor) {
-            const vendPercentDaFatia = Number(venda.vendedor.comissaoPercent) || 0; // 0 to 100
-            comissaoVendedor = fatiaBrutaDistribuidor * (vendPercentDaFatia / 100);
+            // Se houver vendedor envolvido, ele fica com a fatia dele acordada com o distribuidor
+            if (venda.vendedorId && venda.vendedor) {
+              const vendPercentDaFatia =
+                Number(venda.vendedor.comissaoPercent) || 0; // 0 to 100
+              comissaoVendedor =
+                fatiaBrutaDistribuidor * (vendPercentDaFatia / 100);
 
-            if (comissaoVendedor > 0) {
-              await tx.comissao.create({
+              if (comissaoVendedor > 0) {
+                await tx.comissao.create({
+                  data: {
+                    vendedorId: venda.vendedorId,
+                    vendaId: venda.id,
+                    valor: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
+                    status: StatusComissao.PENDENTE,
+                  },
+                });
+
+                await tx.vendedor.update({
+                  where: { id: venda.vendedorId },
+                  data: {
+                    saldo: {
+                      increment: new Prisma.Decimal(
+                        comissaoVendedor.toFixed(2),
+                      ),
+                    },
+                  },
+                });
+
+                this.logger.log(
+                  `Comissão Vendedor (R$ ${comissaoVendedor.toFixed(2)}) creditada -> ${venda.vendedorId}`,
+                );
+              }
+            }
+
+            // O saldo remanescente da fatia distribuída vai para o próprio Distribuidor (Spread)
+            const comissaoLiquidaDistribuidor =
+              fatiaBrutaDistribuidor - comissaoVendedor;
+            if (comissaoLiquidaDistribuidor > 0) {
+              await tx.comissaoDistribuidor.create({
                 data: {
-                  vendedorId: venda.vendedorId,
+                  distribuidorId: venda.distribuidorId,
                   vendaId: venda.id,
-                  valor: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
+                  valor: new Prisma.Decimal(
+                    comissaoLiquidaDistribuidor.toFixed(2),
+                  ),
                   status: StatusComissao.PENDENTE,
                 },
               });
 
-              await tx.vendedor.update({
-                where: { id: venda.vendedorId },
+              await tx.distribuidor.update({
+                where: { id: venda.distribuidorId },
                 data: {
-                  saldo: { increment: new Prisma.Decimal(comissaoVendedor.toFixed(2)) },
+                  saldo: {
+                    increment: new Prisma.Decimal(
+                      comissaoLiquidaDistribuidor.toFixed(2),
+                    ),
+                  },
                 },
               });
 
-              this.logger.log(`Comissão Vendedor (R$ ${comissaoVendedor.toFixed(2)}) creditada -> ${venda.vendedorId}`);
+              this.logger.log(
+                `Comissão Distribuidor Líquida (R$ ${comissaoLiquidaDistribuidor.toFixed(2)}) creditada -> ${venda.distribuidorId}`,
+              );
             }
-          }
-
-          // O saldo remanescente da fatia distribuída vai para o próprio Distribuidor (Spread)
-          const comissaoLiquidaDistribuidor = fatiaBrutaDistribuidor - comissaoVendedor;
-          if (comissaoLiquidaDistribuidor > 0) {
-            await tx.comissaoDistribuidor.create({
-              data: {
-                distribuidorId: venda.distribuidorId,
-                vendaId: venda.id,
-                valor: new Prisma.Decimal(comissaoLiquidaDistribuidor.toFixed(2)),
-                status: StatusComissao.PENDENTE,
-              },
-            });
-
-            await tx.distribuidor.update({
-              where: { id: venda.distribuidorId },
-              data: {
-                saldo: { increment: new Prisma.Decimal(comissaoLiquidaDistribuidor.toFixed(2)) },
-              },
-            });
-
-            this.logger.log(`Comissão Distribuidor Líquida (R$ ${comissaoLiquidaDistribuidor.toFixed(2)}) creditada -> ${venda.distribuidorId}`);
-          }
           }
         }
       }
@@ -387,15 +540,8 @@ export class VendasService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      // 1. Liberar bilhetes (marcar ranges como disponíveis de novo)
+      // 1. Liberar bilhetes (deletar — MatrizRange não tem flag disponivel, rastreio é via Bilhete)
       if (venda.bilhetes.length > 0) {
-        const rangeIds = venda.bilhetes.map((b) => b.rangeId);
-
-        await tx.range.updateMany({
-          where: { id: { in: rangeIds } },
-          data: { disponivel: true },
-        });
-
         await tx.bilhete.deleteMany({
           where: { vendaId: venda.id },
         });
@@ -437,7 +583,7 @@ export class VendasService {
         data: {
           status: StatusVenda.CANCELADO,
           gatewayPayload: {
-            ...(venda.gatewayPayload as Record<string, unknown> ?? {}),
+            ...((venda.gatewayPayload as Record<string, unknown>) ?? {}),
             motivoCancelamento: motivo ?? 'Cancelado pelo administrador',
             canceladoEm: new Date().toISOString(),
           },
@@ -476,7 +622,10 @@ export class VendasService {
       return this.cancelar(id, dto.motivo);
     }
 
-    if (dto.status === StatusVenda.APROVADO && venda.status === StatusVenda.PENDENTE) {
+    if (
+      dto.status === StatusVenda.APROVADO &&
+      venda.status === StatusVenda.PENDENTE
+    ) {
       return this.confirmarPagamento(id);
     }
 
@@ -529,61 +678,310 @@ export class VendasService {
 
   private async alocarBilhetes(
     tx: Prisma.TransactionClient,
-    vendaId: string,
-    edicaoId: string,
-    quantidade: number,
+    venda: {
+      id: string;
+      edicaoId: string;
+      quantidade: number;
+      origemParticipacao: OrigemParticipacao;
+      tipoCartela?: TipoCartela | null;
+    },
   ): Promise<number> {
-    // Buscar ranges disponíveis que pertencem à edição
-    // Para isso, buscamos o range de números da edição e filtramos
     const edicao = await tx.edicao.findUnique({
-      where: { id: edicaoId },
-      select: { rangeInicio: true, rangeFinal: true },
+      where: { id: venda.edicaoId },
+      select: {
+        rangeInicio: true,
+        rangeFinal: true,
+        detalhes: {
+          select: {
+            origemParticipacao: true,
+            tipoCartela: true,
+            rangeInicio: true,
+            rangeFinal: true,
+            preco: true,
+          },
+          orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
+        },
+      },
     });
 
     if (!edicao) {
       throw new NotFoundException('Edição não encontrada para alocação');
     }
 
-    // Buscar ranges disponíveis dentro do intervalo da edição
-    const rangesDisponiveis = await tx.range.findMany({
-      where: {
-        disponivel: true,
-        numero: {
-          gte: edicao.rangeInicio,
-          lte: edicao.rangeFinal,
-        },
+    const detalheVenda = this.resolverDetalheDaVenda(
+      edicao.detalhes,
+      venda.origemParticipacao,
+      venda.tipoCartela,
+    );
+    const quantidadeChances = this.obterQuantidadeChancesDaVenda(
+      detalheVenda?.tipoCartela ?? venda.tipoCartela,
+    );
+    const detalheEfetivo: DetalheVenda =
+      detalheVenda ?? {
+        origemParticipacao: venda.origemParticipacao,
+        tipoCartela: venda.tipoCartela ?? TipoCartela.UMA_CHANCE,
+        rangeInicio: edicao.rangeInicio,
+        rangeFinal: edicao.rangeFinal,
+        preco: null,
+      };
+    const gruposDisponiveis = await this.selecionarGruposDisponiveisParaVenda(
+      tx,
+      venda.edicaoId,
+      detalheEfetivo,
+      venda.quantidade,
+      {
+        strict: true,
       },
-      take: quantidade,
-      orderBy: { numero: 'asc' },
-    });
+    );
+    const matrizDisponiveis = gruposDisponiveis.flat();
 
-    if (rangesDisponiveis.length < quantidade) {
-      throw new BadRequestException(
-        `Não há bilhetes suficientes disponíveis. Disponíveis: ${rangesDisponiveis.length}, solicitados: ${quantidade}`,
-      );
-    }
-
-    // Marcar ranges como indisponíveis
-    await tx.range.updateMany({
-      where: {
-        id: { in: rangesDisponiveis.map((r) => r.id) },
-      },
-      data: { disponivel: false },
-    });
-
-    // Criar bilhetes
-    const bilhetesData: Prisma.BilheteCreateManyInput[] = rangesDisponiveis.map(
-      (range) => ({
-        vendaId,
-        rangeId: range.id,
-        numero: range.numero,
-        sequenciaBolas: range.sequenciaBolas,
+    // Criar bilhetes associando à MatrizRange e à edição
+    const bilhetesData: Prisma.BilheteCreateManyInput[] = matrizDisponiveis.map(
+      (linha) => ({
+        vendaId: venda.id,
+        edicaoId: venda.edicaoId,
+        matrizId: linha.id,
+        numero: linha.numero,
+        sequenciaBolas: linha.sequenciaBolas,
       }),
     );
 
     await tx.bilhete.createMany({ data: bilhetesData });
 
     return bilhetesData.length;
+  }
+
+  private async selecionarGruposDisponiveisParaVenda(
+    client: Prisma.TransactionClient | PrismaService | PrismaClient,
+    edicaoId: string,
+    detalhe: DetalheVenda,
+    quantidadeCartelas: number,
+    options: {
+      cursorNumeroBase?: bigint;
+      direcao?: DirecaoCombo;
+      strict?: boolean;
+    } = {},
+  ): Promise<MatrizDisponivel[][]> {
+    const setores = expandirSetoresDoDetalhe(detalhe);
+    const primeiroSetor = setores[0];
+    const quantidadeChances = setores.length;
+
+    if (!primeiroSetor) {
+      throw new BadRequestException(
+        `O intervalo ${detalhe.rangeInicio.toString()}-${detalhe.rangeFinal.toString()} não suporta ${quantidadeChances} chances`,
+      );
+    }
+
+    const direcao = options.direcao ?? 'PROXIMO';
+    const gruposSelecionados: MatrizDisponivel[][] = [];
+    const numerosReservados = new Set<string>();
+    let cursor =
+      options.cursorNumeroBase ??
+      (direcao === 'PROXIMO'
+        ? primeiroSetor.rangeInicio - 1n
+        : primeiroSetor.rangeFinal + 1n);
+
+    while (gruposSelecionados.length < quantidadeCartelas) {
+      const numeroWhere: Prisma.BigIntFilter = {
+        gte: primeiroSetor.rangeInicio,
+        lte: primeiroSetor.rangeFinal,
+      };
+
+      if (direcao === 'PROXIMO') {
+        numeroWhere.gt = cursor;
+      } else {
+        numeroWhere.lt = cursor;
+      }
+
+      const candidatosBase = await client.matrizRange.findMany({
+        where: {
+          numero: numeroWhere,
+          bilhetes: {
+            none: {
+              edicaoId,
+            },
+          },
+        },
+        orderBy: { numero: direcao === 'PROXIMO' ? 'asc' : 'desc' },
+        take: Math.max(
+          (quantidadeCartelas - gruposSelecionados.length) * 3,
+          25,
+        ),
+      });
+
+      if (candidatosBase.length === 0) {
+        break;
+      }
+
+      const numerosNecessarios: bigint[] = [];
+      const numerosNecessariosSet = new Set<string>();
+      const adicionarNumero = (numero: bigint) => {
+        const chave = numero.toString();
+        if (numerosNecessariosSet.has(chave)) {
+          return;
+        }
+
+        numerosNecessariosSet.add(chave);
+        numerosNecessarios.push(numero);
+      };
+
+      for (const candidato of candidatosBase) {
+        for (const setor of setores) {
+          adicionarNumero(
+            this.calcularNumeroDoSetorParaBase(candidato.numero, primeiroSetor, setor),
+          );
+        }
+      }
+
+      const linhasDisponiveis = await client.matrizRange.findMany({
+        where: {
+          numero: {
+            in: numerosNecessarios,
+          },
+          bilhetes: {
+            none: {
+              edicaoId,
+            },
+          },
+        },
+        orderBy: { numero: 'asc' },
+      });
+
+      const linhasPorNumero = new Map(
+        linhasDisponiveis.map((linha) => [linha.numero.toString(), linha]),
+      );
+
+      for (const candidato of candidatosBase) {
+        const grupo: MatrizDisponivel[] = [];
+        let grupoCompleto = true;
+
+        for (const setor of setores) {
+          const numeroGrupo = this.calcularNumeroDoSetorParaBase(
+            candidato.numero,
+            primeiroSetor,
+            setor,
+          );
+          const chave = numeroGrupo.toString();
+
+          if (numerosReservados.has(chave)) {
+            grupoCompleto = false;
+            break;
+          }
+
+          const linha = linhasPorNumero.get(chave);
+
+          if (!linha) {
+            grupoCompleto = false;
+            break;
+          }
+
+          grupo.push(linha);
+        }
+
+        if (!grupoCompleto) {
+          continue;
+        }
+
+        gruposSelecionados.push(grupo);
+        grupo.forEach((linha) =>
+          numerosReservados.add(linha.numero.toString()),
+        );
+
+        if (gruposSelecionados.length === quantidadeCartelas) {
+          break;
+        }
+      }
+
+      cursor = candidatosBase[candidatosBase.length - 1].numero;
+    }
+
+    if (
+      (options.strict ?? false) &&
+      gruposSelecionados.length < quantidadeCartelas
+    ) {
+      throw new BadRequestException(
+        `Não há cartelas suficientes disponíveis para esta edição. Cartelas disponíveis: ${gruposSelecionados.length}, solicitadas: ${quantidadeCartelas}, chances por cartela: ${quantidadeChances}`,
+      );
+    }
+
+    return gruposSelecionados;
+  }
+
+  private resolverDetalheDaVenda(
+    detalhes: DetalheVenda[],
+    origemParticipacao: OrigemParticipacao,
+    tipoCartela?: TipoCartela | null,
+  ): DetalheVenda | null {
+    if (detalhes.length === 0) {
+      return null;
+    }
+
+    const detalhesDaOrigem = detalhes.filter(
+      (detalhe) => detalhe.origemParticipacao === origemParticipacao,
+    );
+
+    if (detalhesDaOrigem.length === 0) {
+      throw new BadRequestException(
+        `A edição não possui configuração para a origem ${origemParticipacao}`,
+      );
+    }
+
+    if (tipoCartela) {
+      const detalhe = detalhesDaOrigem.find(
+        (item) => item.tipoCartela === tipoCartela,
+      );
+
+      if (!detalhe) {
+        throw new BadRequestException(
+          `Tipo de cartela ${tipoCartela} não está disponível para a origem ${origemParticipacao}`,
+        );
+      }
+
+      return detalhe;
+    }
+
+    const detalheUmaChance = detalhesDaOrigem.find(
+      (item) => item.tipoCartela === TipoCartela.UMA_CHANCE,
+    );
+
+    if (detalheUmaChance) {
+      return detalheUmaChance;
+    }
+
+    if (detalhesDaOrigem.length === 1) {
+      return detalhesDaOrigem[0];
+    }
+
+    throw new BadRequestException(
+      `Informe o tipoCartela para a origem ${origemParticipacao} desta edição`,
+    );
+  }
+
+  private obterQuantidadeChancesDaVenda(
+    tipoCartela?: TipoCartela | null,
+  ): number {
+    return tipoCartela ? obterQuantidadeChances(tipoCartela) : 1;
+  }
+
+  private calcularNumeroDoSetorParaBase(
+    numeroBase: bigint,
+    primeiroSetor: {
+      rangeInicio: bigint;
+      rangeFinal: bigint;
+    },
+    setorDestino: {
+      rangeInicio: bigint;
+      rangeFinal: bigint;
+    },
+  ): bigint {
+    const deslocamento = numeroBase - primeiroSetor.rangeInicio;
+    const numeroDestino = setorDestino.rangeInicio + deslocamento;
+
+    if (numeroDestino < setorDestino.rangeInicio || numeroDestino > setorDestino.rangeFinal) {
+      throw new BadRequestException('Número base fora do setor esperado');
+    }
+
+    return numeroDestino;
   }
 
   private buildWhereFromFiltros(

@@ -254,11 +254,10 @@ model Premio {
   resultadoPremio   ResultadoPremio?
 }
 
-model Range {
+model MatrizRange {
   id             String    @id @default(uuid())
   numero         BigInt    @unique
   sequenciaBolas Int[]
-  disponivel     Boolean   @default(true)
   bilhetes       Bilhete[]
 }
 
@@ -286,15 +285,19 @@ model Venda {
 }
 
 model Bilhete {
-  id             String   @id @default(uuid())
+  id             String      @id @default(uuid())
   vendaId        String
-  rangeId        String
+  edicaoId       String
+  matrizId       String
   numero         BigInt
   sequenciaBolas Int[]
-  ganhador       Boolean  @default(false)
+  ganhador       Boolean     @default(false)
   premioId       String?
-  venda          Venda    @relation(fields: [vendaId], references: [id])
-  range          Range    @relation(fields: [rangeId], references: [id])
+  venda          Venda       @relation(fields: [vendaId], references: [id])
+  matriz         MatrizRange @relation(fields: [matrizId], references: [id])
+
+  @@unique([matrizId, edicaoId])
+  @@index([edicaoId])
 }
 
 model Resultado {

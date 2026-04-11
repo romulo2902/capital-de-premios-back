@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { ConflictException } from '@nestjs/common';
 import {
   DestinoEdicao,
   OrigemParticipacao,
@@ -27,6 +28,12 @@ describe('EdicoesService', () => {
     },
     edicaoDetalhe: {
       findMany: jest.fn(),
+    },
+    matrizRange: {
+      findFirst: jest.fn().mockResolvedValue({
+        sequenciaBolas: Array.from({ length: 15 }, (_, index) => index + 1),
+      }),
+      count: jest.fn().mockResolvedValue(1000000),
     },
   };
   const mockConfig = {
@@ -75,6 +82,7 @@ describe('EdicoesService', () => {
       dataSorteio: new Date('2026-03-27T13:20:00.000Z'),
       dataEncerramento: new Date('2026-03-27T12:59:00.000Z'),
       valorCartela: new Prisma.Decimal('10.00'),
+      qtdNumerosCartela: 15,
       rangeInicio: BigInt(1000000),
       rangeFinal: BigInt(1999999),
       qtdPremios: 1,
@@ -119,7 +127,10 @@ describe('EdicoesService', () => {
       },
       premio: {
         findMany: jest.fn().mockResolvedValue([]),
-        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+        create: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      resultadoPremio: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
     };
@@ -137,7 +148,6 @@ describe('EdicoesService', () => {
         dataSorteio: '2026-03-27T10:20',
         dataEncerramento: '2026-03-27T09:59',
         valorCartela: '10.00',
-        qtdPremios: 1,
         raspadinha: false,
         detalhes: [
           {
@@ -147,7 +157,14 @@ describe('EdicoesService', () => {
             rangeFinal: '1999999',
           },
         ],
+        premios: [
+          {
+            descricao: '1º Prêmio - Moto 0km',
+            valor: '25000.00',
+          },
+        ],
       },
+
       {
         buffer: Buffer.from('imagem'),
         mimetype: 'image/png',
@@ -167,9 +184,53 @@ describe('EdicoesService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           imagemUrl: edicao.imagemUrl,
+          qtdNumerosCartela: 15,
+          qtdPremios: 1,
         }),
       }),
     );
+    expect(tx.premio.create).toHaveBeenCalledWith({
+      data: {
+        edicaoId: 'edicao-1',
+        ordem: 1,
+        descricao: '1º Prêmio - Moto 0km',
+        valor: new Prisma.Decimal('25000.00'),
+      },
+    });
     expect(result.data.imagemUrl).toBe(edicao.imagemUrl);
+  });
+
+  it('create should reject detalhes whose derived sectors overlap', async () => {
+    mockPrisma.edicao.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create({
+        numero: 126,
+        dataSorteio: '2026-03-27T10:20',
+        dataEncerramento: '2026-03-27T09:59',
+        valorCartela: '10.00',
+        raspadinha: false,
+        detalhes: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: '1000000',
+            rangeFinal: '1000199',
+          },
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            rangeInicio: '1000150',
+            rangeFinal: '1000250',
+          },
+        ],
+        premios: [
+          {
+            descricao: '1º Prêmio',
+            valor: '1000.00',
+          },
+        ],
+      }),
+    ).rejects.toThrow(ConflictException);
   });
 });

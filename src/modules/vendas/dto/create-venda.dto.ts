@@ -11,7 +11,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { OrigemParticipacao, TipoPagamento } from '@prisma/client';
+import { OrigemParticipacao, TipoCartela, TipoPagamento } from '@prisma/client';
 
 export class CreateVendaDto {
   @ApiProperty({
@@ -29,6 +29,16 @@ export class CreateVendaDto {
   @IsInt()
   @Min(1)
   quantidade: number;
+
+  @ApiPropertyOptional({
+    enum: TipoCartela,
+    example: TipoCartela.UMA_CHANCE,
+    description:
+      'Tipo de cartela/chances. Quando omitido, a API assume UMA_CHANCE ou o tier compatível padrão da edição.',
+  })
+  @IsOptional()
+  @IsEnum(TipoCartela)
+  tipoCartela?: TipoCartela;
 
   @ApiProperty({
     enum: TipoPagamento,

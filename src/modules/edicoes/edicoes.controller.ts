@@ -43,7 +43,7 @@ export class EdicoesController {
 
   @Post()
   @ApiOperation({
-    summary: 'Criar edição/cartela com detalhes de range (ADMIN)',
+    summary: 'Criar edição com matriz, combos e prêmios detalhados (ADMIN)',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: CreateEdicaoUploadDto })
@@ -70,7 +70,9 @@ export class EdicoesController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Atualizar edição/cartela e seus detalhes (ADMIN)' })
+  @ApiOperation({
+    summary: 'Atualizar edição, combos e prêmios detalhados (ADMIN)',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: UpdateEdicaoUploadDto })
   @UseInterceptors(FileInterceptor('imagem'))
@@ -92,11 +94,5 @@ export class EdicoesController {
   @ApiOperation({ summary: 'Desativar edição (ADMIN)' })
   desativar(@Param('id', ParseUUIDPipe) id: string) {
     return this.edicoesService.desativar(id);
-  }
-
-  @Patch(':id/gerar-ranges')
-  @ApiOperation({ summary: 'Enfileirar geração de ranges da edição (ADMIN)' })
-  gerarRanges(@Param('id', ParseUUIDPipe) id: string) {
-    return this.edicoesService.gerarRanges(id);
   }
 }

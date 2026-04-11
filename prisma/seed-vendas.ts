@@ -212,13 +212,9 @@ async function limparVendasSeed(
     },
     select: {
       id: true,
-      bilhetes: {
-        select: {
-          rangeId: true,
-        },
-      },
     },
   });
+
 
   if (vendasExistentes.length === 0) {
     await prisma.distribuidor.update({
@@ -237,23 +233,8 @@ async function limparVendasSeed(
   }
 
   const vendaIds = vendasExistentes.map((venda) => venda.id);
-  const rangeIds = vendasExistentes.flatMap((venda) =>
-    venda.bilhetes.map((bilhete) => bilhete.rangeId),
-  );
 
   await prisma.$transaction(async (tx) => {
-    if (rangeIds.length > 0) {
-      await tx.range.updateMany({
-        where: {
-          id: {
-            in: rangeIds,
-          },
-        },
-        data: {
-          disponivel: true,
-        },
-      });
-    }
 
     await tx.comissao.deleteMany({
       where: {
@@ -301,8 +282,8 @@ async function limparVendasSeed(
   });
 }
 
-async function garantirRanges(): Promise<void> {
-  const ranges = [];
+async function garantirMatrizRanges(): Promise<void> {
+  const ranges: { numero: bigint; sequenciaBolas: number[] }[] = [];
 
   for (const edicao of EDICOES_BASE) {
     for (let numero = edicao.rangeInicio; numero <= edicao.rangeFinal; numero += 1) {
@@ -313,29 +294,19 @@ async function garantirRanges(): Promise<void> {
       ranges.push({
         numero: BigInt(numero),
         sequenciaBolas,
-        disponivel: true,
       });
     }
   }
 
   for (let indice = 0; indice < ranges.length; indice += RANGE_BATCH_SIZE) {
-    await prisma.range.createMany({
-      data: ranges.slice(indice, indice + RANGE_BATCH_SIZE),
-      skipDuplicates: true,
-    });
+    const lote = ranges.slice(indice, indice + RANGE_BATCH_SIZE);
+    const values = lote.map(
+      (r) => `(gen_random_uuid(), ${r.numero}, ARRAY[${r.sequenciaBolas.join(',')}]::int[])`,
+    );
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "MatrizRange" (id, numero, "sequenciaBolas") VALUES ${values.join(',')} ON CONFLICT (numero) DO UPDATE SET "sequenciaBolas" = EXCLUDED."sequenciaBolas"`,
+    );
   }
-
-  await prisma.range.updateMany({
-    where: {
-      numero: {
-        gte: BigInt(EDICOES_BASE[0].rangeInicio),
-        lte: BigInt(EDICOES_BASE[EDICOES_BASE.length - 1].rangeFinal),
-      },
-    },
-    data: {
-      disponivel: true,
-    },
-  });
 }
 
 async function garantirParticipantes(): Promise<{
@@ -695,12 +666,16 @@ async function criarVendaAprovada(
       throw new Error(`Edicao ${venda.edicaoId} nao encontrada para seed`);
     }
 
-    const rangesDisponiveis = await tx.range.findMany({
+    const matrizDisponiveis = await tx.matrizRange.findMany({
       where: {
-        disponivel: true,
         numero: {
           gte: edicao.rangeInicio,
           lte: edicao.rangeFinal,
+        },
+        bilhetes: {
+          none: {
+            edicaoId: venda.edicaoId,
+          },
         },
       },
       orderBy: {
@@ -709,29 +684,19 @@ async function criarVendaAprovada(
       take: venda.quantidade,
     });
 
-    if (rangesDisponiveis.length < venda.quantidade) {
+    if (matrizDisponiveis.length < venda.quantidade) {
       throw new Error(
-        `Ranges insuficientes para a venda ${venda.gatewayId}: disponiveis=${rangesDisponiveis.length} solicitados=${venda.quantidade}`,
+        `MatrizRange insuficiente para a venda ${venda.gatewayId}: disponiveis=${matrizDisponiveis.length} solicitados=${venda.quantidade}`,
       );
     }
 
-    await tx.range.updateMany({
-      where: {
-        id: {
-          in: rangesDisponiveis.map((range) => range.id),
-        },
-      },
-      data: {
-        disponivel: false,
-      },
-    });
-
     await tx.bilhete.createMany({
-      data: rangesDisponiveis.map((range) => ({
+      data: matrizDisponiveis.map((linha) => ({
         vendaId: vendaCriada.id,
-        rangeId: range.id,
-        numero: range.numero,
-        sequenciaBolas: range.sequenciaBolas,
+        edicaoId: venda.edicaoId,
+        matrizId: linha.id,
+        numero: linha.numero,
+        sequenciaBolas: linha.sequenciaBolas,
       })),
     });
 
@@ -803,7 +768,7 @@ async function main(): Promise<void> {
     participantes.distribuidor.id,
     participantes.vendedores.map((vendedor) => vendedor.id),
   );
-  await garantirRanges();
+  await garantirMatrizRanges();
   const edicoes = await garantirEdicoes();
   const clientes = await garantirClientes(
     participantes.distribuidor.id,

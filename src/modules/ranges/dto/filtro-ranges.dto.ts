@@ -29,13 +29,5 @@ export class FiltroRangesDto extends PaginationQueryDto {
   @Type(() => Number)
   @IsInt()
   numeroFim?: number;
-
-  @ApiPropertyOptional({
-    example: true,
-    description: 'Filtrar por disponibilidade do range',
-  })
-  @IsOptional()
-  @Type(() => Boolean)
-  @IsBoolean()
-  disponivel?: boolean;
 }
+

@@ -20,6 +20,7 @@ import {
 } from 'class-validator';
 import { DestinoEdicao } from '@prisma/client';
 import { CreateEdicaoDetalheDto } from './create-edicao-detalhe.dto';
+import { CreateEdicaoPremioDto } from './create-edicao-premio.dto';
 
 const VALOR_CARTELA_REGEX = /^\d+([.,]\d{1,2})?$/;
 
@@ -69,6 +70,30 @@ const parseDetalhesInput = ({ value }: TransformFnParams): unknown => {
     : parsedValue;
 };
 
+const parsePremiosInput = ({ value }: TransformFnParams): unknown => {
+  const parsedValue = (() => {
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    const normalizedValue = value.trim();
+
+    if (!normalizedValue) {
+      return value;
+    }
+
+    try {
+      return JSON.parse(normalizedValue);
+    } catch {
+      throw new BadRequestException('premios deve ser um JSON válido');
+    }
+  })();
+
+  return Array.isArray(parsedValue)
+    ? plainToInstance(CreateEdicaoPremioDto, parsedValue)
+    : parsedValue;
+};
+
 export class CreateEdicaoDto {
   @ApiProperty({
     example: 125,
@@ -107,25 +132,6 @@ export class CreateEdicaoDto {
   })
   valorCartela: string;
 
-  @ApiProperty({
-    example: 4,
-    description: 'Quantidade de prêmios da edição.',
-  })
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  qtdPremios: number;
-
-  @ApiProperty({
-    example: 15,
-    description:
-      'Quantidade de números exibidos em cada cartela da edição. Os números serão gerados no universo de 1 a 50.',
-  })
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  qtdNumerosCartela: number;
-
   @ApiPropertyOptional({
     enum: DestinoEdicao,
     example: DestinoEdicao.AMBOS,
@@ -155,11 +161,22 @@ export class CreateEdicaoDto {
   @ApiProperty({
     type: [CreateEdicaoDetalheDto],
     description:
-      'Detalhes dos ranges da edição. Permite separar participação DIGITAL, FISICO e POS no mesmo sorteio.',
+      'Detalhes dos ranges totais da edição. Cada tipo de cartela é dividido em setores determinísticos dentro do intervalo informado, preservando a sequência da matriz.',
   })
   @Transform(parseDetalhesInput)
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   detalhes: CreateEdicaoDetalheDto[];
+
+  @ApiProperty({
+    type: [CreateEdicaoPremioDto],
+    description:
+      'Prêmios da edição na ordem em que serão sorteados. A API deriva `qtdPremios` a partir deste array.',
+  })
+  @Transform(parsePremiosInput)
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  premios: CreateEdicaoPremioDto[];
 }

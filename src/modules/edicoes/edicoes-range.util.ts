@@ -1,7 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   DestinoEdicao,
   EdicaoDetalhe,
@@ -12,6 +9,17 @@ import { CreateEdicaoDetalheDto } from './dto/create-edicao-detalhe.dto';
 import { QUANTIDADE_CHANCES_POR_TIPO_CARTELA } from './edicoes.constants';
 import { DetalheRangeNormalizado, EdicaoComRelacoes } from './edicoes.types';
 
+export interface SetorDetalheRange {
+  origemParticipacao: OrigemParticipacao;
+  tipoCartela: TipoCartela;
+  indiceChance: number;
+  rangeInicio: bigint;
+  rangeFinal: bigint;
+  rangeTotalInicio: bigint;
+  rangeTotalFinal: bigint;
+  quantidadeCombos: bigint;
+}
+
 export function normalizarDetalhes(
   detalhes: CreateEdicaoDetalheDto[],
 ): DetalheRangeNormalizado[] {
@@ -20,6 +28,7 @@ export function normalizarDetalhes(
     tipoCartela: detalhe.tipoCartela,
     rangeInicio: BigInt(detalhe.rangeInicio),
     rangeFinal: BigInt(detalhe.rangeFinal),
+    preco: detalhe.preco,
   }));
 }
 
@@ -33,6 +42,10 @@ export function normalizarDetalhesExistentes(
     tipoCartela: detalhe.tipoCartela,
     rangeInicio: detalhe.rangeInicio,
     rangeFinal: detalhe.rangeFinal,
+    preco:
+      'preco' in detalhe && detalhe.preco
+        ? detalhe.preco.toString()
+        : undefined,
   }));
 }
 
@@ -45,19 +58,25 @@ export function validarDetalhesInternos(
         'rangeFinal deve ser maior ou igual ao rangeInicio',
       );
     }
+
+    if (calcularQuantidadeCombosDoDetalhe(detalhe) < 1n) {
+      throw new BadRequestException(
+        `O intervalo ${detalhe.rangeInicio.toString()}-${detalhe.rangeFinal.toString()} não suporta ao menos 1 combo para ${detalhe.tipoCartela}`,
+      );
+    }
   }
 
-  const ordenados = [...detalhes].sort((a, b) =>
-    a.rangeInicio < b.rangeInicio ? -1 : 1,
+  const detalhesOrdenados = [...detalhes].sort((a, b) =>
+    a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0,
   );
 
-  for (let i = 1; i < ordenados.length; i += 1) {
-    const anterior = ordenados[i - 1];
-    const atual = ordenados[i];
+  for (let i = 1; i < detalhesOrdenados.length; i += 1) {
+    const anterior = detalhesOrdenados[i - 1];
+    const atual = detalhesOrdenados[i];
 
     if (possuiSobreposicao(anterior, atual)) {
       throw new ConflictException(
-        `Os detalhes da edição possuem ranges sobrepostos: ${anterior.rangeInicio.toString()}-${anterior.rangeFinal.toString()} e ${atual.rangeInicio.toString()}-${atual.rangeFinal.toString()}`,
+        `Os intervalos configurados para a edição se sobrepõem: ${anterior.tipoCartela} (${anterior.rangeInicio.toString()}-${anterior.rangeFinal.toString()}) e ${atual.tipoCartela} (${atual.rangeInicio.toString()}-${atual.rangeFinal.toString()})`,
       );
     }
   }
@@ -119,12 +138,12 @@ export function isOrigemDigital(origem: OrigemParticipacao): boolean {
 }
 
 export function isOrigemFisica(origem: OrigemParticipacao): boolean {
-  return origem === OrigemParticipacao.FISICO || origem === OrigemParticipacao.POS;
+  return (
+    origem === OrigemParticipacao.FISICO || origem === OrigemParticipacao.POS
+  );
 }
 
-export function calcularResumoDosRanges(
-  detalhes: DetalheRangeNormalizado[],
-): {
+export function calcularResumoDosRanges(detalhes: DetalheRangeNormalizado[]): {
   rangeInicio: bigint;
   rangeFinal: bigint;
 } {
@@ -143,6 +162,73 @@ export function calcularResumoDosRanges(
   return { rangeInicio, rangeFinal };
 }
 
+export function expandirSetoresDoDetalhe(
+  detalhe: Pick<
+    DetalheRangeNormalizado,
+    'origemParticipacao' | 'tipoCartela' | 'rangeInicio' | 'rangeFinal'
+  >,
+): SetorDetalheRange[] {
+  const quantidadeChances = obterQuantidadeChances(detalhe.tipoCartela);
+  const quantidadeCombos = calcularQuantidadeCombosDoDetalhe(detalhe);
+
+  if (quantidadeCombos < 1n) {
+    return [];
+  }
+
+  return Array.from(
+    { length: quantidadeChances },
+    (_, index) => {
+      const deslocamento = BigInt(index) * quantidadeCombos;
+      const rangeInicio = detalhe.rangeInicio + deslocamento;
+
+      return {
+        origemParticipacao: detalhe.origemParticipacao,
+        tipoCartela: detalhe.tipoCartela,
+        indiceChance: index + 1,
+        rangeInicio,
+        rangeFinal: rangeInicio + quantidadeCombos - 1n,
+        rangeTotalInicio: detalhe.rangeInicio,
+        rangeTotalFinal: detalhe.rangeFinal,
+        quantidadeCombos,
+      };
+    },
+  );
+}
+
+export function expandirSetoresDosDetalhes(
+  detalhes: Array<
+    Pick<
+      DetalheRangeNormalizado,
+      'origemParticipacao' | 'tipoCartela' | 'rangeInicio' | 'rangeFinal'
+    >
+  >,
+): SetorDetalheRange[] {
+  return detalhes.flatMap((detalhe) => expandirSetoresDoDetalhe(detalhe));
+}
+
+export function calcularTotalBilhetesDoDetalhe(
+  detalhe: Pick<
+    DetalheRangeNormalizado,
+    'tipoCartela' | 'rangeInicio' | 'rangeFinal'
+  >,
+): bigint {
+  return (
+    calcularQuantidadeCombosDoDetalhe(detalhe) *
+    BigInt(obterQuantidadeChances(detalhe.tipoCartela))
+  );
+}
+
+export function calcularTotalBilhetesDosDetalhes(
+  detalhes: Array<
+    Pick<DetalheRangeNormalizado, 'tipoCartela' | 'rangeInicio' | 'rangeFinal'>
+  >,
+): bigint {
+  return detalhes.reduce(
+    (total, detalhe) => total + calcularTotalBilhetesDoDetalhe(detalhe),
+    0n,
+  );
+}
+
 export function possuiSobreposicao(
   atual: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
   comparado: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
@@ -153,9 +239,7 @@ export function possuiSobreposicao(
   );
 }
 
-export function obterDetalhesComFallback(
-  edicao: EdicaoComRelacoes,
-): Array<
+export function obterDetalhesComFallback(edicao: EdicaoComRelacoes): Array<
   | EdicaoDetalhe
   | (DetalheRangeNormalizado & {
       id: string;
@@ -182,4 +266,17 @@ export function obterDetalhesComFallback(
 
 export function obterQuantidadeChances(tipoCartela: TipoCartela): number {
   return QUANTIDADE_CHANCES_POR_TIPO_CARTELA[tipoCartela];
+}
+
+export function calcularQuantidadeCombosDoDetalhe(
+  detalhe: Pick<DetalheRangeNormalizado, 'tipoCartela' | 'rangeInicio' | 'rangeFinal'>,
+): bigint {
+  const totalNumeros = detalhe.rangeFinal - detalhe.rangeInicio + 1n;
+  return totalNumeros / BigInt(obterQuantidadeChances(detalhe.tipoCartela));
+}
+
+export function calcularPassoEntreChancesDoDetalhe(
+  detalhe: Pick<DetalheRangeNormalizado, 'tipoCartela' | 'rangeInicio' | 'rangeFinal'>,
+): bigint {
+  return calcularQuantidadeCombosDoDetalhe(detalhe);
 }

@@ -1,6 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { Prisma, StatusEdicao, StatusVenda, TipoPagamento, OrigemParticipacao } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  OrigemParticipacao,
+  Prisma,
+  StatusEdicao,
+  StatusVenda,
+  TipoCartela,
+  TipoPagamento,
+} from '@prisma/client';
 import { VendasService } from './vendas.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
@@ -42,9 +53,8 @@ describe('VendasService', () => {
     distribuidor: {
       findUnique: jest.fn(),
     },
-    range: {
+    matrizRange: {
       findMany: jest.fn(),
-      updateMany: jest.fn(),
     },
     bilhete: {
       createMany: jest.fn(),
@@ -174,6 +184,15 @@ describe('VendasService', () => {
       numero: 8,
       status: StatusEdicao.ATIVA,
       valorCartela: new Prisma.Decimal('30.00'),
+      detalhes: [
+        {
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          tipoCartela: TipoCartela.UMA_CHANCE,
+          rangeInicio: BigInt(1000000),
+          rangeFinal: BigInt(1999999),
+          preco: null,
+        },
+      ],
     };
 
     const clienteMock = {
@@ -330,6 +349,48 @@ describe('VendasService', () => {
         }),
       );
     });
+
+    it('should use detalhe price and persist tipoCartela when informed', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        ...edicaoAtiva,
+        detalhes: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1199999),
+            preco: new Prisma.Decimal('25.00'),
+          },
+        ],
+      });
+      mockPrisma.cliente.findUnique.mockResolvedValue(clienteMock);
+      mockPrisma.venda.create.mockResolvedValue({
+        ...vendaCriada,
+        tipoCartela: TipoCartela.DUAS_CHANCES,
+        total: new Prisma.Decimal('50.00'),
+      });
+      mockPrisma.venda.findUnique.mockResolvedValue(vendaCriada);
+      mockGateway.criarCobranca.mockResolvedValue({
+        gatewayId: 'txid-123',
+        payload: {},
+      });
+      mockPrisma.venda.update.mockResolvedValue(vendaCriada);
+
+      await service.create({
+        ...createDto,
+        tipoCartela: TipoCartela.DUAS_CHANCES,
+      });
+
+      expect(mockPrisma.venda.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            quantidade: 2,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            total: new Prisma.Decimal('50.00'),
+          }),
+        }),
+      );
+    });
   });
 
   // ─── findByCliente ────────────────────────────────────
@@ -353,6 +414,64 @@ describe('VendasService', () => {
     });
   });
 
+  describe('listarCombosDisponiveis', () => {
+    it('should return grouped deterministic combos for the requested tipoCartela', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-1',
+        numero: 10,
+        status: StatusEdicao.ATIVA,
+        rangeInicio: BigInt(1000000),
+        rangeFinal: BigInt(1199999),
+        detalhes: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1199999),
+            preco: null,
+          },
+        ],
+      });
+
+      const linhas = [
+        { id: 'matriz-1', numero: BigInt(1000000), sequenciaBolas: [1, 2, 3] },
+        { id: 'matriz-2', numero: BigInt(1100000), sequenciaBolas: [4, 5, 6] },
+      ];
+
+      mockPrisma.matrizRange.findMany
+        .mockResolvedValueOnce([linhas[0]])
+        .mockResolvedValueOnce(linhas);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-1',
+        tipoCartela: TipoCartela.DUAS_CHANCES,
+        limit: 1,
+      });
+
+      expect(result.data.quantidadeChances).toBe(2);
+      expect(result.data.combos).toEqual([
+        {
+          ordemSequencia: 1,
+          numeroBase: '1000000',
+          bilhetes: [
+            {
+              ordem: 1,
+              matrizId: 'matriz-1',
+              numero: '1000000',
+              sequenciaBolas: [1, 2, 3],
+            },
+            {
+              ordem: 2,
+              matrizId: 'matriz-2',
+              numero: '1100000',
+              sequenciaBolas: [4, 5, 6],
+            },
+          ],
+        },
+      ]);
+    });
+  });
+
   // ─── confirmarPagamento ───────────────────────────────
 
   describe('confirmarPagamento', () => {
@@ -361,6 +480,7 @@ describe('VendasService', () => {
       edicaoId: 'edicao-1',
       vendedorId: 'vendedor-1',
       distribuidorId: 'distribuidor-1',
+      origemParticipacao: OrigemParticipacao.DIGITAL,
       status: StatusVenda.PENDENTE,
       total: new Prisma.Decimal('60.00'),
       quantidade: 2,
@@ -402,14 +522,30 @@ describe('VendasService', () => {
           findUnique: jest.fn().mockResolvedValue({
             rangeInicio: BigInt(1000000),
             rangeFinal: BigInt(1999999),
+            detalhes: [
+              {
+                origemParticipacao: OrigemParticipacao.DIGITAL,
+                tipoCartela: TipoCartela.UMA_CHANCE,
+                rangeInicio: BigInt(1000000),
+                rangeFinal: BigInt(1999999),
+                preco: null,
+              },
+            ],
           }),
         },
-        range: {
+        matrizRange: {
           findMany: jest.fn().mockResolvedValue([
-            { id: 'range-1', numero: BigInt(1000000), sequenciaBolas: [1, 2, 3] },
-            { id: 'range-2', numero: BigInt(1000001), sequenciaBolas: [4, 5, 6] },
+            {
+              id: 'matriz-1',
+              numero: BigInt(1000000),
+              sequenciaBolas: [1, 2, 3],
+            },
+            {
+              id: 'matriz-2',
+              numero: BigInt(1000001),
+              sequenciaBolas: [4, 5, 6],
+            },
           ]),
-          updateMany: jest.fn().mockResolvedValue({ count: 2 }),
         },
         bilhete: {
           createMany: jest.fn().mockResolvedValue({ count: 2 }),
@@ -439,7 +575,8 @@ describe('VendasService', () => {
       };
 
       mockPrisma.$transaction.mockImplementation(
-        async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock),
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
       );
 
       const result = await service.confirmarPagamento('venda-1');
@@ -459,8 +596,8 @@ describe('VendasService', () => {
           data: expect.objectContaining({
             distribuidorId: 'distribuidor-1',
             valor: new Prisma.Decimal('6.00'), // Os outros 50% de 20% de 60.00
-          })
-        })
+          }),
+        }),
       );
       expect(txMock.venda.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -469,6 +606,181 @@ describe('VendasService', () => {
           }),
         }),
       );
+    });
+
+    it('should allocate grouped numbers with fixed jump for multi-chance cartelas', async () => {
+      mockPrisma.venda.findUnique.mockResolvedValue({
+        ...vendaPendente,
+        quantidade: 2,
+        tipoCartela: TipoCartela.DUAS_CHANCES,
+      });
+
+      const linhas = [
+        { id: 'matriz-1', numero: BigInt(1000000), sequenciaBolas: [1, 2, 3] },
+        { id: 'matriz-2', numero: BigInt(1000001), sequenciaBolas: [4, 5, 6] },
+        { id: 'matriz-3', numero: BigInt(1100000), sequenciaBolas: [7, 8, 9] },
+        {
+          id: 'matriz-4',
+          numero: BigInt(1100001),
+          sequenciaBolas: [10, 11, 12],
+        },
+      ];
+      const txMock = {
+        edicao: {
+          findUnique: jest.fn().mockResolvedValue({
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1199999),
+            detalhes: [
+              {
+                origemParticipacao: OrigemParticipacao.DIGITAL,
+                tipoCartela: TipoCartela.DUAS_CHANCES,
+                rangeInicio: BigInt(1000000),
+                rangeFinal: BigInt(1199999),
+                preco: null,
+              },
+            ],
+          }),
+        },
+        matrizRange: {
+          findMany: jest.fn().mockImplementation(({ where }) => {
+            if ('in' in where.numero) {
+              return Promise.resolve(linhas);
+            }
+
+            return Promise.resolve(linhas.slice(0, 2));
+          }),
+        },
+        bilhete: {
+          createMany: jest.fn().mockResolvedValue({ count: 4 }),
+        },
+        distribuidor: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'distribuidor-1',
+            comissaoPercent: new Prisma.Decimal('20'),
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        comissaoDistribuidor: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+        comissao: {
+          create: jest.fn().mockResolvedValue({ id: 'comissao-1' }),
+        },
+        vendedor: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+        venda: {
+          update: jest.fn().mockResolvedValue({
+            ...vendaPendente,
+            status: StatusVenda.APROVADO,
+          }),
+        },
+      };
+
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
+
+      await service.confirmarPagamento('venda-1');
+
+      expect(txMock.bilhete.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            numero: BigInt(1000000),
+            matrizId: 'matriz-1',
+          }),
+          expect.objectContaining({
+            numero: BigInt(1100000),
+            matrizId: 'matriz-3',
+          }),
+          expect.objectContaining({
+            numero: BigInt(1000001),
+            matrizId: 'matriz-2',
+          }),
+          expect.objectContaining({
+            numero: BigInt(1100001),
+            matrizId: 'matriz-4',
+          }),
+        ],
+      });
+    });
+
+    it('should reject multi-chance sale when partner numbers are unavailable', async () => {
+      mockPrisma.venda.findUnique.mockResolvedValue({
+        ...vendaPendente,
+        quantidade: 1,
+        tipoCartela: TipoCartela.DUAS_CHANCES,
+      });
+
+      let chamadaFindMany = 0;
+      const base = {
+        id: 'matriz-1',
+        numero: BigInt(1000000),
+        sequenciaBolas: [1, 2, 3],
+      };
+
+      const txMock = {
+        edicao: {
+          findUnique: jest.fn().mockResolvedValue({
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1199999),
+            detalhes: [
+              {
+                origemParticipacao: OrigemParticipacao.DIGITAL,
+                tipoCartela: TipoCartela.DUAS_CHANCES,
+                rangeInicio: BigInt(1000000),
+                rangeFinal: BigInt(1199999),
+                preco: null,
+              },
+            ],
+          }),
+        },
+        matrizRange: {
+          findMany: jest.fn().mockImplementation(() => {
+            chamadaFindMany += 1;
+
+            if (chamadaFindMany === 1) {
+              return Promise.resolve([base]);
+            }
+
+            if (chamadaFindMany === 2) {
+              return Promise.resolve([base]);
+            }
+
+            return Promise.resolve([]);
+          }),
+        },
+        bilhete: {
+          createMany: jest.fn(),
+        },
+        distribuidor: {
+          findUnique: jest.fn(),
+          update: jest.fn(),
+        },
+        comissaoDistribuidor: {
+          create: jest.fn(),
+        },
+        comissao: {
+          create: jest.fn(),
+        },
+        vendedor: {
+          update: jest.fn(),
+        },
+        venda: {
+          update: jest.fn(),
+        },
+      };
+
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
+
+      await expect(service.confirmarPagamento('venda-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(txMock.bilhete.createMany).not.toHaveBeenCalled();
     });
   });
 
@@ -503,8 +815,8 @@ describe('VendasService', () => {
         gatewayPayload: {},
         vendedorId: 'vendedor-1',
         bilhetes: [
-          { id: 'bilhete-1', rangeId: 'range-1' },
-          { id: 'bilhete-2', rangeId: 'range-2' },
+          { id: 'bilhete-1', matrizId: 'matriz-1', edicaoId: 'edicao-1' },
+          { id: 'bilhete-2', matrizId: 'matriz-2', edicaoId: 'edicao-1' },
         ],
         comissao: { id: 'comissao-1', valor: new Prisma.Decimal('6.00') },
         vendedor: { id: 'vendedor-1' },
@@ -512,10 +824,12 @@ describe('VendasService', () => {
 
       mockPrisma.venda.findUnique
         .mockResolvedValueOnce(vendaComBilhetes) // cancelar() lookup
-        .mockResolvedValueOnce({ ...vendaComBilhetes, status: StatusVenda.CANCELADO }); // final lookup
+        .mockResolvedValueOnce({
+          ...vendaComBilhetes,
+          status: StatusVenda.CANCELADO,
+        }); // final lookup
 
       const txMock = {
-        range: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
         bilhete: { deleteMany: jest.fn().mockResolvedValue({ count: 2 }) },
         vendedor: { update: jest.fn().mockResolvedValue({}) },
         comissao: { delete: jest.fn().mockResolvedValue({}) },
@@ -523,14 +837,14 @@ describe('VendasService', () => {
       };
 
       mockPrisma.$transaction.mockImplementation(
-        async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock),
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
       );
       mockGateway.cancelarCobranca.mockResolvedValue(undefined);
 
       const result = await service.cancelar('venda-1', 'Solicitado pelo admin');
 
       expect(result.message).toBe('Venda cancelada com sucesso');
-      expect(txMock.range.updateMany).toHaveBeenCalled();
       expect(txMock.bilhete.deleteMany).toHaveBeenCalled();
       expect(txMock.comissao.delete).toHaveBeenCalled();
       expect(mockGateway.cancelarCobranca).toHaveBeenCalledWith('txid-123');
@@ -544,7 +858,9 @@ describe('VendasService', () => {
       mockPrisma.venda.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.atualizarStatus('inexistente', { status: StatusVenda.APROVADO }),
+        service.atualizarStatus('inexistente', {
+          status: StatusVenda.APROVADO,
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -560,11 +876,10 @@ describe('VendasService', () => {
     });
 
     it('should allow PENDENTE -> RECUSADO transition', async () => {
-      mockPrisma.venda.findUnique
-        .mockResolvedValueOnce({
-          id: 'venda-1',
-          status: StatusVenda.PENDENTE,
-        });
+      mockPrisma.venda.findUnique.mockResolvedValueOnce({
+        id: 'venda-1',
+        status: StatusVenda.PENDENTE,
+      });
 
       mockPrisma.venda.update.mockResolvedValue({
         id: 'venda-1',

@@ -26,7 +26,7 @@ export class CreateEdicaoDetalheDto {
   @ApiProperty({
     example: '1000000',
     description:
-      'Início do range numérico da cartela. Deve conter ao menos 7 dígitos.',
+      'Início do intervalo total do combo dentro da matriz. A API divide esse intervalo em setores determinísticos conforme a quantidade de chances. Deve conter ao menos 7 dígitos.',
   })
   @IsString()
   @Matches(RANGE_MINIMO_REGEX, {
@@ -37,7 +37,7 @@ export class CreateEdicaoDetalheDto {
   @ApiProperty({
     example: '1999999',
     description:
-      'Fim do range numérico da cartela. Deve conter ao menos 7 dígitos.',
+      'Fim do intervalo total do combo dentro da matriz. A API divide esse intervalo em setores determinísticos conforme a quantidade de chances. Deve conter ao menos 7 dígitos.',
   })
   @IsString()
   @Matches(RANGE_MINIMO_REGEX, {
@@ -47,7 +47,8 @@ export class CreateEdicaoDetalheDto {
 
   @ApiPropertyOptional({
     example: '10.00',
-    description: 'Preço deste tier de chances. Se omitido, usará o valorCartela da edição.',
+    description:
+      'Preço deste tier de chances. Se omitido, usará o valorCartela da edição.',
   })
   @IsOptional()
   @IsString()

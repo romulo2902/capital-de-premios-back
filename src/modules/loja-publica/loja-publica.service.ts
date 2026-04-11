@@ -17,7 +17,13 @@ import {
   TipoCartela,
 } from '@prisma/client';
 import { ConteudoService } from '../conteudo/conteudo.service';
-import { obterQuantidadeChances } from '../edicoes/edicoes-range.util';
+import {
+  calcularPassoEntreChancesDoDetalhe,
+  expandirSetoresDoDetalhe,
+  obterQuantidadeChances,
+} from '../edicoes/edicoes-range.util';
+import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
+import { ListarCombosLojaDto } from './dto/listar-combos-loja.dto';
 
 @Injectable()
 export class LojaPublicaService {
@@ -28,6 +34,7 @@ export class LojaPublicaService {
     private readonly vendasService: VendasService,
     private readonly conteudoService: ConteudoService,
     private readonly config: ConfigService,
+    private readonly paymentGatewayFactory: PaymentGatewayFactory,
   ) {}
 
   async getHome() {
@@ -37,19 +44,29 @@ export class LojaPublicaService {
         premios: { orderBy: { ordem: 'asc' } },
         detalhes: {
           where: { origemParticipacao: OrigemParticipacao.DIGITAL },
-          orderBy: { tipoCartela: 'asc' }
-        }
-      }
+          orderBy: { tipoCartela: 'asc' },
+        },
+      },
     });
 
     if (!edicaoAtiva) {
       return { message: 'Nenhuma edição ativa no momento', data: null };
     }
 
-    const opcoesDeCompra = edicaoAtiva.detalhes.map(detalhe => {
-      const preco = (detalhe as any).preco ? (detalhe as any).preco : edicaoAtiva.valorCartela;
+    const opcoesDeCompra = edicaoAtiva.detalhes.map((detalhe) => {
+      const preco = detalhe.preco ?? edicaoAtiva.valorCartela;
       return {
         tipoCartela: detalhe.tipoCartela,
+        quantidadeChances: obterQuantidadeChances(detalhe.tipoCartela),
+        rangeTotalInicio: detalhe.rangeInicio.toString(),
+        rangeTotalFinal: detalhe.rangeFinal.toString(),
+        passoEntreChances:
+          calcularPassoEntreChancesDoDetalhe(detalhe).toString(),
+        setores: expandirSetoresDoDetalhe(detalhe).map((setor) => ({
+          indiceChance: setor.indiceChance,
+          rangeInicio: setor.rangeInicio.toString(),
+          rangeFinal: setor.rangeFinal.toString(),
+        })),
         preco: preco.toString(),
       };
     });
@@ -68,7 +85,7 @@ export class LojaPublicaService {
           valorCartela: edicaoAtiva.valorCartela.toString(),
           qtdNumerosCartela: edicaoAtiva.qtdNumerosCartela,
         },
-        premios: edicaoAtiva.premios.map(p => ({
+        premios: edicaoAtiva.premios.map((p) => ({
           ordem: p.ordem,
           descricao: p.descricao,
           valor: p.valor.toString(),
@@ -77,8 +94,8 @@ export class LojaPublicaService {
         countdown: {
           dataSorteio: edicaoAtiva.dataSorteio,
           serverTime: new Date(),
-        }
-      }
+        },
+      },
     };
   }
 
@@ -86,40 +103,58 @@ export class LojaPublicaService {
     return this.getHome(); // Serve the same data since home essentially focuses on the active edition
   }
 
+  async listarCombosDisponiveis(
+    edicaoId: string,
+    filtros: ListarCombosLojaDto,
+  ) {
+    return this.vendasService.listarCombosDisponiveis({
+      edicaoId,
+      origemParticipacao:
+        filtros.origemParticipacao ?? OrigemParticipacao.DIGITAL,
+      tipoCartela: filtros.tipoCartela,
+      cursorNumeroBase: filtros.cursorNumeroBase,
+      direcao: filtros.direcao,
+      limit: filtros.limit,
+    });
+  }
+
   async comprar(dto: ComprarLojaDto) {
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: dto.edicaoId },
       include: {
         detalhes: {
-          where: { 
+          where: {
             origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: dto.tipoCartela
-          }
-        }
-      }
+            tipoCartela: dto.tipoCartela,
+          },
+        },
+      },
     });
 
     if (!edicao) throw new NotFoundException('Edição não encontrada');
-    if (edicao.status !== StatusEdicao.ATIVA) throw new BadRequestException('Edição não está ativa');
+    if (edicao.status !== StatusEdicao.ATIVA)
+      throw new BadRequestException('Edição não está ativa');
 
     const detalheSelecionado = edicao.detalhes[0];
     if (!detalheSelecionado) {
-      throw new BadRequestException('Tipo de cartela não está disponível para esta edição');
+      throw new BadRequestException(
+        'Tipo de cartela não está disponível para esta edição',
+      );
     }
 
-    const quantidadeCartelas = obterQuantidadeChances(dto.tipoCartela) * dto.quantidade;
+    const quantidadeBilhetes =
+      obterQuantidadeChances(dto.tipoCartela) * dto.quantidade;
 
     // Calcula total
-    const precoUnitario = (detalheSelecionado as any).preco ? Number((detalheSelecionado as any).preco) : Number(edicao.valorCartela);
+    const precoUnitario = Number(
+      detalheSelecionado.preco ?? edicao.valorCartela,
+    );
     const total = precoUnitario * dto.quantidade;
 
-    // Use the existing VendasService to generate logic, but we modify how the service handles the price, 
-    // or we create the venda manual here and call the gateway
-    // Assuming VendasService calculates `total` internally, it might be safer to create the sale directly here 
-    // to override the price logic if `vendasService.create` doesn't support custom pricing yet.
-
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    let cliente = await this.prisma.cliente.findUnique({ where: { cpf: cpfLimpo } });
+    let cliente = await this.prisma.cliente.findUnique({
+      where: { cpf: cpfLimpo },
+    });
     if (!cliente) {
       const dbDate = dto.dataNascimento ? new Date(dto.dataNascimento) : null;
       cliente = await this.prisma.cliente.create({
@@ -129,29 +164,21 @@ export class LojaPublicaService {
           telefone: dto.telefone,
           email: dto.email,
           dataNascimento: dbDate && !isNaN(dbDate.getTime()) ? dbDate : null,
-        }
+        },
       });
     }
 
-    // Since VendasService calculates price rigidly by valorCartela * quantidade,
-    // We will mimic the create method but specify the calculated total directly
-    // Assuming VendasService logic needs an update, I will update VendasService manually or mimic it here.
-    // For now, let's call the `VendasService`, but wait... I need to update VendasService to accept 'total' or 'tipoCartela'.
-    
-    // Creating it manually as VendasService might be overriden later, or we use a separate method in VendasService.
-    // For simplicity, let's just create it here:
-    
     const venda = await this.prisma.venda.create({
       data: {
         edicaoId: edicao.id,
         clienteId: cliente.id,
-        quantidade: quantidadeCartelas,
+        quantidade: dto.quantidade,
         tipoCartela: dto.tipoCartela,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao: OrigemParticipacao.DIGITAL,
         tipoPagamento: TipoPagamento.PIX,
-      }
+      },
     });
 
     const mockPagamentoAprovado = this.isMockPagamentoAprovado();
@@ -188,16 +215,15 @@ export class LojaPublicaService {
         },
       });
 
-      this.logger.log(
-        `Pagamento mock autoaprovado para venda ${venda.id}`,
-      );
+      this.logger.log(`Pagamento mock autoaprovado para venda ${venda.id}`);
 
       return {
         message: 'Pedido criado e aprovado com sucesso (mock)',
         data: {
           vendaId: venda.id,
           total: vendaAprovada?.total.toString() ?? venda.total.toString(),
-          quantidadeCartelas,
+          quantidadeCartelas: dto.quantidade,
+          quantidadeBilhetes,
           status: vendaAprovada?.status ?? StatusVenda.APROVADO,
           pagamento: {
             mock: true,
@@ -211,34 +237,33 @@ export class LojaPublicaService {
 
     // Create PIX charge
     let dadosPagamento = {};
-    const paymentGatewayFactory = (this.vendasService as any).paymentGatewayFactory; // Accessing internal for now, should ideally be public or injected
-    if (paymentGatewayFactory) {
-      try {
-        const gateway = paymentGatewayFactory.getGateway(TipoPagamento.PIX);
-        const cobranca = await gateway.criarCobranca({
-          vendaId: venda.id,
-          valorCentavos: Math.round(total * 100),
-          descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidade}x ${dto.tipoCartela}`,
-          cpfPagador: cpfLimpo,
-          nomePagador: dto.nome,
-          expiracaoSegundos: 3600 // 1 hour
-        });
+    try {
+      const gateway = this.paymentGatewayFactory.getGateway(TipoPagamento.PIX);
+      const cobranca = await gateway.criarCobranca({
+        vendaId: venda.id,
+        valorCentavos: Math.round(total * 100),
+        descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidade}x ${dto.tipoCartela}`,
+        cpfPagador: cpfLimpo,
+        nomePagador: dto.nome,
+        expiracaoSegundos: 3600,
+      });
 
-        await this.prisma.venda.update({
-          where: { id: venda.id },
-          data: {
-            gatewayId: cobranca.gatewayId,
-            gatewayPayload: cobranca.payload as any,
-          }
-        });
-        dadosPagamento = {
-          pixCopiaECola: cobranca.pixCopiaECola,
-          qrCodeBase64: cobranca.qrCodeBase64,
-          urlPagamento: cobranca.urlPagamento,
-        }
-      } catch (e) {
-        console.error("Gateway error:", e);
-      }
+      await this.prisma.venda.update({
+        where: { id: venda.id },
+        data: {
+          gatewayId: cobranca.gatewayId,
+          gatewayPayload: cobranca.payload as Prisma.InputJsonValue,
+        },
+      });
+      dadosPagamento = {
+        pixCopiaECola: cobranca.pixCopiaECola,
+        qrCodeBase64: cobranca.qrCodeBase64,
+        urlPagamento: cobranca.urlPagamento,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Erro ao criar cobrança PIX para venda ${venda.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     return {
@@ -246,9 +271,10 @@ export class LojaPublicaService {
       data: {
         vendaId: venda.id,
         total: venda.total.toString(),
-        quantidadeCartelas,
-        pagamento: dadosPagamento
-      }
+        quantidadeCartelas: dto.quantidade,
+        quantidadeBilhetes,
+        pagamento: dadosPagamento,
+      },
     };
   }
 
@@ -258,14 +284,17 @@ export class LojaPublicaService {
 
   async consultarNumeros(cpf: string) {
     const cpfLimpo = cpf.replace(/\D/g, '');
-    const cliente = await this.prisma.cliente.findUnique({ where: { cpf: cpfLimpo } });
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { cpf: cpfLimpo },
+    });
 
-    if (!cliente) throw new NotFoundException('Nenhum cadastro encontrado para este CPF');
+    if (!cliente)
+      throw new NotFoundException('Nenhum cadastro encontrado para este CPF');
 
     const vendas = await this.prisma.venda.findMany({
       where: {
         clienteId: cliente.id,
-        status: StatusVenda.APROVADO
+        status: StatusVenda.APROVADO,
       },
       include: {
         edicao: {
@@ -275,13 +304,13 @@ export class LojaPublicaService {
               where: { origemParticipacao: OrigemParticipacao.DIGITAL },
               orderBy: { tipoCartela: 'asc' },
             },
-          }
+          },
         },
         bilhetes: {
           orderBy: { numero: 'asc' },
         },
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
 
     this.logger.log(
@@ -302,7 +331,7 @@ export class LojaPublicaService {
           emailMascarado,
           telefone: cliente.telefone,
         },
-        compras: vendas.map(v => ({
+        compras: vendas.map((v) => ({
           vendaId: v.id,
           numeroPedido: v.id,
           status: v.status,
@@ -331,7 +360,9 @@ export class LojaPublicaService {
             dataSorteio: v.edicao.dataSorteio,
             dataSorteioFormatada: this.formatarData(v.edicao.dataSorteio),
             dataEncerramento: v.edicao.dataEncerramento,
-            dataEncerramentoFormatada: this.formatarDataHora(v.edicao.dataEncerramento),
+            dataEncerramentoFormatada: this.formatarDataHora(
+              v.edicao.dataEncerramento,
+            ),
             imagemUrl: v.edicao.imagemUrl,
             frase: v.edicao.frase,
             valorCartela: v.edicao.valorCartela.toString(),
@@ -345,23 +376,28 @@ export class LojaPublicaService {
                 detalhe.preco ?? v.edicao.valorCartela,
               ),
             })),
-            premios: v.edicao.premios.map(p => ({
+            premios: v.edicao.premios.map((p) => ({
               ordem: p.ordem,
               descricao: p.descricao,
               valor: p.valor.toString(),
               valorFormatado: this.formatarMoeda(p.valor),
-            }))
+            })),
           },
           resumo: {
             titulo: `EDIÇÃO ${String(v.edicao.numero).padStart(2, '0')} | ${this.formatarData(v.edicao.dataSorteio)}`,
-            subtitulo: `${v.bilhetes.length} cartela(s) com ${v.edicao.qtdNumerosCartela} número(s) cada`,
+            subtitulo: `${v.quantidade} combo(s) com ${v.edicao.qtdNumerosCartela} número(s) por bilhete`,
           },
-          bilhetes: v.bilhetes.map(b => ({
+          combos: this.agruparBilhetesPorCombo(
+            v.bilhetes,
+            v.edicao.detalhes,
+            v.tipoCartela,
+          ),
+          bilhetes: v.bilhetes.map((b) => ({
             numero: b.numero.toString(),
             sequenciaBolas: b.sequenciaBolas,
           })),
-        }))
-      }
+        })),
+      },
     };
   }
 
@@ -370,18 +406,18 @@ export class LojaPublicaService {
       where: { status: StatusEdicao.FINALIZADA },
       include: { resultado: true, premios: { include: { edicao: false } } }, // Add logic to fetch winners
       orderBy: { dataSorteio: 'desc' },
-      take: 10
+      take: 10,
     });
 
     return {
       message: 'Resultados carregados',
-      data: edicoes.map(e => ({
+      data: edicoes.map((e) => ({
         id: e.id,
         numero: e.numero,
         dataSorteio: e.dataSorteio,
         resultado: e.resultado ? e.resultado.numerosApurados : null,
-      }))
-    }
+      })),
+    };
   }
 
   async getPagina(slug: string) {
@@ -447,5 +483,72 @@ export class LojaPublicaService {
       hour: '2-digit',
       minute: '2-digit',
     }).format(data);
+  }
+
+  private agruparBilhetesPorCombo(
+    bilhetes: Array<{ numero: bigint; sequenciaBolas: number[] }>,
+    detalhes: Array<{
+      origemParticipacao: OrigemParticipacao;
+      tipoCartela: TipoCartela;
+      rangeInicio: bigint;
+      rangeFinal: bigint;
+      preco: Prisma.Decimal | null;
+    }>,
+    tipoCartela?: TipoCartela | null,
+  ) {
+    const grupos = new Map<
+      string,
+      {
+        numeroBase: bigint;
+        tipoCartela: TipoCartela | null;
+        bilhetes: Array<{ numero: bigint; sequenciaBolas: number[] }>;
+      }
+    >();
+
+    const setores = detalhes.flatMap((detalhe) =>
+      expandirSetoresDoDetalhe(detalhe),
+    );
+
+    for (const bilhete of bilhetes) {
+      const setorCorrespondente = setores.find(
+        (setor) =>
+          setor.rangeInicio <= bilhete.numero &&
+          bilhete.numero <= setor.rangeFinal &&
+          (tipoCartela ? setor.tipoCartela === tipoCartela : true),
+      );
+      const numeroBase = setorCorrespondente
+        ? bilhete.numero -
+          (setorCorrespondente.rangeInicio - setorCorrespondente.rangeTotalInicio)
+        : bilhete.numero;
+      const chave = `${tipoCartela ?? setorCorrespondente?.tipoCartela ?? 'SEM_TIPO'}:${numeroBase.toString()}`;
+      const grupoExistente = grupos.get(chave);
+
+      if (grupoExistente) {
+        grupoExistente.bilhetes.push(bilhete);
+        continue;
+      }
+
+      grupos.set(chave, {
+        numeroBase,
+        tipoCartela: tipoCartela ?? setorCorrespondente?.tipoCartela ?? null,
+        bilhetes: [bilhete],
+      });
+    }
+
+    return Array.from(grupos.values())
+      .sort((a, b) => (a.numeroBase < b.numeroBase ? -1 : 1))
+      .map((grupo, index) => ({
+        ordemSequencia: index + 1,
+        numeroBase: grupo.numeroBase.toString(),
+        tipoCartela: grupo.tipoCartela,
+        quantidadeBilhetes: grupo.bilhetes.length,
+        bilhetes: grupo.bilhetes
+          .sort((a, b) => (a.numero < b.numero ? -1 : 1))
+          .map((bilhete, bilheteIndex) => ({
+            ordem: bilheteIndex + 1,
+            numero: bilhete.numero.toString(),
+            sequenciaBolas: bilhete.sequenciaBolas,
+          })),
+      }));
   }
 }
