@@ -30,8 +30,7 @@ import {
   PIX_EXPIRACAO_SEGUNDOS,
 } from './vendas.constants';
 import {
-  calcularPassoEntreChancesDoDetalhe,
-  expandirSetoresDoDetalhe,
+  expandirSetoresDosDetalhes,
   obterQuantidadeChances,
 } from '../edicoes/edicoes-range.util';
 
@@ -84,11 +83,20 @@ export class VendasService {
 
     const origemParticipacao =
       dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
-    const detalheVenda = this.resolverDetalheDaVenda(
+    const detalhesVenda = this.resolverDetalhesDaVenda(
       edicao.detalhes,
       origemParticipacao,
       dto.tipoCartela,
     );
+    const detalheVenda: DetalheVenda =
+      detalhesVenda[0] ??
+      ({
+        origemParticipacao,
+        tipoCartela: dto.tipoCartela ?? TipoCartela.UMA_CHANCE,
+        rangeInicio: edicao.rangeInicio,
+        rangeFinal: edicao.rangeFinal,
+        preco: null,
+      } satisfies DetalheVenda);
 
     // 2. Buscar ou criar cliente por CPF
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
@@ -121,7 +129,9 @@ export class VendasService {
     }
 
     // 4. Calcular total
-    const valorCartela = Number(detalheVenda?.preco ?? edicao.valorCartela);
+    const precoDoCombo =
+      detalhesVenda.find((detalhe) => detalhe.preco !== null)?.preco ?? null;
+    const valorCartela = Number(precoDoCombo ?? edicao.valorCartela);
     const total = valorCartela * dto.quantidade;
 
     // 5. Criar venda com status PENDENTE
@@ -132,7 +142,7 @@ export class VendasService {
         vendedorId: dto.vendedorId ?? null,
         distribuidorId: dto.distribuidorId ?? null,
         quantidade: dto.quantidade,
-        tipoCartela: detalheVenda?.tipoCartela ?? dto.tipoCartela ?? null,
+        tipoCartela: detalheVenda.tipoCartela,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao,
@@ -154,7 +164,7 @@ export class VendasService {
 
     try {
       const gateway = this.paymentGatewayFactory.getGateway(dto.tipoPagamento);
-      const descricaoCartela = detalheVenda?.tipoCartela ?? dto.tipoCartela;
+      const descricaoCartela = detalheVenda.tipoCartela;
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
@@ -246,24 +256,36 @@ export class VendasService {
 
     const origemParticipacao =
       params.origemParticipacao ?? OrigemParticipacao.DIGITAL;
-    const detalheVenda = this.resolverDetalheDaVenda(
+    const detalhesVenda = this.resolverDetalhesDaVenda(
       edicao.detalhes,
       origemParticipacao,
       params.tipoCartela,
     );
-
-    if (!detalheVenda) {
-      throw new BadRequestException('Detalhe da edição não encontrado');
-    }
-
+    const detalheBase: DetalheVenda =
+      detalhesVenda[0] ??
+      ({
+        origemParticipacao,
+        tipoCartela: params.tipoCartela,
+        rangeInicio: edicao.rangeInicio,
+        rangeFinal: edicao.rangeFinal,
+        preco: null,
+      } satisfies DetalheVenda);
+    const detalhesEfetivos = detalhesVenda.length > 0 ? detalhesVenda : [detalheBase];
     const quantidadeChances = this.obterQuantidadeChancesDaVenda(
-      detalheVenda.tipoCartela,
+      detalheBase.tipoCartela,
     );
-    const setores = expandirSetoresDoDetalhe(detalheVenda);
+    const setores = expandirSetoresDosDetalhes(
+      detalhesEfetivos.map((detalhe, index) => ({
+        ...detalhe,
+        ordemConfiguracao: index,
+      })),
+    );
+    const primeiroSetor = setores[0];
+    const segundoSetor = setores[1];
     const grupos = await this.selecionarGruposDisponiveisParaVenda(
       this.prisma,
       edicao.id,
-      detalheVenda,
+      detalhesEfetivos,
       Math.min(Math.max(params.limit ?? 12, 1), 24),
       {
         cursorNumeroBase: params.cursorNumeroBase
@@ -281,12 +303,14 @@ export class VendasService {
         edicaoNumero: edicao.numero,
         status: edicao.status,
         origemParticipacao,
-        tipoCartela: detalheVenda.tipoCartela,
+        tipoCartela: detalheBase.tipoCartela,
         quantidadeChances,
         passoEntreChances:
-          calcularPassoEntreChancesDoDetalhe(detalheVenda).toString(),
-        rangeTotalInicio: detalheVenda.rangeInicio.toString(),
-        rangeTotalFinal: detalheVenda.rangeFinal.toString(),
+          primeiroSetor && segundoSetor
+            ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
+            : '0',
+        rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
+        rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
         setores: setores.map((setor) => ({
           indiceChance: setor.indiceChance,
           rangeInicio: setor.rangeInicio.toString(),
@@ -713,29 +737,33 @@ export class VendasService {
       throw new NotFoundException('Edição não encontrada para alocação');
     }
 
-    const detalheVenda = this.resolverDetalheDaVenda(
+    const detalhesVenda = this.resolverDetalhesDaVenda(
       edicao.detalhes,
       venda.origemParticipacao,
       venda.tipoCartela,
     );
     const quantidadeChances = this.obterQuantidadeChancesDaVenda(
-      detalheVenda?.tipoCartela ?? venda.tipoCartela,
+      detalhesVenda[0]?.tipoCartela ?? venda.tipoCartela,
     );
-    const detalheEfetivo: DetalheVenda =
-      detalheVenda ?? {
-        origemParticipacao: venda.origemParticipacao,
-        tipoCartela: venda.tipoCartela ?? TipoCartela.UMA_CHANCE,
-        rangeInicio: edicao.rangeInicio,
-        rangeFinal: edicao.rangeFinal,
-        preco: null,
-      };
+    const detalhesEfetivos: DetalheVenda[] =
+      detalhesVenda.length > 0
+        ? detalhesVenda
+        : [
+            {
+              origemParticipacao: venda.origemParticipacao,
+              tipoCartela: venda.tipoCartela ?? TipoCartela.UMA_CHANCE,
+              rangeInicio: edicao.rangeInicio,
+              rangeFinal: edicao.rangeFinal,
+              preco: null,
+            },
+          ];
     const combosSelecionados = this.extrairCombosSelecionadosDaVenda(
       venda.gatewayPayload,
     );
     const gruposDisponiveis = await this.selecionarGruposDisponiveisParaVenda(
       tx,
       venda.edicaoId,
-      detalheEfetivo,
+      detalhesEfetivos,
       venda.quantidade,
       {
         strict: true,
@@ -763,7 +791,7 @@ export class VendasService {
   private async selecionarGruposDisponiveisParaVenda(
     client: Prisma.TransactionClient | PrismaService | PrismaClient,
     edicaoId: string,
-    detalhe: DetalheVenda,
+    detalhes: DetalheVenda[],
     quantidadeCartelas: number,
     options: {
       cursorNumeroBase?: bigint;
@@ -772,13 +800,22 @@ export class VendasService {
       numerosBaseSelecionados?: bigint[];
     } = {},
   ): Promise<MatrizDisponivel[][]> {
-    const setores = expandirSetoresDoDetalhe(detalhe);
+    const setores = expandirSetoresDosDetalhes(
+      detalhes.map((detalhe, index) => ({
+        ...detalhe,
+        ordemConfiguracao: index,
+      })),
+    );
     const primeiroSetor = setores[0];
     const quantidadeChances = setores.length;
+    const rangeDescricao =
+      primeiroSetor && setores[setores.length - 1]
+        ? `${primeiroSetor.rangeTotalInicio.toString()}-${setores[setores.length - 1].rangeTotalFinal.toString()}`
+        : 'indefinido';
 
     if (!primeiroSetor) {
       throw new BadRequestException(
-        `O intervalo ${detalhe.rangeInicio.toString()}-${detalhe.rangeFinal.toString()} não suporta ${quantidadeChances} chances`,
+        `O intervalo ${rangeDescricao} não suporta ${quantidadeChances} chances`,
       );
     }
 
@@ -1021,13 +1058,13 @@ export class VendasService {
     return grupos;
   }
 
-  private resolverDetalheDaVenda(
+  private resolverDetalhesDaVenda(
     detalhes: DetalheVenda[],
     origemParticipacao: OrigemParticipacao,
     tipoCartela?: TipoCartela | null,
-  ): DetalheVenda | null {
+  ): DetalheVenda[] {
     if (detalhes.length === 0) {
-      return null;
+      return [];
     }
 
     const detalhesDaOrigem = detalhes.filter(
@@ -1041,29 +1078,33 @@ export class VendasService {
     }
 
     if (tipoCartela) {
-      const detalhe = detalhesDaOrigem.find(
+      const detalhesDoTipo = detalhesDaOrigem.filter(
         (item) => item.tipoCartela === tipoCartela,
       );
 
-      if (!detalhe) {
+      if (detalhesDoTipo.length === 0) {
         throw new BadRequestException(
           `Tipo de cartela ${tipoCartela} não está disponível para a origem ${origemParticipacao}`,
         );
       }
 
-      return detalhe;
+      return detalhesDoTipo.sort((a, b) =>
+        a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0,
+      );
     }
 
-    const detalheUmaChance = detalhesDaOrigem.find(
+    const detalhesUmaChance = detalhesDaOrigem.filter(
       (item) => item.tipoCartela === TipoCartela.UMA_CHANCE,
     );
 
-    if (detalheUmaChance) {
-      return detalheUmaChance;
+    if (detalhesUmaChance.length > 0) {
+      return detalhesUmaChance.sort((a, b) =>
+        a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0,
+      );
     }
 
     if (detalhesDaOrigem.length === 1) {
-      return detalhesDaOrigem[0];
+      return detalhesDaOrigem;
     }
 
     throw new BadRequestException(

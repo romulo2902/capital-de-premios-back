@@ -18,8 +18,8 @@ import {
 } from '@prisma/client';
 import { ConteudoService } from '../conteudo/conteudo.service';
 import {
-  calcularPassoEntreChancesDoDetalhe,
-  expandirSetoresDoDetalhe,
+  agruparDetalhesPorOrigemETipoCartela,
+  expandirSetoresDosDetalhes,
   obterQuantidadeChances,
 } from '../edicoes/edicoes-range.util';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
@@ -53,23 +53,10 @@ export class LojaPublicaService {
       return { message: 'Nenhuma edição ativa no momento', data: null };
     }
 
-    const opcoesDeCompra = edicaoAtiva.detalhes.map((detalhe) => {
-      const preco = detalhe.preco ?? edicaoAtiva.valorCartela;
-      return {
-        tipoCartela: detalhe.tipoCartela,
-        quantidadeChances: obterQuantidadeChances(detalhe.tipoCartela),
-        rangeTotalInicio: detalhe.rangeInicio.toString(),
-        rangeTotalFinal: detalhe.rangeFinal.toString(),
-        passoEntreChances:
-          calcularPassoEntreChancesDoDetalhe(detalhe).toString(),
-        setores: expandirSetoresDoDetalhe(detalhe).map((setor) => ({
-          indiceChance: setor.indiceChance,
-          rangeInicio: setor.rangeInicio.toString(),
-          rangeFinal: setor.rangeFinal.toString(),
-        })),
-        preco: preco.toString(),
-      };
-    });
+    const opcoesDeCompra = this.mapearOpcoesCompraDaEdicao(
+      edicaoAtiva.detalhes,
+      edicaoAtiva.valorCartela,
+    );
 
     return {
       message: 'Dados da home carregados com sucesso',
@@ -388,13 +375,14 @@ export class LojaPublicaService {
             valorCartela: v.edicao.valorCartela.toString(),
             valorCartelaFormatado: this.formatarMoeda(v.edicao.valorCartela),
             qtdNumerosCartela: v.edicao.qtdNumerosCartela,
-            opcoesCompra: v.edicao.detalhes.map((detalhe) => ({
-              tipoCartela: detalhe.tipoCartela,
-              quantidadeCartelas: obterQuantidadeChances(detalhe.tipoCartela),
-              preco: (detalhe.preco ?? v.edicao.valorCartela).toString(),
-              precoFormatado: this.formatarMoeda(
-                detalhe.preco ?? v.edicao.valorCartela,
-              ),
+            opcoesCompra: this.mapearOpcoesCompraDaEdicao(
+              v.edicao.detalhes,
+              v.edicao.valorCartela,
+            ).map((opcao) => ({
+              tipoCartela: opcao.tipoCartela,
+              quantidadeCartelas: opcao.quantidadeChances,
+              preco: opcao.preco,
+              precoFormatado: this.formatarMoeda(Number(opcao.preco)),
             })),
             premios: v.edicao.premios.map((p) => ({
               ordem: p.ordem,
@@ -525,8 +513,11 @@ export class LojaPublicaService {
       }
     >();
 
-    const setores = detalhes.flatMap((detalhe) =>
-      expandirSetoresDoDetalhe(detalhe),
+    const setores = expandirSetoresDosDetalhes(
+      detalhes.map((detalhe, index) => ({
+        ...detalhe,
+        ordemConfiguracao: index,
+      })),
     );
 
     for (const bilhete of bilhetes) {
@@ -574,5 +565,52 @@ export class LojaPublicaService {
 
   private formatarNumeroBilhete(numero: bigint): string {
     return numero.toString().padStart(7, '0');
+  }
+
+  private mapearOpcoesCompraDaEdicao(
+    detalhes: Array<{
+      origemParticipacao: OrigemParticipacao;
+      tipoCartela: TipoCartela;
+      rangeInicio: bigint;
+      rangeFinal: bigint;
+      preco: Prisma.Decimal | null;
+    }>,
+    valorCartelaPadrao: Prisma.Decimal,
+  ) {
+    const grupos = agruparDetalhesPorOrigemETipoCartela(
+      detalhes.map((detalhe, index) => ({
+        ...detalhe,
+        preco: detalhe.preco?.toString(),
+        ordemConfiguracao: index,
+      })),
+    );
+
+    return grupos
+      .filter((grupo) => grupo.origemParticipacao === OrigemParticipacao.DIGITAL)
+      .map((grupo) => {
+        const setores = expandirSetoresDosDetalhes(grupo.detalhes);
+        const primeiroSetor = setores[0];
+        const segundoSetor = setores[1];
+        const preco =
+          grupo.detalhes.find((detalhe) => detalhe.preco)?.preco ??
+          valorCartelaPadrao.toString();
+
+        return {
+          tipoCartela: grupo.tipoCartela,
+          quantidadeChances: obterQuantidadeChances(grupo.tipoCartela),
+          rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
+          rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
+          passoEntreChances:
+            primeiroSetor && segundoSetor
+              ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
+              : '0',
+          setores: setores.map((setor) => ({
+            indiceChance: setor.indiceChance,
+            rangeInicio: setor.rangeInicio.toString(),
+            rangeFinal: setor.rangeFinal.toString(),
+          })),
+          preco,
+        };
+      });
   }
 }

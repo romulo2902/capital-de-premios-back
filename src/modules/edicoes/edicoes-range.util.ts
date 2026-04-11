@@ -23,12 +23,14 @@ export interface SetorDetalheRange {
 export function normalizarDetalhes(
   detalhes: CreateEdicaoDetalheDto[],
 ): DetalheRangeNormalizado[] {
-  return detalhes.map((detalhe) => ({
+  return detalhes.map((detalhe, index) => ({
     origemParticipacao: detalhe.origemParticipacao,
     tipoCartela: detalhe.tipoCartela,
     rangeInicio: BigInt(detalhe.rangeInicio),
     rangeFinal: BigInt(detalhe.rangeFinal),
     preco: detalhe.preco,
+    indiceChance: detalhe.indiceChance,
+    ordemConfiguracao: index,
   }));
 }
 
@@ -37,7 +39,7 @@ export function normalizarDetalhesExistentes(
 ): DetalheRangeNormalizado[] {
   const detalhes = obterDetalhesComFallback(edicao);
 
-  return detalhes.map((detalhe) => ({
+  return detalhes.map((detalhe, index) => ({
     origemParticipacao: detalhe.origemParticipacao,
     tipoCartela: detalhe.tipoCartela,
     rangeInicio: detalhe.rangeInicio,
@@ -46,6 +48,7 @@ export function normalizarDetalhesExistentes(
       'preco' in detalhe && detalhe.preco
         ? detalhe.preco.toString()
         : undefined,
+    ordemConfiguracao: index,
   }));
 }
 
@@ -59,10 +62,84 @@ export function validarDetalhesInternos(
       );
     }
 
-    if (calcularQuantidadeCombosDoDetalhe(detalhe) < 1n) {
+    if (detalhe.rangeFinal - detalhe.rangeInicio + 1n < 1n) {
       throw new BadRequestException(
         `O intervalo ${detalhe.rangeInicio.toString()}-${detalhe.rangeFinal.toString()} não suporta ao menos 1 combo para ${detalhe.tipoCartela}`,
       );
+    }
+  }
+
+  const grupos = agruparDetalhesPorOrigemETipo(detalhes);
+
+  for (const grupo of grupos) {
+    const quantidadeChances = obterQuantidadeChances(grupo.tipoCartela);
+    if (grupo.detalhes.length !== 1 && grupo.detalhes.length !== quantidadeChances) {
+      throw new BadRequestException(
+        `A configuração ${grupo.origemParticipacao}/${grupo.tipoCartela} deve ter 1 range (automático) ou ${quantidadeChances} ranges (manual por chance). Recebido: ${grupo.detalhes.length}`,
+      );
+    }
+
+    if (grupo.detalhes.length === quantidadeChances) {
+      const todosComIndice = grupo.detalhes.every(
+        (detalhe) => typeof detalhe.indiceChance === 'number',
+      );
+      const algumComIndice = grupo.detalhes.some(
+        (detalhe) => typeof detalhe.indiceChance === 'number',
+      );
+
+      if (algumComIndice && !todosComIndice) {
+        throw new BadRequestException(
+          `A configuração ${grupo.origemParticipacao}/${grupo.tipoCartela} deve informar indiceChance em todos os ranges ou em nenhum`,
+        );
+      }
+
+      if (todosComIndice) {
+        const indices = grupo.detalhes.map((detalhe) => detalhe.indiceChance ?? 0);
+        const indicesUnicos = new Set(indices);
+        const possuiForaDoIntervalo = indices.some(
+          (indice) => indice < 1 || indice > quantidadeChances,
+        );
+
+        if (possuiForaDoIntervalo) {
+          throw new BadRequestException(
+            `indiceChance inválido para ${grupo.origemParticipacao}/${grupo.tipoCartela}. Use valores de 1 até ${quantidadeChances}`,
+          );
+        }
+
+        if (indicesUnicos.size !== quantidadeChances) {
+          throw new BadRequestException(
+            `indiceChance duplicado ou ausente em ${grupo.origemParticipacao}/${grupo.tipoCartela}. Informe os índices de 1 até ${quantidadeChances} sem repetição`,
+          );
+        }
+      }
+
+      const tamanhos = grupo.detalhes.map(
+        (detalhe) => detalhe.rangeFinal - detalhe.rangeInicio + 1n,
+      );
+      const primeiro = tamanhos[0];
+      const tamanhosDiferentes = tamanhos.some((tamanho) => tamanho !== primeiro);
+      if (tamanhosDiferentes) {
+        throw new BadRequestException(
+          `Os ranges de ${grupo.origemParticipacao}/${grupo.tipoCartela} devem ter o mesmo tamanho para manter o pareamento dos bilhetes`,
+        );
+      }
+    }
+
+    const precosInformados = grupo.detalhes
+      .map((detalhe) => detalhe.preco?.replace(',', '.').trim())
+      .filter((preco): preco is string => Boolean(preco));
+
+    if (precosInformados.length > 1) {
+      const precoBase = precosInformados[0];
+      const possuiPrecoDiferente = precosInformados.some(
+        (preco) => preco !== precoBase,
+      );
+
+      if (possuiPrecoDiferente) {
+        throw new BadRequestException(
+          `Preço inconsistente em ${grupo.origemParticipacao}/${grupo.tipoCartela}. O preço é por combo e deve ser igual em todas as chances do mesmo tipo`,
+        );
+      }
     }
   }
 
@@ -165,23 +242,78 @@ export function calcularResumoDosRanges(detalhes: DetalheRangeNormalizado[]): {
 export function expandirSetoresDoDetalhe(
   detalhe: Pick<
     DetalheRangeNormalizado,
-    'origemParticipacao' | 'tipoCartela' | 'rangeInicio' | 'rangeFinal'
+    | 'origemParticipacao'
+    | 'tipoCartela'
+    | 'rangeInicio'
+    | 'rangeFinal'
+    | 'indiceChance'
+    | 'ordemConfiguracao'
   >,
 ): SetorDetalheRange[] {
-  const quantidadeChances = obterQuantidadeChances(detalhe.tipoCartela);
-  const quantidadeCombos = calcularQuantidadeCombosDoDetalhe(detalhe);
+  return expandirSetoresDosDetalhes([detalhe]);
+}
 
-  if (quantidadeCombos < 1n) {
-    return [];
-  }
+export function expandirSetoresDosDetalhes(
+  detalhes: Array<
+    Pick<
+      DetalheRangeNormalizado,
+      | 'origemParticipacao'
+      | 'tipoCartela'
+      | 'rangeInicio'
+      | 'rangeFinal'
+      | 'indiceChance'
+      | 'ordemConfiguracao'
+    >
+  >,
+): SetorDetalheRange[] {
+  const grupos = agruparDetalhesPorOrigemETipo(detalhes);
+  const setores: SetorDetalheRange[] = [];
 
-  return Array.from(
-    { length: quantidadeChances },
-    (_, index) => {
+  for (const grupo of grupos) {
+    const quantidadeChances = obterQuantidadeChances(grupo.tipoCartela);
+    const detalhesDoGrupo = ordenarDetalhesDoGrupo(grupo.detalhes);
+
+    if (detalhesDoGrupo.length === quantidadeChances) {
+      const rangeTotalInicio = detalhesDoGrupo.reduce(
+        (menor, detalhe) =>
+          detalhe.rangeInicio < menor ? detalhe.rangeInicio : menor,
+        detalhesDoGrupo[0].rangeInicio,
+      );
+      const rangeTotalFinal = detalhesDoGrupo.reduce(
+        (maior, detalhe) =>
+          detalhe.rangeFinal > maior ? detalhe.rangeFinal : maior,
+        detalhesDoGrupo[0].rangeFinal,
+      );
+      const quantidadeCombos =
+        detalhesDoGrupo[0].rangeFinal - detalhesDoGrupo[0].rangeInicio + 1n;
+
+      detalhesDoGrupo.forEach((detalhe, index) => {
+        setores.push({
+          origemParticipacao: detalhe.origemParticipacao,
+          tipoCartela: detalhe.tipoCartela,
+          indiceChance: index + 1,
+          rangeInicio: detalhe.rangeInicio,
+          rangeFinal: detalhe.rangeFinal,
+          rangeTotalInicio,
+          rangeTotalFinal,
+          quantidadeCombos,
+        });
+      });
+      continue;
+    }
+
+    const detalhe = detalhesDoGrupo[0];
+    const quantidadeCombos = calcularQuantidadeCombosDoDetalhe(detalhe);
+
+    if (quantidadeCombos < 1n) {
+      continue;
+    }
+
+    Array.from({ length: quantidadeChances }, (_, index) => {
       const deslocamento = BigInt(index) * quantidadeCombos;
       const rangeInicio = detalhe.rangeInicio + deslocamento;
 
-      return {
+      setores.push({
         origemParticipacao: detalhe.origemParticipacao,
         tipoCartela: detalhe.tipoCartela,
         indiceChance: index + 1,
@@ -190,20 +322,11 @@ export function expandirSetoresDoDetalhe(
         rangeTotalInicio: detalhe.rangeInicio,
         rangeTotalFinal: detalhe.rangeFinal,
         quantidadeCombos,
-      };
-    },
-  );
-}
+      });
+    });
+  }
 
-export function expandirSetoresDosDetalhes(
-  detalhes: Array<
-    Pick<
-      DetalheRangeNormalizado,
-      'origemParticipacao' | 'tipoCartela' | 'rangeInicio' | 'rangeFinal'
-    >
-  >,
-): SetorDetalheRange[] {
-  return detalhes.flatMap((detalhe) => expandirSetoresDoDetalhe(detalhe));
+  return setores;
 }
 
 export function calcularTotalBilhetesDoDetalhe(
@@ -212,19 +335,24 @@ export function calcularTotalBilhetesDoDetalhe(
     'tipoCartela' | 'rangeInicio' | 'rangeFinal'
   >,
 ): bigint {
-  return (
-    calcularQuantidadeCombosDoDetalhe(detalhe) *
-    BigInt(obterQuantidadeChances(detalhe.tipoCartela))
-  );
+  return detalhe.rangeFinal - detalhe.rangeInicio + 1n;
 }
 
 export function calcularTotalBilhetesDosDetalhes(
   detalhes: Array<
-    Pick<DetalheRangeNormalizado, 'tipoCartela' | 'rangeInicio' | 'rangeFinal'>
+    Pick<
+      DetalheRangeNormalizado,
+      | 'origemParticipacao'
+      | 'tipoCartela'
+      | 'rangeInicio'
+      | 'rangeFinal'
+      | 'indiceChance'
+      | 'ordemConfiguracao'
+    >
   >,
 ): bigint {
-  return detalhes.reduce(
-    (total, detalhe) => total + calcularTotalBilhetesDoDetalhe(detalhe),
+  return expandirSetoresDosDetalhes(detalhes).reduce(
+    (total, setor) => total + (setor.rangeFinal - setor.rangeInicio + 1n),
     0n,
   );
 }
@@ -269,14 +397,130 @@ export function obterQuantidadeChances(tipoCartela: TipoCartela): number {
 }
 
 export function calcularQuantidadeCombosDoDetalhe(
-  detalhe: Pick<DetalheRangeNormalizado, 'tipoCartela' | 'rangeInicio' | 'rangeFinal'>,
+  detalhe: Pick<
+    DetalheRangeNormalizado,
+    'tipoCartela' | 'rangeInicio' | 'rangeFinal'
+  >,
 ): bigint {
   const totalNumeros = detalhe.rangeFinal - detalhe.rangeInicio + 1n;
   return totalNumeros / BigInt(obterQuantidadeChances(detalhe.tipoCartela));
 }
 
 export function calcularPassoEntreChancesDoDetalhe(
-  detalhe: Pick<DetalheRangeNormalizado, 'tipoCartela' | 'rangeInicio' | 'rangeFinal'>,
+  detalhe: Pick<
+    DetalheRangeNormalizado,
+    'tipoCartela' | 'rangeInicio' | 'rangeFinal'
+  >,
 ): bigint {
   return calcularQuantidadeCombosDoDetalhe(detalhe);
+}
+
+interface GrupoDetalhesPorTipo {
+  origemParticipacao: OrigemParticipacao;
+  tipoCartela: TipoCartela;
+  detalhes: Array<
+    Pick<
+      DetalheRangeNormalizado,
+      | 'origemParticipacao'
+      | 'tipoCartela'
+      | 'rangeInicio'
+      | 'rangeFinal'
+      | 'indiceChance'
+      | 'ordemConfiguracao'
+      | 'preco'
+    >
+  >;
+}
+
+export interface GrupoDetalhesRangeConfiguracao {
+  origemParticipacao: OrigemParticipacao;
+  tipoCartela: TipoCartela;
+  detalhes: Array<
+    Pick<
+      DetalheRangeNormalizado,
+      | 'origemParticipacao'
+      | 'tipoCartela'
+      | 'rangeInicio'
+      | 'rangeFinal'
+      | 'indiceChance'
+      | 'ordemConfiguracao'
+      | 'preco'
+    >
+  >;
+}
+
+function agruparDetalhesPorOrigemETipo(
+  detalhes: Array<
+    Pick<
+      DetalheRangeNormalizado,
+      | 'origemParticipacao'
+      | 'tipoCartela'
+      | 'rangeInicio'
+      | 'rangeFinal'
+      | 'indiceChance'
+      | 'ordemConfiguracao'
+      | 'preco'
+    >
+  >,
+): GrupoDetalhesPorTipo[] {
+  const grupos = new Map<string, GrupoDetalhesPorTipo>();
+
+  for (const detalhe of detalhes) {
+    const key = `${detalhe.origemParticipacao}:${detalhe.tipoCartela}`;
+    const existente = grupos.get(key);
+
+    if (existente) {
+      existente.detalhes.push(detalhe);
+      continue;
+    }
+
+    grupos.set(key, {
+      origemParticipacao: detalhe.origemParticipacao,
+      tipoCartela: detalhe.tipoCartela,
+      detalhes: [detalhe],
+    });
+  }
+
+  return Array.from(grupos.values());
+}
+
+export function agruparDetalhesPorOrigemETipoCartela(
+  detalhes: Array<
+    Pick<
+      DetalheRangeNormalizado,
+      | 'origemParticipacao'
+      | 'tipoCartela'
+      | 'rangeInicio'
+      | 'rangeFinal'
+      | 'indiceChance'
+      | 'ordemConfiguracao'
+      | 'preco'
+    >
+  >,
+): GrupoDetalhesRangeConfiguracao[] {
+  return agruparDetalhesPorOrigemETipo(detalhes).map((grupo) => ({
+    origemParticipacao: grupo.origemParticipacao,
+    tipoCartela: grupo.tipoCartela,
+    detalhes: ordenarDetalhesDoGrupo(grupo.detalhes),
+  }));
+}
+
+function ordenarDetalhesDoGrupo<T extends { indiceChance?: number; ordemConfiguracao?: number }>(
+  detalhes: T[],
+): T[] {
+  const todosComIndice = detalhes.every(
+    (detalhe) => typeof detalhe.indiceChance === 'number',
+  );
+
+  if (todosComIndice) {
+    return [...detalhes].sort(
+      (a, b) => (a.indiceChance ?? 0) - (b.indiceChance ?? 0),
+    );
+  }
+
+  return [...detalhes].sort((a, b) => {
+    const ordemA = a.ordemConfiguracao ?? 0;
+    const ordemB = b.ordemConfiguracao ?? 0;
+    return ordemA - ordemB;
+  });
 }

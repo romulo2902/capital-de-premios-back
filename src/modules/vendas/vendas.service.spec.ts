@@ -470,6 +470,54 @@ describe('VendasService', () => {
         },
       ]);
     });
+
+    it('should respect manual sectors when tipoCartela has one detail per chance', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-2',
+        numero: 11,
+        status: StatusEdicao.ATIVA,
+        rangeInicio: BigInt(950000),
+        rangeFinal: BigInt(2059980),
+        detalhes: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(950000),
+            rangeFinal: BigInt(959980),
+            preco: null,
+          },
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(1050000),
+            rangeFinal: BigInt(1059980),
+            preco: null,
+          },
+        ],
+      });
+
+      const linhas = [
+        { id: 'matriz-a', numero: BigInt(950000), sequenciaBolas: [1, 2, 3] },
+        { id: 'matriz-b', numero: BigInt(1050000), sequenciaBolas: [4, 5, 6] },
+      ];
+
+      mockPrisma.matrizRange.findMany
+        .mockResolvedValueOnce([linhas[0]])
+        .mockResolvedValueOnce(linhas);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-2',
+        tipoCartela: TipoCartela.DUAS_CHANCES,
+        limit: 1,
+      });
+
+      expect(result.data.rangeTotalInicio).toBe('950000');
+      expect(result.data.rangeTotalFinal).toBe('1059980');
+      expect(result.data.passoEntreChances).toBe('100000');
+      expect(result.data.combos[0].bilhetes).toHaveLength(2);
+      expect(result.data.combos[0].bilhetes[0].numero).toBe('0950000');
+      expect(result.data.combos[0].bilhetes[1].numero).toBe('1050000');
+    });
   });
 
   // ─── confirmarPagamento ───────────────────────────────

@@ -14,6 +14,8 @@ export interface DetalheRangeNormalizado {
   rangeInicio: bigint;
   rangeFinal: bigint;
   preco?: string;
+  indiceChance?: number;
+  ordemConfiguracao?: number;
 }
 
 export interface ArquivoImagemUpload extends UploadFile {}

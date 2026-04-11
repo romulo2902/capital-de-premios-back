@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, Matches } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsEnum, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
 
 const RANGE_MINIMO_REGEX = /^\d{7,}$/;
 
@@ -26,7 +27,7 @@ export class CreateEdicaoDetalheDto {
   @ApiProperty({
     example: '1000000',
     description:
-      'Início do intervalo total do combo dentro da matriz. A API divide esse intervalo em setores determinísticos conforme a quantidade de chances. Deve conter ao menos 7 dígitos.',
+      'Início do range deste bilhete/chance dentro da matriz. No modo manual (2/6/12), envie um detalhe por chance. Deve conter ao menos 7 dígitos.',
   })
   @IsString()
   @Matches(RANGE_MINIMO_REGEX, {
@@ -37,7 +38,7 @@ export class CreateEdicaoDetalheDto {
   @ApiProperty({
     example: '1999999',
     description:
-      'Fim do intervalo total do combo dentro da matriz. A API divide esse intervalo em setores determinísticos conforme a quantidade de chances. Deve conter ao menos 7 dígitos.',
+      'Fim do range deste bilhete/chance dentro da matriz. No modo manual (2/6/12), todos os ranges do mesmo tipo devem ter o mesmo tamanho para manter o pareamento. Deve conter ao menos 7 dígitos.',
   })
   @IsString()
   @Matches(RANGE_MINIMO_REGEX, {
@@ -48,12 +49,26 @@ export class CreateEdicaoDetalheDto {
   @ApiPropertyOptional({
     example: '10.00',
     description:
-      'Preço deste tier de chances. Se omitido, usará o valorCartela da edição.',
+      'Preço do combo deste tipo de cartela (não por bilhete). Em grupos com múltiplas chances, pode ser informado apenas em um dos detalhes; quando informado em mais de um, deve ser igual em todos. Se omitido no grupo, usa valorCartela da edição.',
   })
   @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === null ? value : String(value),
+  )
   @IsString()
   @Matches(/^\d+([.,]\d{1,2})?$/, {
     message: 'preco deve ser um valor monetário válido',
   })
   preco?: string;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description:
+      'Índice explícito da chance (1ª, 2ª, ... 12ª). Se usar `indiceChance` em um range do grupo, informe em todos do mesmo grupo.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  indiceChance?: number;
 }
