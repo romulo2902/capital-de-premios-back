@@ -51,7 +51,7 @@ export class RangesController {
   @Post('matriz/upload')
   @ApiOperation({
     summary:
-      'Importar/substituir a matriz global de ranges via CSV (ADMIN). Cada linha deve conter: numero;bolas (ex: 950000;05-07-09-21-24-31-32-35-36-39). Faz upsert — números existentes têm as bolas atualizadas.',
+      'Importar/substituir a matriz global de ranges via CSV ou XLSX (ADMIN). CSV recomendado para 1 milhão+ linhas. Faz upsert — números existentes têm as bolas atualizadas.',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -61,12 +61,17 @@ export class RangesController {
         arquivo: {
           type: 'string',
           format: 'binary',
-          description: 'Arquivo CSV da matriz de ranges',
+          description:
+            'Arquivo CSV ou XLSX da matriz de ranges. CSV: numero;bolas (ex: 950000;05-07-09-21-24-31-32-35-36-39). XLSX: col A=numero, col B=bolas no mesmo formato.',
         },
       },
     },
   })
-  @UseInterceptors(FileInterceptor('arquivo'))
+  @UseInterceptors(
+    FileInterceptor('arquivo', {
+      limits: { fileSize: 250 * 1024 * 1024 }, // 250MB
+    }),
+  )
   importarMatriz(@UploadedFile() arquivo: Express.Multer.File) {
     return this.rangesService.importarMatriz(arquivo);
   }

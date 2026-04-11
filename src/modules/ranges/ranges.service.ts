@@ -16,6 +16,7 @@ import { FiltroRangesDto } from './dto/filtro-ranges.dto';
 import { Readable } from 'stream';
 import * as readline from 'readline';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
 
 const MATRIZ_BATCH_SIZE = 5000;
@@ -86,26 +87,8 @@ export class RangesService {
     let importados = 0;
 
     if (this.isXlsx(file)) {
-      // XLSX: carrega em memória (SheetJS não tem streaming)
-      if (file.size > 50 * 1024 * 1024) {
-        this.logger.warn(
-          `Arquivo XLSX grande (${(file.size / 1024 / 1024).toFixed(0)} MB). ` +
-            `Para arquivos com mais de 100k linhas, prefira CSV para evitar alto consumo de memória.`,
-        );
-      }
-
-      const linhas = this.parseXlsx(file.buffer);
-
-      if (linhas.length === 0) {
-        throw new BadRequestException(
-          'Nenhuma linha válida encontrada no arquivo XLSX.',
-        );
-      }
-
-      this.logger.log(
-        `XLSX: ${linhas.length} linhas válidas. Iniciando inserção...`,
-      );
-      importados = await this.inserirEmLotes(linhas);
+      // XLSX: usa streaming (exceljs) para suportar 1 milhão+ linhas sem estourar memória.
+      importados = await this.parseXlsxEInserir(file.buffer);
     } else {
       // CSV: streaming real — insere enquanto lê, sem acumular tudo na memória
       importados = await this.parseCsvEInserir(file.buffer);
@@ -199,6 +182,79 @@ export class RangesService {
         `Lote ${Math.ceil((i + 1) / MATRIZ_BATCH_SIZE)} / ${Math.ceil(linhas.length / MATRIZ_BATCH_SIZE)} — ${importados}/${linhas.length} inseridos`,
       );
     }
+    return importados;
+  }
+
+  private async parseXlsxEInserir(buffer: Buffer): Promise<number> {
+    const stream = Readable.from(buffer);
+    const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
+      entries: 'emit',
+      sharedStrings: 'cache',
+      styles: 'ignore',
+      hyperlinks: 'ignore',
+      worksheets: 'emit',
+    });
+
+    let importados = 0;
+    let lote: MatrizLinha[] = [];
+    let linhaAtual = 0;
+    let loteNumero = 0;
+
+    const flushLote = async (loteAtual: MatrizLinha[], numero: number) => {
+      if (loteAtual.length === 0) return;
+      await this.executarInsertLote(loteAtual);
+      importados += loteAtual.length;
+      this.logger.log(
+        `Lote XLSX ${numero} inserido — ${importados} registros acumulados`,
+      );
+    };
+
+    for await (const worksheetReader of workbookReader) {
+      // Processa apenas a primeira planilha por padrão
+      for await (const row of worksheetReader) {
+        linhaAtual++;
+
+        // ExcelJS pode emitir linhas vazias; row.values é 1-indexed (posição 0 vazia)
+        const colA = row.getCell(1).value;
+        const colB = row.getCell(2).value;
+
+        const numeroRaw = String(colA ?? '').trim();
+        const bolasRaw = String(colB ?? '').trim();
+
+        if (!numeroRaw || !bolasRaw) continue;
+        if (isNaN(Number(numeroRaw))) continue; // ignora cabeçalho
+
+        const sequenciaBolas = bolasRaw
+          .split('-')
+          .map((b) => parseInt(b.trim(), 10))
+          .filter((n) => !isNaN(n) && n >= 1 && n <= 50);
+
+        if (sequenciaBolas.length === 0) continue;
+
+        try {
+          const numero = BigInt(Math.round(Number(numeroRaw)));
+          lote.push({ numero, sequenciaBolas });
+        } catch {
+          this.logger.warn(`Linha XLSX ${linhaAtual} inválida, ignorada`);
+        }
+
+        if (lote.length >= MATRIZ_BATCH_SIZE) {
+          loteNumero++;
+          await flushLote(lote, loteNumero);
+          lote = [];
+        }
+      }
+
+      // Flush final da planilha
+      if (lote.length > 0) {
+        loteNumero++;
+        await flushLote(lote, loteNumero);
+        lote = [];
+      }
+
+      break;
+    }
+
     return importados;
   }
 
