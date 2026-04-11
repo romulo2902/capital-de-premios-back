@@ -1,7 +1,22 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, Min, MinLength, IsEmail } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  Min,
+  MinLength,
+  IsEmail,
+  IsArray,
+  ValidateNested,
+  ArrayMinSize,
+} from 'class-validator';
 import { TipoCartela } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { ComboSelecionadoLojaDto } from './combo-selecionado-loja.dto';
 
 export class ComprarLojaDto {
   @ApiProperty({ example: 'uuid-da-edicao', description: 'ID da edição' })
@@ -17,6 +32,18 @@ export class ComprarLojaDto {
   @IsInt()
   @Min(1)
   quantidade: number;
+
+  @ApiPropertyOptional({
+    type: [ComboSelecionadoLojaDto],
+    description:
+      'Combos escolhidos explicitamente pelo cliente. Quando informado, a compra aprova exatamente esses combos e não uma nova alocação automática.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ComboSelecionadoLojaDto)
+  combosSelecionados?: ComboSelecionadoLojaDto[];
 
   @ApiProperty({ example: '12345678900', description: 'CPF do cliente' })
   @IsString()

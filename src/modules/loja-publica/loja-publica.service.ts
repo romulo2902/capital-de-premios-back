@@ -145,6 +145,15 @@ export class LojaPublicaService {
     const quantidadeBilhetes =
       obterQuantidadeChances(dto.tipoCartela) * dto.quantidade;
 
+    if (
+      dto.combosSelecionados &&
+      dto.combosSelecionados.length !== dto.quantidade
+    ) {
+      throw new BadRequestException(
+        'A quantidade de combos selecionados deve ser igual à quantidade da compra',
+      );
+    }
+
     // Calcula total
     const precoUnitario = Number(
       detalheSelecionado.preco ?? edicao.valorCartela,
@@ -178,6 +187,13 @@ export class LojaPublicaService {
         status: StatusVenda.PENDENTE,
         origemParticipacao: OrigemParticipacao.DIGITAL,
         tipoPagamento: TipoPagamento.PIX,
+        gatewayPayload: dto.combosSelecionados
+          ? ({
+              combosSelecionados: dto.combosSelecionados.map((combo) => ({
+                numeroBase: combo.numeroBase,
+              })),
+            } as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
       },
     });
 
@@ -191,6 +207,7 @@ export class LojaPublicaService {
         data: {
           gatewayId: gatewayIdMock,
           gatewayPayload: {
+            ...((venda.gatewayPayload as Record<string, unknown> | null) ?? {}),
             mock: true,
             ambiente: this.config.get<string>('NODE_ENV', 'development'),
             motivo: 'Aprovação automática habilitada por flag de ambiente',
@@ -252,7 +269,10 @@ export class LojaPublicaService {
         where: { id: venda.id },
         data: {
           gatewayId: cobranca.gatewayId,
-          gatewayPayload: cobranca.payload as Prisma.InputJsonValue,
+          gatewayPayload: {
+            ...((venda.gatewayPayload as Record<string, unknown> | null) ?? {}),
+            ...(cobranca.payload as Record<string, unknown>),
+          } as Prisma.InputJsonValue,
         },
       });
       dadosPagamento = {
@@ -393,7 +413,7 @@ export class LojaPublicaService {
             v.tipoCartela,
           ),
           bilhetes: v.bilhetes.map((b) => ({
-            numero: b.numero.toString(),
+            numero: this.formatarNumeroBilhete(b.numero),
             sequenciaBolas: b.sequenciaBolas,
           })),
         })),
@@ -539,16 +559,20 @@ export class LojaPublicaService {
       .sort((a, b) => (a.numeroBase < b.numeroBase ? -1 : 1))
       .map((grupo, index) => ({
         ordemSequencia: index + 1,
-        numeroBase: grupo.numeroBase.toString(),
+        numeroBase: this.formatarNumeroBilhete(grupo.numeroBase),
         tipoCartela: grupo.tipoCartela,
         quantidadeBilhetes: grupo.bilhetes.length,
         bilhetes: grupo.bilhetes
           .sort((a, b) => (a.numero < b.numero ? -1 : 1))
           .map((bilhete, bilheteIndex) => ({
             ordem: bilheteIndex + 1,
-            numero: bilhete.numero.toString(),
+            numero: this.formatarNumeroBilhete(bilhete.numero),
             sequenciaBolas: bilhete.sequenciaBolas,
           })),
       }));
+  }
+
+  private formatarNumeroBilhete(numero: bigint): string {
+    return numero.toString().padStart(7, '0');
   }
 }

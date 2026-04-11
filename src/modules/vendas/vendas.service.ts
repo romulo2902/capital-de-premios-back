@@ -48,6 +48,10 @@ type MatrizDisponivel = {
 
 type DirecaoCombo = 'PROXIMO' | 'ANTERIOR';
 
+type ComboSelecionadoPersistido = {
+  numeroBase: string;
+};
+
 @Injectable()
 export class VendasService {
   private readonly logger = new Logger(VendasService.name);
@@ -290,11 +294,11 @@ export class VendasService {
         })),
         combos: grupos.map((grupo, index) => ({
           ordemSequencia: index + 1,
-          numeroBase: grupo[0]?.numero.toString() ?? null,
+          numeroBase: grupo[0] ? this.formatarNumeroBilhete(grupo[0].numero) : null,
           bilhetes: grupo.map((bilhete, bilheteIndex) => ({
             ordem: bilheteIndex + 1,
             matrizId: bilhete.id,
-            numero: bilhete.numero.toString(),
+            numero: this.formatarNumeroBilhete(bilhete.numero),
             sequenciaBolas: bilhete.sequenciaBolas,
           })),
         })),
@@ -684,6 +688,7 @@ export class VendasService {
       quantidade: number;
       origemParticipacao: OrigemParticipacao;
       tipoCartela?: TipoCartela | null;
+      gatewayPayload?: Prisma.JsonValue | null;
     },
   ): Promise<number> {
     const edicao = await tx.edicao.findUnique({
@@ -724,6 +729,9 @@ export class VendasService {
         rangeFinal: edicao.rangeFinal,
         preco: null,
       };
+    const combosSelecionados = this.extrairCombosSelecionadosDaVenda(
+      venda.gatewayPayload,
+    );
     const gruposDisponiveis = await this.selecionarGruposDisponiveisParaVenda(
       tx,
       venda.edicaoId,
@@ -731,6 +739,7 @@ export class VendasService {
       venda.quantidade,
       {
         strict: true,
+        numerosBaseSelecionados: combosSelecionados,
       },
     );
     const matrizDisponiveis = gruposDisponiveis.flat();
@@ -760,6 +769,7 @@ export class VendasService {
       cursorNumeroBase?: bigint;
       direcao?: DirecaoCombo;
       strict?: boolean;
+      numerosBaseSelecionados?: bigint[];
     } = {},
   ): Promise<MatrizDisponivel[][]> {
     const setores = expandirSetoresDoDetalhe(detalhe);
@@ -769,6 +779,17 @@ export class VendasService {
     if (!primeiroSetor) {
       throw new BadRequestException(
         `O intervalo ${detalhe.rangeInicio.toString()}-${detalhe.rangeFinal.toString()} não suporta ${quantidadeChances} chances`,
+      );
+    }
+
+    if ((options.numerosBaseSelecionados?.length ?? 0) > 0) {
+      return this.montarGruposPorNumerosBaseSelecionados(
+        client,
+        edicaoId,
+        options.numerosBaseSelecionados ?? [],
+        primeiroSetor,
+        setores,
+        options.strict ?? false,
       );
     }
 
@@ -907,6 +928,99 @@ export class VendasService {
     return gruposSelecionados;
   }
 
+  private async montarGruposPorNumerosBaseSelecionados(
+    client: Prisma.TransactionClient | PrismaService | PrismaClient,
+    edicaoId: string,
+    numerosBaseSelecionados: bigint[],
+    primeiroSetor: {
+      rangeInicio: bigint;
+      rangeFinal: bigint;
+    },
+    setores: Array<{
+      rangeInicio: bigint;
+      rangeFinal: bigint;
+    }>,
+    strict: boolean,
+  ): Promise<MatrizDisponivel[][]> {
+    const numerosNecessarios: bigint[] = [];
+    const numerosNecessariosSet = new Set<string>();
+
+    for (const numeroBase of numerosBaseSelecionados) {
+      if (
+        numeroBase < primeiroSetor.rangeInicio ||
+        numeroBase > primeiroSetor.rangeFinal
+      ) {
+        throw new BadRequestException(
+          `O combo ${numeroBase.toString()} está fora do setor inicial permitido para esta cartela`,
+        );
+      }
+
+      for (const setor of setores) {
+        const numero = this.calcularNumeroDoSetorParaBase(
+          numeroBase,
+          primeiroSetor,
+          setor,
+        );
+        const chave = numero.toString();
+
+        if (numerosNecessariosSet.has(chave)) {
+          continue;
+        }
+
+        numerosNecessariosSet.add(chave);
+        numerosNecessarios.push(numero);
+      }
+    }
+
+    const linhasDisponiveis = await client.matrizRange.findMany({
+      where: {
+        numero: {
+          in: numerosNecessarios,
+        },
+        bilhetes: {
+          none: {
+            edicaoId,
+          },
+        },
+      },
+      orderBy: { numero: 'asc' },
+    });
+
+    const linhasPorNumero = new Map(
+      linhasDisponiveis.map((linha) => [linha.numero.toString(), linha]),
+    );
+    const grupos: MatrizDisponivel[][] = [];
+
+    for (const numeroBase of numerosBaseSelecionados) {
+      const grupo: MatrizDisponivel[] = [];
+
+      for (const setor of setores) {
+        const numero = this.calcularNumeroDoSetorParaBase(
+          numeroBase,
+          primeiroSetor,
+          setor,
+        );
+        const linha = linhasPorNumero.get(numero.toString());
+
+        if (!linha) {
+          if (strict) {
+            throw new BadRequestException(
+              `O combo ${numeroBase.toString()} não está mais disponível para esta edição`,
+            );
+          }
+
+          return grupos;
+        }
+
+        grupo.push(linha);
+      }
+
+      grupos.push(grupo);
+    }
+
+    return grupos;
+  }
+
   private resolverDetalheDaVenda(
     detalhes: DetalheVenda[],
     origemParticipacao: OrigemParticipacao,
@@ -982,6 +1096,38 @@ export class VendasService {
     }
 
     return numeroDestino;
+  }
+
+  private extrairCombosSelecionadosDaVenda(
+    gatewayPayload?: Prisma.JsonValue | null,
+  ): bigint[] | undefined {
+    if (!gatewayPayload || typeof gatewayPayload !== 'object' || Array.isArray(gatewayPayload)) {
+      return undefined;
+    }
+
+    const combosSelecionados = (gatewayPayload as Record<string, unknown>)
+      .combosSelecionados;
+
+    if (!Array.isArray(combosSelecionados) || combosSelecionados.length === 0) {
+      return undefined;
+    }
+
+    return combosSelecionados.flatMap((combo) => {
+      if (
+        !combo ||
+        typeof combo !== 'object' ||
+        !('numeroBase' in combo) ||
+        typeof (combo as ComboSelecionadoPersistido).numeroBase !== 'string'
+      ) {
+        return [];
+      }
+
+      return [BigInt((combo as ComboSelecionadoPersistido).numeroBase)];
+    });
+  }
+
+  private formatarNumeroBilhete(numero: bigint): string {
+    return numero.toString().padStart(7, '0');
   }
 
   private buildWhereFromFiltros(
