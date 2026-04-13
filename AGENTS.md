@@ -12,7 +12,7 @@ Este arquivo guia agentes de IA (OpenAI Codex, GPT-4o, etc.) sobre as convençõ
 - **Auth**: JWT (access + refresh), bcrypt
 - **Docs**: Swagger/OpenAPI (`@nestjs/swagger`)
 - **Tempo Real**: Firebase Firestore (Admin SDK no backend, Client SDK no frontend)
-  - Sorteio transmite números em tempo real via Firestore — **não usar WebSocket**
+  - Sorteio transmite números em tempo real via Firestore. **WebSocket foi 100% banido.**
 - **Dev**: `npm run start:dev` | Build: `npm run build`
 
 ---
@@ -92,7 +92,8 @@ CLIENTE → auto-cadastra por CPF no primeiro acesso/compra
 ```
 
 - **Cliente é criado quando o pagamento é aprovado**, não antes
-- `Venda.vendedorId` / `Venda.distribuidorId` rastreiam a origem da compra para comissão
+- `Venda.vendedorId` / `Venda.distribuidorId` rastreiam a origem da compra para comissão. O Back-end as associa **automaticamente** via `@CurrentUser` quando a venda ocorre no painel admin `(POST /admin/vendas)`.
+- Faturamento suporta Compra Rápida (quantidade X aleatória na ponta do banco) e Combos Selecionados (`combosSelecionados: string[]`).
 
 ---
 
@@ -108,7 +109,7 @@ src/modules/
   edicoes/       → edições/sorteios
   vendas/        → processamento de compras
   pagamentos/    → webhook gateway de pagamento
-  sorteio/       → lógica do sorteio + WebSocket
+  sorteio/       → lógica do sorteio exclusiva via Firebase
   comissoes/     → comissões de vendedores
   saques/        → solicitações de saque
   relatorios/    → Excel/PDF

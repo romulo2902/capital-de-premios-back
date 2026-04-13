@@ -108,18 +108,21 @@ CLIENTE → auto-cadastro por CPF (independente)
 ```
 
 - Todo `Vendedor` pertence obrigatoriamente a um `Distribuidor` (FK `distribuidorId`)
-- `Cliente` acessa a loja via link de `Vendedor` ou `Distribuidor` — a venda registra `vendedorId` ou `distribuidorId` para cálculo de comissão
-- **Cliente é criado automaticamente quando o pagamento é aprovado** (webhook do gateway) — nunca antes. O checkout coleta: CPF, Nome, E-mail, Celular, Data de Nascimento. O `VendasService` faz `upsert` do cliente ao processar o webhook de pagamento aprovado.
+- `Cliente` acessa a loja ou compra com um Vendedor. Ao ser cadastrado no checkout ou via Admin (`POST /admin/vendas`), o backend **garante** pelo Token JWT (`@CurrentUser`) o vínculo da comissão ao `vendedorId` ou `distribuidorId` logado. Nunca confiar no frontend para ID de vendedor.
+- **Cliente é criado automaticamente quando o pagamento é aprovado** (webhook do gateway). O checkout coleta: CPF, Nome, E-mail, Celular. O `VendasService` faz `upsert` do cliente.
 
 ```typescript
 // VendasService — executado no webhook de pagamento aprovado
 const cliente = await prisma.cliente.upsert({
   where: { cpf: dto.cpf },
   update: { nome: dto.nome, email: dto.email, telefone: dto.telefone },
-  create: { cpf: dto.cpf, nome: dto.nome, email: dto.email, telefone: dto.telefone,
-            dataNascimento: dto.dataNascimento, vendedorId: dto.vendedorId },
+  create: { cpf: dto.cpf, nome: dto.nome, email: dto.email, telefone: dto.telefone },
 });
 ```
+
+### Compras e Combos
+- **Compra Rápida**: Apenas a propriedade `quantidade` é requerida. O sistema travará bilhetes sequenciais não reservados. Caso não haja cartelas especificadas, utiliza `UMA_CHANCE` por padrão ou falha de forma graciosa retornando strings vazias ou nulas pelo service (ex: ao invés de lançar erro 400).
+- **Compra Manuais / Combos Específicos**: Payload aceita Array simples de strings com os ids formatados: `combosSelecionados: ["122340", "122355"]`. O Prisma aloca estritamente essas chaves. Tratamento de Erros via Exceções (BadRequestException) dentro de Try/Catch mapeados nos endpoints para retornar `"combos": []` na pesquisa do frontend.
 
 ---
 
@@ -178,12 +181,10 @@ const value = this.config.get<string>('JWT_ACCESS_SECRET');
 
 ---
 
-## WebSocket (Sorteio)
+## Sorteio (Lembrete)
 
-- Room: `edicao-{id}`
-- Autenticação JWT no handshake
-- Eventos emitidos pelo servidor: `sorteio:numero_marcado`, `sorteio:ganhador`, `sorteio:status`, `sorteio:resultado_final`
-- Eventos recebidos do admin: `sorteio:marcar_numero`
+- O sorteio atua **ESTRITAMENTE** pelo Firebase Firestore (`Admin SDK` -> `Client Web`).
+- WebSockets (`socket.io` ou gatewyes nativos do nest) foram **banidos** por restrições operacionais e substituídos 100% pelas streams sub/pub do Firestore Database `collections('sorteios')`.
 
 ---
 
