@@ -4,6 +4,7 @@ import {
   ApiOperation,
   ApiBearerAuth,
   ApiQuery,
+  ApiExcludeController,
 } from '@nestjs/swagger';
 import { BilhetesService } from './bilhetes.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -12,6 +13,7 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @ApiTags('Bilhetes')
 @ApiBearerAuth()
+@ApiExcludeController()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/bilhetes')
 export class BilhetesController {

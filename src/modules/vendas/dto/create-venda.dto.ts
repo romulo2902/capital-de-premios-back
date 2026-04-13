@@ -9,9 +9,12 @@ import {
   Matches,
   Min,
   MinLength,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { OrigemParticipacao, TipoCartela, TipoPagamento } from '@prisma/client';
+
 
 export class CreateVendaDto {
   @ApiProperty({
@@ -56,6 +59,16 @@ export class CreateVendaDto {
   @IsOptional()
   @IsEnum(OrigemParticipacao)
   origemParticipacao?: OrigemParticipacao;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['1234567', '7654321'],
+    description: 'Combos específicos escolhidos pelo vendedor/cliente',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  combosSelecionados?: string[];
 
   // --- Dados do cliente (auto-cadastro ou lookup) ---
 

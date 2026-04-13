@@ -23,6 +23,9 @@ import { CreateVendaDto } from './dto/create-venda.dto';
 import { UpdateVendaStatusDto } from './dto/update-venda-status.dto';
 import { FiltroVendasDto } from './dto/filtro-vendas.dto';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { ListarCombosAdminDto } from './dto/listar-combos-admin.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 /**
  * CRUD de Vendas — Painel Administrativo
@@ -48,8 +51,28 @@ export class VendasController {
   @ApiOperation({
     summary: 'Criar venda + iniciar pagamento (ADMIN, DISTRIBUIDOR, VENDEDOR)',
   })
-  create(@Body() dto: CreateVendaDto) {
+  create(@Body() dto: CreateVendaDto, @CurrentUser() user: RequestUser) {
+    if (user.perfil === 'VENDEDOR' && user.vendedorId) {
+      dto.vendedorId = user.vendedorId;
+    } else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
+      dto.distribuidorId = user.distribuidorId;
+    }
     return this.vendasService.create(dto);
+  }
+
+  @Get('edicoes/:edicaoId/combos')
+  @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
+  @ApiOperation({
+    summary: 'Navegar pelos combos disponíveis para venda de uma edição (Admin/Vendedor)',
+  })
+  listarCombosDisponiveis(
+    @Param('edicaoId', ParseUUIDPipe) edicaoId: string,
+    @Query() filtros: ListarCombosAdminDto,
+  ) {
+    return this.vendasService.listarCombosDisponiveis({
+      edicaoId,
+      ...filtros,
+    });
   }
 
   @Get()

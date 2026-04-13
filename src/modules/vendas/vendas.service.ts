@@ -117,6 +117,10 @@ export class VendasService {
       if (!vendedor) {
         throw new NotFoundException('Vendedor não encontrado');
       }
+
+      if (!dto.distribuidorId) {
+        dto.distribuidorId = vendedor.distribuidorId;
+      }
     }
 
     if (dto.distribuidorId) {
@@ -125,6 +129,14 @@ export class VendasService {
       });
       if (!distribuidor) {
         throw new NotFoundException('Distribuidor não encontrado');
+      }
+    }
+
+    if (dto.combosSelecionados && dto.combosSelecionados.length > 0) {
+      if (dto.quantidade !== dto.combosSelecionados.length) {
+        throw new BadRequestException(
+          'A quantidade de cartelas deve ser igual ao número de combos selecionados',
+        );
       }
     }
 
@@ -147,6 +159,9 @@ export class VendasService {
         status: StatusVenda.PENDENTE,
         origemParticipacao,
         tipoPagamento: dto.tipoPagamento,
+        ...(dto.combosSelecionados && dto.combosSelecionados.length > 0
+          ? { gatewayPayload: { combosSelecionados: dto.combosSelecionados } as unknown as Prisma.InputJsonValue }
+          : {}),
       },
       include: VENDA_INCLUDE,
     });
@@ -181,7 +196,12 @@ export class VendasService {
         where: { id: venda.id },
         data: {
           gatewayId: cobranca.gatewayId,
-          gatewayPayload: cobranca.payload as Prisma.InputJsonValue,
+          gatewayPayload: {
+            ...((cobranca.payload as Record<string, unknown>) ?? {}),
+            ...(dto.combosSelecionados && dto.combosSelecionados.length > 0
+              ? { combosSelecionados: dto.combosSelecionados }
+              : {}),
+          } as Prisma.InputJsonValue,
         },
       });
 
@@ -220,7 +240,7 @@ export class VendasService {
   async listarCombosDisponiveis(params: {
     edicaoId: string;
     origemParticipacao?: OrigemParticipacao;
-    tipoCartela: TipoCartela;
+    tipoCartela?: TipoCartela;
     cursorNumeroBase?: string;
     direcao?: DirecaoCombo;
     limit?: number;
@@ -256,16 +276,41 @@ export class VendasService {
 
     const origemParticipacao =
       params.origemParticipacao ?? OrigemParticipacao.DIGITAL;
-    const detalhesVenda = this.resolverDetalhesDaVenda(
-      edicao.detalhes,
-      origemParticipacao,
-      params.tipoCartela,
-    );
+
+    let detalhesVenda: DetalheVenda[] = [];
+    try {
+      detalhesVenda = this.resolverDetalhesDaVenda(
+        edicao.detalhes,
+        origemParticipacao,
+        params.tipoCartela,
+      );
+    } catch (e) {
+      if (e instanceof BadRequestException) {
+        return {
+          message: 'Nenhum combo configurado para esta seleção',
+          data: {
+            edicaoId: edicao.id,
+            edicaoNumero: edicao.numero,
+            status: edicao.status,
+            origemParticipacao,
+            tipoCartela: params.tipoCartela ?? TipoCartela.UMA_CHANCE,
+            quantidadeChances: 0,
+            passoEntreChances: '0',
+            rangeTotalInicio: '0',
+            rangeTotalFinal: '0',
+            setores: [],
+            combos: [],
+          },
+        };
+      }
+      throw e;
+    }
+
     const detalheBase: DetalheVenda =
       detalhesVenda[0] ??
       ({
         origemParticipacao,
-        tipoCartela: params.tipoCartela,
+        tipoCartela: params.tipoCartela ?? TipoCartela.UMA_CHANCE,
         rangeInicio: edicao.rangeInicio,
         rangeFinal: edicao.rangeFinal,
         preco: null,
@@ -1154,6 +1199,10 @@ export class VendasService {
     }
 
     return combosSelecionados.flatMap((combo) => {
+      if (typeof combo === 'string') {
+        return [BigInt(combo)];
+      }
+
       if (
         !combo ||
         typeof combo !== 'object' ||
