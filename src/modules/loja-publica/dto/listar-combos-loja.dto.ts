@@ -57,8 +57,9 @@ export class ListarCombosLojaDto {
 
   @ApiPropertyOptional({
     example: 12,
+    deprecated: true,
     description:
-      'Quantidade máxima de combos a retornar na sequência navegável.',
+      'Ignorado: a API sempre retorna apenas 1 combo por requisição (navegação simplificada).',
   })
   @IsOptional()
   @Type(() => Number)

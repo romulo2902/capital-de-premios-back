@@ -63,7 +63,8 @@ export class VendasController {
   @Get('edicoes/:edicaoId/combos')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({
-    summary: 'Navegar pelos combos disponíveis para venda de uma edição (Admin/Vendedor)',
+    summary:
+      'Navegar pelos combos disponíveis (1 por vez) para venda de uma edição (Admin/Vendedor)',
   })
   listarCombosDisponiveis(
     @Param('edicaoId', ParseUUIDPipe) edicaoId: string,

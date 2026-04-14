@@ -299,7 +299,9 @@ export class VendasService {
             rangeTotalInicio: '0',
             rangeTotalFinal: '0',
             setores: [],
+            cursorNumeroBaseAtual: null,
             combos: [],
+            comboAtual: null,
           },
         };
       }
@@ -331,7 +333,7 @@ export class VendasService {
       this.prisma,
       edicao.id,
       detalhesEfetivos,
-      Math.min(Math.max(params.limit ?? 12, 1), 24),
+      1,
       {
         cursorNumeroBase: params.cursorNumeroBase
           ? BigInt(params.cursorNumeroBase)
@@ -340,6 +342,26 @@ export class VendasService {
         strict: false,
       },
     );
+
+    const combos = grupos.map((grupo, index) => ({
+      ordemSequencia: index + 1,
+      numeroBase: grupo[0] ? this.formatarNumeroBilhete(grupo[0].numero) : null,
+      bilhetes: grupo.map((bilhete, bilheteIndex) => ({
+        ordem: bilheteIndex + 1,
+        matrizId: bilhete.id,
+        numero: this.formatarNumeroBilhete(bilhete.numero),
+        sequenciaBolas: bilhete.sequenciaBolas,
+      })),
+    }));
+
+    const primeiroCombo = combos[0];
+    const comboAtual =
+      primeiroCombo && primeiroCombo.numeroBase
+        ? {
+            numeroBase: primeiroCombo.numeroBase,
+            bilhetes: primeiroCombo.bilhetes,
+          }
+        : null;
 
     return {
       message: 'Combos disponíveis listados com sucesso',
@@ -361,16 +383,9 @@ export class VendasService {
           rangeInicio: setor.rangeInicio.toString(),
           rangeFinal: setor.rangeFinal.toString(),
         })),
-        combos: grupos.map((grupo, index) => ({
-          ordemSequencia: index + 1,
-          numeroBase: grupo[0] ? this.formatarNumeroBilhete(grupo[0].numero) : null,
-          bilhetes: grupo.map((bilhete, bilheteIndex) => ({
-            ordem: bilheteIndex + 1,
-            matrizId: bilhete.id,
-            numero: this.formatarNumeroBilhete(bilhete.numero),
-            sequenciaBolas: bilhete.sequenciaBolas,
-          })),
-        })),
+        cursorNumeroBaseAtual: comboAtual?.numeroBase ?? null,
+        combos,
+        comboAtual,
       },
     };
   }

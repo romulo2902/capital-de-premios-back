@@ -33,7 +33,7 @@ export class LojaPublicaController {
   @Get('edicoes/:edicaoId/combos')
   @ApiOperation({
     summary:
-      'Navegar pelos combos pré-definidos de uma edição/combinação (Público)',
+      'Navegar pelos combos pré-definidos (1 por vez) de uma edição/combinação (Público)',
   })
   @ApiQuery({ name: 'tipoCartela', required: true, enum: TipoCartela })
   @ApiQuery({
@@ -47,7 +47,7 @@ export class LojaPublicaController {
     required: false,
     enum: ['PROXIMO', 'ANTERIOR'],
   })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number, deprecated: true })
   listarCombosDisponiveis(
     @Param('edicaoId', ParseUUIDPipe) edicaoId: string,
     @Query() filtros: ListarCombosLojaDto,
