@@ -6,6 +6,8 @@ services:
     container_name: capital-premios-api
     restart: unless-stopped
     env_file:
+      - path: .env
+        required: false
       - path: .env.homolog
         required: false
       - path: .env.development
