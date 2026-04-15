@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { VendasService } from '../vendas/vendas.service';
+import { DistributedLockService } from '../../common/redis/distributed-lock.service';
 import {
   buildPaginatedResponse,
   normalizePagination,
@@ -20,6 +21,7 @@ export class PagamentosService {
     private readonly prisma: PrismaService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
     private readonly vendasService: VendasService,
+    private readonly distributedLock: DistributedLockService,
   ) {}
 
   // ─── WEBHOOK PIX (Inter) ──────────────────────────────
@@ -50,25 +52,37 @@ export class PagamentosService {
         continue;
       }
 
-      // Buscar venda pelo gatewayId (que é o txid)
-      const venda = await this.prisma.venda.findFirst({
-        where: { gatewayId: txid },
-        select: { id: true, status: true },
-      });
-
-      if (!venda) {
-        this.logger.warn(`Venda não encontrada para txid: ${txid}`);
-        resultados.push({ txid, status: 'VENDA_NAO_ENCONTRADA' });
-        continue;
-      }
-
-      if (venda.status !== 'PENDENTE') {
-        this.logger.log(`Venda ${venda.id} já processada (status: ${venda.status})`);
-        resultados.push({ txid, status: 'JA_PROCESSADA' });
+      const lockKey = `lock:pix:webhook:${txid}`;
+      const lock = await this.distributedLock.acquire(lockKey, 30_000);
+      if (!lock) {
+        this.logger.warn(
+          `Webhook PIX ignorado temporariamente para txid ${txid} (já em processamento em outra instância)`,
+        );
+        resultados.push({ txid, status: 'EM_PROCESSAMENTO' });
         continue;
       }
 
       try {
+        // Buscar venda pelo gatewayId (que é o txid)
+        const venda = await this.prisma.venda.findFirst({
+          where: { gatewayId: txid },
+          select: { id: true, status: true },
+        });
+
+        if (!venda) {
+          this.logger.warn(`Venda não encontrada para txid: ${txid}`);
+          resultados.push({ txid, status: 'VENDA_NAO_ENCONTRADA' });
+          continue;
+        }
+
+        if (venda.status !== 'PENDENTE') {
+          this.logger.log(
+            `Venda ${venda.id} já processada (status: ${venda.status})`,
+          );
+          resultados.push({ txid, status: 'JA_PROCESSADA' });
+          continue;
+        }
+
         await this.vendasService.confirmarPagamento(
           venda.id,
           pix as Record<string, unknown>,
@@ -77,9 +91,11 @@ export class PagamentosService {
         this.logger.log(`Pagamento confirmado via webhook para venda ${venda.id}`);
       } catch (error) {
         this.logger.error(
-          `Erro ao confirmar pagamento da venda ${venda.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `Erro ao confirmar pagamento por txid ${txid}: ${error instanceof Error ? error.message : String(error)}`,
         );
         resultados.push({ txid, status: 'ERRO' });
+      } finally {
+        await this.distributedLock.release(lock);
       }
     }
 

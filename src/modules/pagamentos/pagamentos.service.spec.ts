@@ -3,6 +3,7 @@ import { PagamentosService } from './pagamentos.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { VendasService } from '../vendas/vendas.service';
+import { DistributedLockService } from '../../common/redis/distributed-lock.service';
 
 describe('PagamentosService', () => {
   let service: PagamentosService;
@@ -30,6 +31,14 @@ describe('PagamentosService', () => {
     },
   };
 
+  const mockDistributedLockService = {
+    acquire: jest.fn().mockResolvedValue({
+      key: 'lock:pix:webhook:txid-123',
+      token: 'token-123',
+    }),
+    release: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -39,6 +48,7 @@ describe('PagamentosService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
         { provide: VendasService, useValue: mockVendasService },
+        { provide: DistributedLockService, useValue: mockDistributedLockService },
       ],
     }).compile();
 

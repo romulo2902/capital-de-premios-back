@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
@@ -23,6 +25,9 @@ import { LojaPublicaModule } from './modules/loja-publica/loja-publica.module';
 import { ConteudoModule } from './modules/conteudo/conteudo.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { FirebaseModule } from './common/firebase/firebase.module';
+import { RedisModule } from './common/redis/redis.module';
+import { RedisService } from './common/redis/redis.service';
+import { RedisThrottlerStorageService } from './common/throttler/redis-throttler-storage.service';
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const envFilePathByEnvironment: Record<string, string[]> = {
@@ -33,6 +38,8 @@ const envFilePathByEnvironment: Record<string, string[]> = {
 };
 
 @Module({
+  controllers: [AppController],
+  providers: [AppService],
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
@@ -45,17 +52,24 @@ const envFilePathByEnvironment: Record<string, string[]> = {
       ignoreEnvFile: false,
     }),
     ThrottlerModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      imports: [ConfigModule, RedisModule],
+      inject: [ConfigService, RedisService],
+      useFactory: (
+        config: ConfigService,
+        redisService: RedisService,
+      ) => ({
         throttlers: [
           {
             ttl: config.get<number>('THROTTLE_TTL', 60) * 1000,
             limit: config.get<number>('THROTTLE_LIMIT', 100),
           },
         ],
+        // Storage distribuído para funcionar corretamente com múltiplas réplicas.
+        // Instanciado aqui para evitar dependência de provider fora do escopo interno do ThrottlerModule.
+        storage: new RedisThrottlerStorageService(redisService),
       }),
     }),
+    RedisModule,
     PrismaModule,
     FirebaseModule,
     AuthModule,

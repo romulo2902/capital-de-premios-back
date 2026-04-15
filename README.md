@@ -40,44 +40,55 @@ DATABASE_URL=postgresql://user:password@localhost:5432/capital_premios_db
 Se a senha tiver `@`, escape como `%40`.
 Exemplo: `capital@123` -> `capital%40123`.
 
-## Setup rapido (Docker)
+## Setup rapido (Docker usando seu banco/redis local)
 
-1. Suba o Redis:
+1. Garanta seu `.env.development` com `PORT`, `DATABASE_URL`, `REDIS_URL` e `FIREBASE_SERVICE_ACCOUNT_PATH` corretos.
 
-```bash
-docker-compose up -d
-```
-
-2. Ajuste o `.env.development` (baseie-se no `.env.example`):
+Exemplo alinhado ao ambiente local:
 
 ```env
-DATABASE_URL=postgresql://user:password@seu-endpoint-rds:5432/capital_premios_db
+NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=postgresql://capital_user:capital%40123@localhost:5432/capital_premios_db
 REDIS_URL=redis://localhost:6379
+FIREBASE_SERVICE_ACCOUNT_PATH=/home/jair/projetos/freela/capital-premios/firebase/capital-premios-efa1e-firebase-adminsdk-fbsvc-a3287399f9.json
 ```
 
-3. Instale dependencias:
+Observacoes importantes:
+- a API roda em `network_mode: host`, entao usa o mesmo `localhost` do seu WSL
+- a porta da API vem do seu proprio `PORT` no `.env.development`
+- o `docker-compose` monta a pasta de Firebase para respeitar o caminho de `FIREBASE_SERVICE_ACCOUNT_PATH`
+- por padrao, o Compose sobe apenas a API. Postgres/Redis em container sao opcionais (`--profile infra`)
+
+2. Suba a API:
 
 ```bash
-npm install
+npm run docker:up
 ```
 
-4. Gere o Prisma Client e rode as migrations:
+3. Acompanhe logs:
 
 ```bash
-npm run prisma:generate
-npm run prisma:migrate
+npm run docker:logs
 ```
 
-5. (Opcional) Seed:
+4. Healthcheck da API:
 
 ```bash
-npm run prisma:seed
+curl http://localhost:3000/api/health
 ```
 
-6. Suba a API:
+5. Para desligar:
 
 ```bash
-npm run start:dev
+npm run docker:down
+```
+
+Opcional: subir infra por Docker (Postgres + Redis)
+
+```bash
+docker compose --profile infra up -d
 ```
 
 ## Setup local (RDS + Redis ja instalados)
@@ -105,10 +116,10 @@ npm run start:dev
 ## Subindo infraestrutura (opcional com Docker)
 
 ```bash
-docker compose up -d
+docker compose --profile infra up -d
 ```
 
-Observacao: o `docker-compose.yml` atual sobe Postgres com `user/password`.
+Observacao: por padrao o Compose sobe apenas a API.
 
 ## Variaveis de ambiente
 

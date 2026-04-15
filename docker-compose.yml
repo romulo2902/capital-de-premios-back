@@ -1,11 +1,66 @@
-version: '3.8'
 services:
-  redis:
-    image: redis:7-alpine
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: capital-premios-api
+    restart: unless-stopped
+    env_file:
+      - path: .env.homolog
+        required: false
+      - path: .env.development
+        required: false
+    environment:
+      DOCKER_DATABASE_HOST: ${DOCKER_DATABASE_HOST:-}
+      DOCKER_REDIS_HOST: ${DOCKER_REDIS_HOST:-}
+    network_mode: host
+    volumes:
+      - ${FIREBASE_MOUNT_HOST_DIR:-../firebase}:${FIREBASE_MOUNT_CONTAINER_DIR:-/home/jair/projetos/freela/capital-premios/firebase}:ro
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "const p=process.env.PORT||3000;const h=process.env.HEALTHCHECK_PATH||''/api/health'';fetch(''http://127.0.0.1:''+p+h).then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  postgres:
+    profiles: ['infra']
+    image: postgres:16-alpine
+    container_name: capital-premios-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-capital_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-capital@123}
+      POSTGRES_DB: ${POSTGRES_DB:-capital_premios_db}
     ports:
-      - '6379:6379'
+      - '${POSTGRES_HOST_PORT:-55432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-capital_user} -d ${POSTGRES_DB:-capital_premios_db}',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    profiles: ['infra']
+    image: redis:7-alpine
+    container_name: capital-premios-redis
+    restart: unless-stopped
     volumes:
       - redis_data:/data
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '${REDIS_HOST_PORT:-56379}:6379'
 
 volumes:
+  postgres_data:
   redis_data:
