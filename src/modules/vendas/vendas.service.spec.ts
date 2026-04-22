@@ -183,6 +183,7 @@ describe('VendasService', () => {
       id: 'edicao-1',
       numero: 8,
       status: StatusEdicao.ATIVA,
+      dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
       valorCartela: new Prisma.Decimal('30.00'),
       detalhes: [
         {
@@ -258,6 +259,17 @@ describe('VendasService', () => {
             total: new Prisma.Decimal('60.00'),
           }),
         }),
+      );
+    });
+
+    it('should throw BadRequestException when sales window is closed', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        ...edicaoAtiva,
+        dataEncerramento: new Date('2000-01-01T00:00:00.000Z'),
+      });
+
+      await expect(service.create(createDto)).rejects.toThrow(
+        BadRequestException,
       );
     });
 

@@ -133,6 +133,7 @@ export class LojaPublicaService {
     if (!edicao) throw new NotFoundException('Edição não encontrada');
     if (edicao.status !== StatusEdicao.ATIVA)
       throw new BadRequestException('Edição não está ativa');
+    this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
     const detalheSelecionado = edicao.detalhes[0];
     if (!detalheSelecionado) {
@@ -817,6 +818,24 @@ export class LojaPublicaService {
       throw new HttpException(
         'Limite de tentativas excedido. Tente novamente mais tarde',
         HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private validarJanelaDeVenda(
+    edicaoNumero: number,
+    dataEncerramento: Date,
+  ): void {
+    const agora = Date.now();
+    const encerramento = new Date(dataEncerramento).getTime();
+
+    if (Number.isNaN(encerramento)) {
+      return;
+    }
+
+    if (agora >= encerramento) {
+      throw new BadRequestException(
+        `As vendas da edição ${edicaoNumero} estão encerradas`,
       );
     }
   }

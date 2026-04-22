@@ -81,6 +81,8 @@ export class VendasService {
       );
     }
 
+    this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
+
     const origemParticipacao =
       dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
     const detalhesVenda = this.resolverDetalhesDaVenda(
@@ -251,6 +253,7 @@ export class VendasService {
         id: true,
         numero: true,
         status: true,
+        dataEncerramento: true,
         rangeInicio: true,
         rangeFinal: true,
         detalhes: {
@@ -273,6 +276,8 @@ export class VendasService {
     if (edicao.status !== StatusEdicao.ATIVA) {
       throw new BadRequestException('Edição não está ativa para navegação');
     }
+
+    this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
     const origemParticipacao =
       params.origemParticipacao ?? OrigemParticipacao.DIGITAL;
@@ -762,6 +767,24 @@ export class VendasService {
 
     this.logger.log(`Cliente auto-criado: ${nome} (CPF: ${cpf})`);
     return cliente;
+  }
+
+  private validarJanelaDeVenda(
+    edicaoNumero: number,
+    dataEncerramento: Date,
+  ): void {
+    const agora = Date.now();
+    const encerramento = new Date(dataEncerramento).getTime();
+
+    if (Number.isNaN(encerramento)) {
+      return;
+    }
+
+    if (agora >= encerramento) {
+      throw new BadRequestException(
+        `As vendas da edição ${edicaoNumero} estão encerradas`,
+      );
+    }
   }
 
   private async alocarBilhetes(
