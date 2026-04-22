@@ -12,39 +12,24 @@ API em NestJS para o sistema Capital de Premios, com Postgres, Prisma e Redis.
 
 ## Requisitos
 
+- Docker + Docker Compose
+
+Opcional (apenas para comandos utilitarios fora do container):
+
 - Node.js 22+
 - npm 10+
-- PostgreSQL 16+
-- Redis 7+
-
-Opcional (para subir banco/redis por container):
-
-- Docker + Docker Compose
 
 ## Configuracao de ambiente
 
-1. Crie o arquivo de ambiente local:
+1. Crie seu arquivo `.env.development`:
 
 ```bash
 cp .env.example .env.development
 ```
 
-2. Ajuste o `DATABASE_URL` para o seu Postgres.
+2. Ajuste `PORT`, `DATABASE_URL`, `REDIS_URL` e `FIREBASE_SERVICE_ACCOUNT_PATH`.
 
 Exemplo:
-
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/capital_premios_db
-```
-
-Se a senha tiver `@`, escape como `%40`.
-Exemplo: `capital@123` -> `capital%40123`.
-
-## Setup rapido (Docker usando seu banco/redis local)
-
-1. Garanta seu `.env.development` com `PORT`, `DATABASE_URL`, `REDIS_URL` e `FIREBASE_SERVICE_ACCOUNT_PATH` corretos.
-
-Exemplo alinhado ao ambiente local:
 
 ```env
 NODE_ENV=development
@@ -60,6 +45,14 @@ Observacoes importantes:
 - a porta da API vem do seu proprio `PORT` no `.env.development`
 - o `docker-compose` monta a pasta de Firebase para respeitar o caminho de `FIREBASE_SERVICE_ACCOUNT_PATH`
 - por padrao, o Compose sobe apenas a API. Postgres/Redis em container sao opcionais (`--profile infra`)
+
+## Execucao com Docker
+
+1. (Opcional) suba Postgres/Redis por Docker:
+
+```bash
+docker compose --profile infra up -d postgres redis
+```
 
 2. Suba a API:
 
@@ -85,70 +78,24 @@ curl http://localhost:3000/api/health
 npm run docker:down
 ```
 
-Opcional: subir infra por Docker (Postgres + Redis)
-
-```bash
-docker compose --profile infra up -d
-```
-
-## Setup local (RDS + Redis ja instalados)
-
-1. Ajuste o `.env.development` com suas credenciais locais.
-2. Instale dependencias:
-
-```bash
-npm install
-```
-
-3. Gere o Prisma Client e rode as migrations:
-
-```bash
-npm run prisma:generate
-npm run prisma:migrate
-```
-
-4. Suba a API:
-
-```bash
-npm run start:dev
-```
-
-## Subindo infraestrutura (opcional com Docker)
-
-```bash
-docker compose --profile infra up -d
-```
-
-Observacao: por padrao o Compose sobe apenas a API.
+Observacao: o container `api` ja executa `npx prisma migrate deploy` antes de iniciar a aplicacao.
 
 ## Variaveis de ambiente
 
 - Baseie-se no `.env.example`
-- O projeto usa `.env.development` por padrao nos scripts do Prisma
-- Em homologacao/producao com PM2/AWS, exporte as variaveis no shell, no `/etc/environment`, via Parameter Store/Secrets Manager ou carregue um `.env.homolog` / `.env.production` antes de iniciar o processo
+- Para Docker local, use `.env.development`
+- Para Docker em homolog/prod, use `.env.homolog` ou `.env.production`
 - Ajuste `DATABASE_URL` e `REDIS_URL` conforme seu ambiente
 - Configure JWT, gateways de pagamento, AWS S3, Swagger (prod) e throttle
 
 ## Comandos principais
 
-- `npm run start:dev` desenvolvimento com watch
-- `npm run build` build de producao
-- `npm run lint` lint do projeto
-- `npm run format` formatacao do codigo
-- `npm run prisma:migrate` cria e aplica migrations
-- `npm run prisma:migrate:deploy` aplica migrations em homologacao/producao
-- `npm run prisma:generate` gera o Prisma Client
-- `npm run prisma:seed` popula dados de exemplo
-- `npm run prisma:studio` abre o Prisma Studio
-- `npm run pm2:start` sobe a API de homologacao via PM2
-- `npm run pm2:reload` recarrega a API de homologacao no PM2 com as variaveis atuais
-- `npm run pm2:start:prod` sobe a API de producao via PM2
-- `npm run pm2:reload:prod` recarrega a API de producao no PM2
-- `npm run pm2:logs` acompanha logs da API no PM2
-- `npm run test` tests unitarios
-- `npm run test:watch` tests com watch
-- `npm run test:cov` cobertura
-- `npm run test:e2e` tests e2e
+- `npm run docker:build` build da imagem da API
+- `npm run docker:up` sobe/recria o container da API
+- `npm run docker:down` para e remove containers
+- `npm run docker:logs` acompanha logs da API
+- `docker compose --profile infra up -d postgres redis` sobe infraestrutura local
+- `docker compose exec api npx prisma migrate deploy` roda migration manualmente no container
 
 ## Documentacao da API
 
@@ -235,20 +182,20 @@ Impacto esperado no admin:
 ## Comandos Prisma
 
 ```bash
-# cria/aplica migracao em ambiente local
-npm run prisma:migrate
+# aplicar migrations pendentes (producao/homolog)
+docker compose exec api npx prisma migrate deploy
 
-# gera client do Prisma
-npm run prisma:generate
+# criar migration de desenvolvimento (quando necessario)
+docker compose exec api npx prisma migrate dev
 
-# popula dados iniciais
-npm run prisma:seed
+# gerar Prisma Client
+docker compose exec api npx prisma generate
 
-# reset completo do banco local (cuidado: apaga dados)
-npm run prisma:reset
+# reset completo do banco (cuidado: apaga dados)
+docker compose exec api npx prisma migrate reset --force
 
 # abre Prisma Studio
-npm run prisma:studio
+docker compose exec api npx prisma studio
 ```
 
 ## Erros comuns
@@ -305,8 +252,8 @@ psql -h localhost -U postgres -d postgres -c "ALTER ROLE capital_user CREATEDB;"
 Depois rode novamente:
 
 ```bash
-npm run prisma:migrate
-npm run prisma:seed
+docker compose exec api npx prisma migrate dev
+docker compose exec api npx prisma db seed
 ```
 
 ### Solucao 2 (quando voce nao pode alterar permissoes)
@@ -316,82 +263,39 @@ Use um usuario de desenvolvimento com permissao de `CREATEDB`, ou rode as migrac
 ## Rodando a API
 
 ```bash
-npm run start:dev
+npm run docker:up
 ```
 
 - API: `http://localhost:3000`
-- Swagger: `http://localhost:3000/docs`
+- Swagger: `http://localhost:3000/api/docs` (somente fora de producao)
 
-## Deploy na AWS com PM2 (Homologacao)
+## Deploy com Docker (Homologacao/Producao)
 
-Fluxo recomendado para EC2 com Ubuntu:
+1. Atualize o codigo e configure o arquivo de ambiente correto (`.env.homolog` ou `.env.production`).
 
-1. Instale Node.js 22, `pm2` e dependencias do projeto:
-
-```bash
-npm install -g pm2
-npm ci
-```
-
-2. Prepare as variaveis de homologacao:
+2. Rebuild da imagem:
 
 ```bash
-cp .env.homolog.example .env.homolog
+docker compose build api
 ```
 
-Preencha os valores reais e carregue no shell antes de migrar/subir a API:
+3. Suba a API:
 
 ```bash
-set -a
-source .env.homolog
-set +a
+docker compose up -d api
 ```
 
-3. Gere o Prisma Client, aplique migrations e faça o build:
+4. Verifique os logs:
 
 ```bash
-npx prisma generate
-npm run prisma:migrate:deploy
-npm run build
+docker compose logs -f api
 ```
-
-4. Inicie a API com PM2:
-
-```bash
-npm run pm2:start
-```
-
-5. Em novos deploys, depois do `git pull`, repita:
-
-```bash
-set -a
-source .env.homolog
-set +a
-npm ci
-npx prisma generate
-npm run prisma:migrate:deploy
-npm run build
-npm run pm2:reload
-```
-
-6. Para o PM2 reiniciar automaticamente apos reboot da instancia:
-
-```bash
-pm2 startup systemd -u ubuntu --hp /home/ubuntu
-npm run pm2:save
-```
-
-Comandos uteis:
-
-- `pm2 status`
-- `npm run pm2:logs`
-- `pm2 monit`
 
 Observacoes:
 
-- O arquivo `ecosystem.config.cjs` possui perfis `homolog` e `production`, ambos em `fork` com `1` instancia para evitar duplicacao de jobs/processamentos sensiveis.
-- Em homologacao e producao, o Nest usa apenas variaveis exportadas no ambiente. O `.env.homolog` e o `.env.production` servem como base para `source`, mas nao sao lidos diretamente pela aplicacao.
-- Se usar Nginx na frente da API, aponte o proxy para `http://127.0.0.1:3000`.
+- O container da API executa `npx prisma migrate deploy` no startup antes de subir o Nest.
+- Se precisar rodar migration manualmente: `docker compose exec api npx prisma migrate deploy`.
+- Se estiver usando Postgres/Redis locais no host, mantenha `network_mode: host` e URLs apontando para `localhost`.
 
 ## Credenciais do seed
 

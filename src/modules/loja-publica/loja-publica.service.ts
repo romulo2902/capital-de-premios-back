@@ -3,7 +3,10 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
@@ -24,10 +27,18 @@ import {
 } from '../edicoes/edicoes-range.util';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { ListarCombosLojaDto } from './dto/listar-combos-loja.dto';
+import { CreateFaleConoscoDto } from './dto/create-fale-conosco.dto';
+import { getRequestContext } from '../../common/request-context/request-context.util';
+import { RedisService } from '../../common/redis/redis.service';
 
 @Injectable()
 export class LojaPublicaService {
   private readonly logger = new Logger(LojaPublicaService.name);
+  private static readonly CONTATO_COOLDOWN_SEGUNDOS = 120;
+  private static readonly CONTATO_LIMITE_IP_JANELA_SEGUNDOS = 600;
+  private static readonly CONTATO_LIMITE_IP_MAXIMO = 8;
+  private static readonly CONTATO_LIMITE_CPF_JANELA_SEGUNDOS = 3600;
+  private static readonly CONTATO_LIMITE_CPF_MAXIMO = 3;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -35,6 +46,7 @@ export class LojaPublicaService {
     private readonly conteudoService: ConteudoService,
     private readonly config: ConfigService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
+    private readonly redisService: RedisService,
   ) {}
 
   async getHome() {
@@ -282,6 +294,51 @@ export class LojaPublicaService {
         quantidadeBilhetes,
         pagamento: dadosPagamento,
       },
+    };
+  }
+
+  async enviarFaleConosco(dto: CreateFaleConoscoDto) {
+    if (dto.website?.trim()) {
+      this.logger.warn(
+        `Tentativa de spam no formulário "Fale Conosco" bloqueada por honeypot (requestId: ${getRequestContext()?.requestId ?? 'n/a'})`,
+      );
+
+      return {
+        message: 'Mensagem enviada com sucesso',
+        data: { protocolo: null },
+      };
+    }
+
+    const nome = this.normalizarTexto(dto.nome);
+    const cpf = this.normalizarCpf(dto.cpf);
+    const email = dto.email.trim().toLowerCase();
+    const telefone = this.normalizarTelefone(dto.telefone);
+    const mensagem = this.normalizarTexto(dto.mensagem);
+
+    await this.validarLimitesContato(cpf);
+    await this.validarCooldownContato(cpf, email, mensagem);
+
+    const contexto = getRequestContext();
+    const fingerprint = this.gerarFingerprintContato(cpf, email, mensagem);
+
+    const contato = await this.prisma.contatoMensagem.create({
+      data: {
+        nome,
+        cpf,
+        email,
+        telefone,
+        mensagem,
+        fingerprint,
+        ip: contexto?.ip ?? null,
+        userAgent: contexto?.userAgent ?? null,
+      },
+    });
+
+    this.logger.log(`Nova mensagem recebida no Fale Conosco: ${contato.id}`);
+
+    return {
+      message: 'Mensagem enviada com sucesso',
+      data: { protocolo: contato.id },
     };
   }
 
@@ -612,5 +669,155 @@ export class LojaPublicaService {
           preco,
         };
       });
+  }
+
+  private normalizarTexto(valor: string): string {
+    return valor.replace(/\s+/g, ' ').trim();
+  }
+
+  private normalizarCpf(cpf: string): string {
+    return cpf.replace(/\D/g, '');
+  }
+
+  private normalizarTelefone(telefone: string): string {
+    return telefone.replace(/\D/g, '');
+  }
+
+  private gerarFingerprintContato(
+    cpf: string,
+    email: string,
+    mensagem: string,
+  ): string {
+    const base = `${cpf}|${email}|${mensagem}`;
+    return createHash('sha256').update(base).digest('hex');
+  }
+
+  private async validarCooldownContato(
+    cpf: string,
+    email: string,
+    mensagem: string,
+  ): Promise<void> {
+    const cooldownSeconds = LojaPublicaService.CONTATO_COOLDOWN_SEGUNDOS;
+
+    if (cooldownSeconds <= 0) {
+      return;
+    }
+
+    const fingerprint = this.gerarFingerprintContato(cpf, email, mensagem);
+    const key = `contact-form:cooldown:${fingerprint}`;
+    const redis = this.redisService.client;
+
+    if (redis) {
+      const wasStored = await redis.set(
+        key,
+        '1',
+        'EX',
+        cooldownSeconds,
+        'NX',
+      );
+
+      if (wasStored !== 'OK') {
+        throw new HttpException(
+          'Aguarde alguns instantes antes de reenviar a mesma mensagem',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      return;
+    }
+
+    const limite = new Date(Date.now() - cooldownSeconds * 1000);
+    const mensagemRecente = await this.prisma.contatoMensagem.findFirst({
+      where: {
+        fingerprint,
+        createdAt: { gte: limite },
+      },
+      select: { id: true },
+    });
+
+    if (mensagemRecente) {
+      throw new HttpException(
+        'Aguarde alguns instantes antes de reenviar a mesma mensagem',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private async validarLimitesContato(cpf: string): Promise<void> {
+    const ip = getRequestContext()?.ip ?? 'desconhecido';
+    const redis = this.redisService.client;
+
+    if (redis) {
+      await this.incrementarLimiteRedis(
+        `contact-form:ip:${ip}`,
+        LojaPublicaService.CONTATO_LIMITE_IP_JANELA_SEGUNDOS,
+        LojaPublicaService.CONTATO_LIMITE_IP_MAXIMO,
+      );
+      await this.incrementarLimiteRedis(
+        `contact-form:cpf:${cpf}`,
+        LojaPublicaService.CONTATO_LIMITE_CPF_JANELA_SEGUNDOS,
+        LojaPublicaService.CONTATO_LIMITE_CPF_MAXIMO,
+      );
+      return;
+    }
+
+    const limitePorIp = new Date(
+      Date.now() - LojaPublicaService.CONTATO_LIMITE_IP_JANELA_SEGUNDOS * 1000,
+    );
+    const limitePorCpf = new Date(
+      Date.now() - LojaPublicaService.CONTATO_LIMITE_CPF_JANELA_SEGUNDOS * 1000,
+    );
+
+    const [totalPorIp, totalPorCpf] = await Promise.all([
+      this.prisma.contatoMensagem.count({
+        where: {
+          ip,
+          createdAt: { gte: limitePorIp },
+        },
+      }),
+      this.prisma.contatoMensagem.count({
+        where: {
+          cpf,
+          createdAt: { gte: limitePorCpf },
+        },
+      }),
+    ]);
+
+    if (totalPorIp >= LojaPublicaService.CONTATO_LIMITE_IP_MAXIMO) {
+      throw new HttpException(
+        'Limite de tentativas excedido. Tente novamente mais tarde',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    if (totalPorCpf >= LojaPublicaService.CONTATO_LIMITE_CPF_MAXIMO) {
+      throw new HttpException(
+        'Limite de tentativas excedido. Tente novamente mais tarde',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private async incrementarLimiteRedis(
+    key: string,
+    windowSeconds: number,
+    limit: number,
+  ): Promise<void> {
+    const redis = this.redisService.client;
+    if (!redis) {
+      return;
+    }
+
+    const totalAtual = await redis.incr(key);
+    if (totalAtual === 1) {
+      await redis.expire(key, windowSeconds);
+    }
+
+    if (totalAtual > limit) {
+      throw new HttpException(
+        'Limite de tentativas excedido. Tente novamente mais tarde',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
   }
 }

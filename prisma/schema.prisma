@@ -366,6 +366,23 @@ model PaginaConteudo {
   updatedAt DateTime @updatedAt
 }
 
+model ContatoMensagem {
+  id          String   @id @default(uuid())
+  nome        String
+  cpf         String
+  email       String
+  telefone    String
+  mensagem    String
+  fingerprint String
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([cpf, createdAt])
+  @@index([fingerprint, createdAt])
+}
+
 model AuditLog {
   id          String      @id @default(uuid())
   requestId   String?

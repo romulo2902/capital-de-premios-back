@@ -5,9 +5,16 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { VendasModule } from '../vendas/vendas.module';
 import { ConteudoModule } from '../conteudo/conteudo.module';
 import { PagamentosModule } from '../pagamentos/pagamentos.module';
+import { RedisModule } from '../../common/redis/redis.module';
 
 @Module({
-  imports: [PrismaModule, VendasModule, PagamentosModule, ConteudoModule],
+  imports: [
+    PrismaModule,
+    VendasModule,
+    PagamentosModule,
+    ConteudoModule,
+    RedisModule,
+  ],
   controllers: [LojaPublicaController],
   providers: [LojaPublicaService],
 })
