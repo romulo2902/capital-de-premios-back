@@ -362,6 +362,33 @@ function buildDocsIndexHtml(port: number): string {
         padding-left: 20px;
         color: var(--muted);
       }
+
+      .commands {
+        margin-top: 28px;
+        padding: 18px 20px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        box-shadow: 0 10px 30px rgba(31, 41, 55, 0.08);
+      }
+
+      .commands h2 {
+        margin: 0 0 12px;
+        color: #0f172a;
+      }
+
+      .commands p {
+        margin-bottom: 12px;
+      }
+
+      .commands pre {
+        margin: 0;
+        padding: 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: #fffaf5;
+        overflow-x: auto;
+      }
     </style>
   </head>
   <body>
@@ -402,12 +429,31 @@ function buildDocsIndexHtml(port: number): string {
           <p>Interface interativa para testar os fluxos da loja e demais rotas da API.</p>
           <code>/api/swagger/geral</code>
         </a>
+
+        <a class="card" href="/api/admin/filas">
+          <span class="eyebrow">Bull Board</span>
+          <h2>Filas e Tasks</h2>
+          <p>Painel visual das filas BullMQ (auto-encerramento e jobs recorrentes).</p>
+          <code>/api/admin/filas (fallback: /admin/filas)</code>
+        </a>
       </section>
 
       <ul>
         <li>JSON Admin: <code>http://localhost:${port}/api/docs-json/admin</code></li>
         <li>JSON Geral: <code>http://localhost:${port}/api/docs-json/geral</code></li>
       </ul>
+
+      <section class="commands">
+        <h2>Deploy Docker (Homologação)</h2>
+        <p>Comandos sugeridos para atualizar a API no servidor:</p>
+        <pre><code>docker compose down
+docker compose build api --no-cache
+docker compose up -d api
+docker compose logs -f api
+
+# (opcional) conferir migrations
+docker compose exec api npx prisma migrate status</code></pre>
+      </section>
     </main>
   </body>
 </html>`;

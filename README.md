@@ -86,6 +86,7 @@ Observacao: o container `api` ja executa `npx prisma migrate deploy` antes de in
 - Para Docker local, use `.env.development`
 - Para Docker em homolog/prod, use `.env.homolog` ou `.env.production`
 - Ajuste `DATABASE_URL` e `REDIS_URL` conforme seu ambiente
+- Configure `BULL_BOARD_USER` e `BULL_BOARD_PASS` para habilitar o painel visual de filas em `/api/admin/filas`
 - Configure JWT, gateways de pagamento, AWS S3, Swagger (prod) e throttle
 
 ## Comandos principais
@@ -96,6 +97,7 @@ Observacao: o container `api` ja executa `npx prisma migrate deploy` antes de in
 - `npm run docker:logs` acompanha logs da API
 - `docker compose --profile infra up -d postgres redis` sobe infraestrutura local
 - `docker compose exec api npx prisma migrate deploy` roda migration manualmente no container
+- `http://localhost:3000/api/admin/filas` bull-board (quando `BULL_BOARD_USER/PASS` estiverem configurados)
 
 ## Documentacao da API
 

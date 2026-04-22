@@ -8,6 +8,7 @@ import compression from 'compression';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { setupOpenApiDocs } from './common/docs/openapi-docs.util';
+import { setupBullBoard } from './common/docs/bull-board.util';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { RequestContextInterceptor } from './common/interceptors/request-context.interceptor';
@@ -83,7 +84,10 @@ async function bootstrap(): Promise<void> {
     setupOpenApiDocs(app, port, logger);
   }
 
+  setupBullBoard(app.getHttpAdapter().getInstance(), config, logger);
+
   await app.listen(port, host);
+
   logger.log(`🚀 Aplicação rodando em ${host}:${port}`);
   logger.log(`🌍 Ambiente: ${nodeEnv}`);
 }
