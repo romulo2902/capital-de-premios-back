@@ -156,22 +156,22 @@ export class CreateEdicaoDto {
     example: [
       {
         origemParticipacao: 'DIGITAL',
-        tipoCartela: 'UMA_CHANCE',
+        quantidadeCartelas: 1,
         preco: '10.00',
       },
       {
         origemParticipacao: 'DIGITAL',
-        tipoCartela: 'DUAS_CHANCES',
+        quantidadeCartelas: 2,
         preco: '20.00',
       },
       {
         origemParticipacao: 'POS',
-        tipoCartela: 'DUAS_CHANCES',
+        quantidadeCartelas: 2,
         preco: '22.00',
       },
     ],
     description:
-      'Combos da edição com preço por origem e tipo de cartela/chances.',
+      'Combos da edição com preço por origem e quantidade de cartelas/chances. Compatível com `tipoCartela` (legado).',
   })
   @Transform(parseCombosInput)
   @Type(() => CreateEdicaoComboDto)

@@ -13,6 +13,8 @@ import {
   IsArray,
   ValidateNested,
   ArrayMinSize,
+  Max,
+  ValidateIf,
 } from 'class-validator';
 import { TipoCartela } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -23,9 +25,30 @@ export class ComprarLojaDto {
   @IsUUID('4')
   edicaoId: string;
 
-  @ApiProperty({ enum: TipoCartela, example: TipoCartela.SEIS_CHANCES, description: 'Tipo de cartela escolhido' })
+  @ApiPropertyOptional({
+    enum: TipoCartela,
+    example: TipoCartela.SEIS_CHANCES,
+    description:
+      'Tipo de cartela escolhido (legado compatível com `quantidadeCartelas`).',
+  })
+  @ValidateIf(
+    (dto: ComprarLojaDto) =>
+      dto.tipoCartela !== undefined || dto.quantidadeCartelas === undefined,
+  )
   @IsEnum(TipoCartela)
-  tipoCartela: TipoCartela;
+  tipoCartela?: TipoCartela;
+
+  @ApiPropertyOptional({
+    example: 6,
+    description:
+      'Quantidade de cartelas/chances do combo (1 a 12). Alias para `tipoCartela`.',
+  })
+  @Type(() => Number)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  quantidadeCartelas?: number;
 
   @ApiProperty({ example: 1, description: 'Quantidade de opções deste tipo' })
   @Type(() => Number)

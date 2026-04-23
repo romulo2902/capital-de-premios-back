@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
@@ -9,6 +9,7 @@ import {
   Matches,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
 
@@ -18,13 +19,30 @@ export enum DirecaoComboLoja {
 }
 
 export class ListarCombosLojaDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     enum: TipoCartela,
     example: TipoCartela.SEIS_CHANCES,
-    description: 'Tipo de cartela/combinação que o cliente deseja navegar.',
+    description:
+      'Tipo de cartela/combinação que o cliente deseja navegar (legado compatível com `quantidadeCartelas`).',
   })
+  @ValidateIf(
+    (dto: ListarCombosLojaDto) =>
+      dto.tipoCartela !== undefined || dto.quantidadeCartelas === undefined,
+  )
   @IsEnum(TipoCartela)
-  tipoCartela: TipoCartela;
+  tipoCartela?: TipoCartela;
+
+  @ApiPropertyOptional({
+    example: 6,
+    description:
+      'Quantidade de cartelas/chances do combo (1 a 12). Alias para `tipoCartela`.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  quantidadeCartelas?: number;
 
   @ApiPropertyOptional({
     enum: [OrigemParticipacao.DIGITAL, OrigemParticipacao.POS],

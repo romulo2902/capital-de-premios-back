@@ -1,6 +1,17 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
-import { IsEnum, IsIn, IsString, Matches } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 const VALOR_COMBO_REGEX = /^\d+([.,]\d{1,2})?$/;
 
@@ -16,14 +27,30 @@ export class CreateEdicaoComboDto {
   })
   origemParticipacao: OrigemParticipacao;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    example: 2,
+    description:
+      'Quantidade de cartelas/chances deste combo (1 a 12). Novo formato recomendado.',
+  })
+  @Type(() => Number)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  quantidadeCartelas?: number;
+
+  @ApiPropertyOptional({
     enum: TipoCartela,
     example: TipoCartela.DUAS_CHANCES,
     description:
-      'Tipo do combo conforme quantidade de chances (ex.: UMA_CHANCE, DUAS_CHANCES, ...).',
+      'Tipo do combo conforme quantidade de chances (legado compatível). Se `quantidadeCartelas` também for enviado, ambos devem ser equivalentes.',
   })
+  @ValidateIf(
+    (combo: CreateEdicaoComboDto) =>
+      combo.tipoCartela !== undefined || combo.quantidadeCartelas === undefined,
+  )
   @IsEnum(TipoCartela)
-  tipoCartela: TipoCartela;
+  tipoCartela?: TipoCartela;
 
   @ApiProperty({
     example: '20.00',

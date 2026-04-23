@@ -55,7 +55,7 @@ export class UpdateEdicaoDto extends PartialType(CreateEdicaoDto) {
   @ApiPropertyOptional({
     type: [CreateEdicaoComboDto],
     description:
-      'Novo conjunto de combos com preços por origem/tipo. Quando informado, substitui integralmente os combos existentes.',
+      'Novo conjunto de combos com preços por origem e quantidade de cartelas/chances. Quando informado, substitui integralmente os combos existentes.',
   })
   @Transform(parseCombosInput)
   @Type(() => CreateEdicaoComboDto)

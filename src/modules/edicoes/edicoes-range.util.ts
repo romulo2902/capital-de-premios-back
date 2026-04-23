@@ -36,6 +36,21 @@ interface GrupoDetalhesPorTipo {
   detalhes: DetalheRangeExpandivel[];
 }
 
+const TIPO_CARTELA_POR_QUANTIDADE_CHANCES = new Map<number, TipoCartela>([
+  [1, TipoCartela.UMA_CHANCE],
+  [2, TipoCartela.DUAS_CHANCES],
+  [3, TipoCartela.TRES_CHANCES],
+  [4, TipoCartela.QUATRO_CHANCES],
+  [5, TipoCartela.CINCO_CHANCES],
+  [6, TipoCartela.SEIS_CHANCES],
+  [7, TipoCartela.SETE_CHANCES],
+  [8, TipoCartela.OITO_CHANCES],
+  [9, TipoCartela.NOVE_CHANCES],
+  [10, TipoCartela.DEZ_CHANCES],
+  [11, TipoCartela.ONZE_CHANCES],
+  [12, TipoCartela.DOZE_CHANCES],
+]);
+
 export interface GrupoDetalhesRangeConfiguracao {
   origemParticipacao: OrigemParticipacao;
   tipoCartela: TipoCartela;
@@ -382,6 +397,12 @@ export function obterQuantidadeChances(tipoCartela: TipoCartela): number {
   return QUANTIDADE_CHANCES_POR_TIPO_CARTELA[tipoCartela];
 }
 
+export function obterTipoCartelaPorQuantidadeChances(
+  quantidadeChances: number,
+): TipoCartela | null {
+  return TIPO_CARTELA_POR_QUANTIDADE_CHANCES.get(quantidadeChances) ?? null;
+}
+
 export function calcularQuantidadeCombosDoDetalhe(
   detalhe: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
 ): bigint {
@@ -422,23 +443,8 @@ function contarDetalhesPorOrigem<
 function resolverTipoCartelaBasePorQuantidade(
   quantidadeRanges: number,
 ): TipoCartela {
-  const tipoCartelaPorQuantidade = new Map<number, TipoCartela>([
-    [1, TipoCartela.UMA_CHANCE],
-    [2, TipoCartela.DUAS_CHANCES],
-    [3, TipoCartela.TRES_CHANCES],
-    [4, TipoCartela.QUATRO_CHANCES],
-    [5, TipoCartela.CINCO_CHANCES],
-    [6, TipoCartela.SEIS_CHANCES],
-    [7, TipoCartela.SETE_CHANCES],
-    [8, TipoCartela.OITO_CHANCES],
-    [9, TipoCartela.NOVE_CHANCES],
-    [10, TipoCartela.DEZ_CHANCES],
-    [11, TipoCartela.ONZE_CHANCES],
-    [12, TipoCartela.DOZE_CHANCES],
-  ]);
-
   return (
-    tipoCartelaPorQuantidade.get(quantidadeRanges) ??
+    obterTipoCartelaPorQuantidadeChances(quantidadeRanges) ??
     TipoCartela.DOZE_CHANCES
   );
 }

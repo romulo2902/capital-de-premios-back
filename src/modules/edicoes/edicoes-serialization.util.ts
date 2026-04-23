@@ -56,6 +56,7 @@ export function serializarEdicao(
 
   const combos = edicao.combos.map((combo) => ({
     ...combo,
+    quantidadeCartelas: obterQuantidadeChances(combo.tipoCartela),
     quantidadeChances: obterQuantidadeChances(combo.tipoCartela),
     preco: combo.preco.toString(),
   }));

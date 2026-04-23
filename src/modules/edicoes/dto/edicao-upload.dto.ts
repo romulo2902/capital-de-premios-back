@@ -21,9 +21,9 @@ export class CreateEdicaoUploadDto extends OmitType(CreateEdicaoDto, [
 
   @ApiProperty({
     example:
-      '[{"origemParticipacao":"DIGITAL","tipoCartela":"UMA_CHANCE","preco":"10.00"},{"origemParticipacao":"DIGITAL","tipoCartela":"DUAS_CHANCES","preco":"20.00"},{"origemParticipacao":"POS","tipoCartela":"DUAS_CHANCES","preco":"22.00"}]',
+      '[{"origemParticipacao":"DIGITAL","quantidadeCartelas":1,"preco":"10.00"},{"origemParticipacao":"DIGITAL","quantidadeCartelas":2,"preco":"20.00"},{"origemParticipacao":"POS","quantidadeCartelas":2,"preco":"22.00"}]',
     description:
-      'JSON serializado com os combos da edição e seus preços por origem/tipo.',
+      'JSON serializado com os combos da edição e seus preços por origem e quantidade de cartelas/chances (compatível com `tipoCartela` legado).',
   })
   combos: string;
 

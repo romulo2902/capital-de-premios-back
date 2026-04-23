@@ -38,7 +38,8 @@ export class LojaPublicaController {
     summary:
       'Navegar pelos combos pré-definidos (1 por vez) de uma edição/combinação (Público)',
   })
-  @ApiQuery({ name: 'tipoCartela', required: true, enum: TipoCartela })
+  @ApiQuery({ name: 'tipoCartela', required: false, enum: TipoCartela })
+  @ApiQuery({ name: 'quantidadeCartelas', required: false, type: Number })
   @ApiQuery({
     name: 'origemParticipacao',
     required: false,

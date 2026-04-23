@@ -7,6 +7,7 @@ import {
   IsString,
   IsUUID,
   Matches,
+  Max,
   Min,
   MinLength,
   IsArray,
@@ -38,11 +39,23 @@ export class CreateVendaDto {
     enum: TipoCartela,
     example: TipoCartela.UMA_CHANCE,
     description:
-      'Tipo de cartela/chances. Quando omitido, a API assume UMA_CHANCE ou o tier compatível padrão da edição.',
+      'Tipo de cartela/chances (legado compatível). Quando omitido, a API usa `quantidadeCartelas` ou assume UMA_CHANCE/tier padrão da edição.',
   })
   @IsOptional()
   @IsEnum(TipoCartela)
   tipoCartela?: TipoCartela;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description:
+      'Quantidade de cartelas/chances por combo (1 a 12). Alias para `tipoCartela`.',
+  })
+  @Type(() => Number)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  quantidadeCartelas?: number;
 
   @ApiProperty({
     enum: TipoPagamento,

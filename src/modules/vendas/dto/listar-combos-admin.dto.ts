@@ -20,11 +20,24 @@ export class ListarCombosAdminDto {
   @ApiPropertyOptional({
     enum: TipoCartela,
     example: TipoCartela.SEIS_CHANCES,
-    description: 'Tipo de cartela/combinação a navegar.',
+    description:
+      'Tipo de cartela/combinação a navegar (legado compatível com `quantidadeCartelas`).',
   })
   @IsOptional()
   @IsEnum(TipoCartela)
   tipoCartela?: TipoCartela;
+
+  @ApiPropertyOptional({
+    example: 6,
+    description:
+      'Quantidade de cartelas/chances do combo (1 a 12). Alias para `tipoCartela`.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  quantidadeCartelas?: number;
 
   @ApiPropertyOptional({
     enum: OrigemParticipacao,

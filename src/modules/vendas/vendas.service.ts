@@ -33,6 +33,7 @@ import {
 import {
   expandirSetoresDosDetalhes,
   obterQuantidadeChances,
+  obterTipoCartelaPorQuantidadeChances,
 } from '../edicoes/edicoes-range.util';
 
 type DetalheVenda = Pick<
@@ -104,11 +105,15 @@ export class VendasService {
 
     const origemParticipacao =
       dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
+    const tipoCartelaSolicitada = this.resolverTipoCartelaDaSolicitacao(
+      dto.tipoCartela,
+      dto.quantidadeCartelas,
+    );
     const configuracaoVenda = this.resolverConfiguracaoDaVenda(
       edicao.detalhes,
       edicao.combos,
       origemParticipacao,
-      dto.tipoCartela,
+      tipoCartelaSolicitada,
     );
     const detalhesVenda = configuracaoVenda.detalhes;
     const detalheVenda = detalhesVenda[0];
@@ -262,6 +267,7 @@ export class VendasService {
     edicaoId: string;
     origemParticipacao?: OrigemParticipacao;
     tipoCartela?: TipoCartela;
+    quantidadeCartelas?: number;
     cursorNumeroBase?: string;
     direcao?: DirecaoCombo;
     limit?: number;
@@ -309,6 +315,10 @@ export class VendasService {
 
     const origemParticipacao =
       params.origemParticipacao ?? OrigemParticipacao.DIGITAL;
+    const tipoCartelaSolicitada = this.resolverTipoCartelaDaSolicitacao(
+      params.tipoCartela,
+      params.quantidadeCartelas,
+    );
 
     let configuracaoVenda: ConfiguracaoVendaResolvida;
     try {
@@ -316,7 +326,7 @@ export class VendasService {
         edicao.detalhes,
         edicao.combos,
         origemParticipacao,
-        params.tipoCartela,
+        tipoCartelaSolicitada,
       );
     } catch (e) {
       if (e instanceof BadRequestException) {
@@ -327,7 +337,8 @@ export class VendasService {
             edicaoNumero: edicao.numero,
             status: edicao.status,
             origemParticipacao,
-            tipoCartela: params.tipoCartela ?? TipoCartela.UMA_CHANCE,
+            tipoCartela: tipoCartelaSolicitada ?? TipoCartela.UMA_CHANCE,
+            quantidadeCartelas: 0,
             quantidadeChances: 0,
             passoEntreChances: '0',
             rangeTotalInicio: '0',
@@ -403,6 +414,7 @@ export class VendasService {
         status: edicao.status,
         origemParticipacao,
         tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
+        quantidadeCartelas: quantidadeChances,
         quantidadeChances,
         preco: configuracaoVenda.precoCombo
           ? configuracaoVenda.precoCombo.toString()
@@ -1337,6 +1349,38 @@ export class VendasService {
     tipoCartela?: TipoCartela | null,
   ): number {
     return tipoCartela ? obterQuantidadeChances(tipoCartela) : 1;
+  }
+
+  private resolverTipoCartelaDaSolicitacao(
+    tipoCartela?: TipoCartela | null,
+    quantidadeCartelas?: number | null,
+  ): TipoCartela | undefined {
+    const tipoCartelaPelaQuantidade =
+      quantidadeCartelas !== undefined && quantidadeCartelas !== null
+        ? obterTipoCartelaPorQuantidadeChances(quantidadeCartelas)
+        : null;
+
+    if (
+      quantidadeCartelas !== undefined &&
+      quantidadeCartelas !== null &&
+      !tipoCartelaPelaQuantidade
+    ) {
+      throw new BadRequestException(
+        `quantidadeCartelas inválida: ${quantidadeCartelas}. Informe um valor entre 1 e 12`,
+      );
+    }
+
+    if (
+      tipoCartela &&
+      tipoCartelaPelaQuantidade &&
+      tipoCartela !== tipoCartelaPelaQuantidade
+    ) {
+      throw new BadRequestException(
+        `Conflito entre tipoCartela (${tipoCartela}) e quantidadeCartelas (${quantidadeCartelas})`,
+      );
+    }
+
+    return tipoCartela ?? tipoCartelaPelaQuantidade ?? undefined;
   }
 
   private calcularNumeroDoSetorParaBase(

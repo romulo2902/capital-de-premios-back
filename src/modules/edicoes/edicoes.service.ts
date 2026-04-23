@@ -38,6 +38,7 @@ import {
   normalizarDetalhes as normalizarDetalhesUtil,
   normalizarDetalhesExistentes as normalizarDetalhesExistentesUtil,
   obterQuantidadeChances as obterQuantidadeChancesUtil,
+  obterTipoCartelaPorQuantidadeChances as obterTipoCartelaPorQuantidadeChancesUtil,
   possuiSobreposicao as possuiSobreposicaoUtil,
   validarDestinoComDetalhes as validarDestinoComDetalhesUtil,
   validarDetalhesInternos as validarDetalhesInternosUtil,
@@ -633,7 +634,7 @@ export class EdicoesService {
   ): ComboEdicaoNormalizado[] {
     return combos.map((combo) => ({
       origemParticipacao: combo.origemParticipacao,
-      tipoCartela: combo.tipoCartela,
+      tipoCartela: this.resolverTipoCartelaCombo(combo),
       preco: this.normalizarValorCartela(combo.preco),
     }));
   }
@@ -646,6 +647,41 @@ export class EdicoesService {
       tipoCartela: combo.tipoCartela,
       preco: combo.preco,
     }));
+  }
+
+  private resolverTipoCartelaCombo(combo: CreateEdicaoComboDto): TipoCartela {
+    const tipoCartelaPelaQuantidade =
+      combo.quantidadeCartelas !== undefined
+        ? this.obterTipoCartelaPorQuantidadeChances(combo.quantidadeCartelas)
+        : null;
+
+    if (combo.quantidadeCartelas !== undefined && !tipoCartelaPelaQuantidade) {
+      throw new BadRequestException(
+        `quantidadeCartelas inválida no combo da origem ${combo.origemParticipacao}: ${combo.quantidadeCartelas}. Informe um valor entre 1 e 12`,
+      );
+    }
+
+    if (
+      combo.tipoCartela &&
+      tipoCartelaPelaQuantidade &&
+      combo.tipoCartela !== tipoCartelaPelaQuantidade
+    ) {
+      throw new BadRequestException(
+        `Combo da origem ${combo.origemParticipacao} possui conflito entre tipoCartela (${combo.tipoCartela}) e quantidadeCartelas (${combo.quantidadeCartelas})`,
+      );
+    }
+
+    if (combo.tipoCartela) {
+      return combo.tipoCartela;
+    }
+
+    if (tipoCartelaPelaQuantidade) {
+      return tipoCartelaPelaQuantidade;
+    }
+
+    throw new BadRequestException(
+      `Informe tipoCartela ou quantidadeCartelas para o combo da origem ${combo.origemParticipacao}`,
+    );
   }
 
   private validarCombosComDetalhes(
@@ -874,5 +910,11 @@ export class EdicoesService {
 
   private obterQuantidadeChances(tipoCartela: TipoCartela): number {
     return obterQuantidadeChancesUtil(tipoCartela);
+  }
+
+  private obterTipoCartelaPorQuantidadeChances(
+    quantidadeChances: number,
+  ): TipoCartela | null {
+    return obterTipoCartelaPorQuantidadeChancesUtil(quantidadeChances);
   }
 }

@@ -23,6 +23,7 @@ import { ConteudoService } from '../conteudo/conteudo.service';
 import {
   expandirSetoresDosDetalhes,
   obterQuantidadeChances,
+  obterTipoCartelaPorQuantidadeChances,
 } from '../edicoes/edicoes-range.util';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { ListarCombosLojaDto } from './dto/listar-combos-loja.dto';
@@ -115,6 +116,7 @@ export class LojaPublicaService {
       origemParticipacao:
         filtros.origemParticipacao ?? OrigemParticipacao.DIGITAL,
       tipoCartela: filtros.tipoCartela,
+      quantidadeCartelas: filtros.quantidadeCartelas,
       cursorNumeroBase: filtros.cursorNumeroBase,
       direcao: filtros.direcao,
       limit: filtros.limit,
@@ -122,6 +124,11 @@ export class LojaPublicaService {
   }
 
   async comprar(dto: ComprarLojaDto) {
+    const tipoCartelaSelecionada = this.resolverTipoCartelaDaCompra(
+      dto.tipoCartela,
+      dto.quantidadeCartelas,
+    );
+
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: dto.edicaoId },
       include: {
@@ -134,7 +141,7 @@ export class LojaPublicaService {
         combos: {
           where: {
             origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: dto.tipoCartela,
+            tipoCartela: tipoCartelaSelecionada,
           },
         },
       },
@@ -154,7 +161,7 @@ export class LojaPublicaService {
     }
 
     const quantidadeBilhetes =
-      obterQuantidadeChances(dto.tipoCartela) * dto.quantidade;
+      obterQuantidadeChances(tipoCartelaSelecionada) * dto.quantidade;
 
     if (
       dto.combosSelecionados &&
@@ -191,7 +198,7 @@ export class LojaPublicaService {
         edicaoId: edicao.id,
         clienteId: cliente.id,
         quantidade: dto.quantidade,
-        tipoCartela: dto.tipoCartela,
+        tipoCartela: tipoCartelaSelecionada,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao: OrigemParticipacao.DIGITAL,
@@ -268,7 +275,7 @@ export class LojaPublicaService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
-        descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidade}x ${dto.tipoCartela}`,
+        descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidade}x ${tipoCartelaSelecionada}`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
         expiracaoSegundos: 3600,
@@ -685,6 +692,7 @@ export class LojaPublicaService {
       return [
         {
           tipoCartela: TipoCartela.UMA_CHANCE,
+          quantidadeCartelas: 1,
           quantidadeChances: 1,
           rangeTotalInicio: setoresBase[0].rangeTotalInicio.toString(),
           rangeTotalFinal: setoresBase[0].rangeTotalFinal.toString(),
@@ -718,6 +726,7 @@ export class LojaPublicaService {
 
       return {
         tipoCartela: combo.tipoCartela,
+        quantidadeCartelas: quantidadeChances,
         quantidadeChances,
         rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
         rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
@@ -883,6 +892,34 @@ export class LojaPublicaService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
+  }
+
+  private resolverTipoCartelaDaCompra(
+    tipoCartela?: TipoCartela,
+    quantidadeCartelas?: number,
+  ): TipoCartela {
+    const tipoCartelaPelaQuantidade =
+      quantidadeCartelas !== undefined
+        ? obterTipoCartelaPorQuantidadeChances(quantidadeCartelas)
+        : null;
+
+    if (quantidadeCartelas !== undefined && !tipoCartelaPelaQuantidade) {
+      throw new BadRequestException(
+        `quantidadeCartelas inválida: ${quantidadeCartelas}. Informe um valor entre 1 e 12`,
+      );
+    }
+
+    if (
+      tipoCartela &&
+      tipoCartelaPelaQuantidade &&
+      tipoCartela !== tipoCartelaPelaQuantidade
+    ) {
+      throw new BadRequestException(
+        `Conflito entre tipoCartela (${tipoCartela}) e quantidadeCartelas (${quantidadeCartelas})`,
+      );
+    }
+
+    return tipoCartela ?? tipoCartelaPelaQuantidade ?? TipoCartela.UMA_CHANCE;
   }
 
   private validarJanelaDeVenda(
