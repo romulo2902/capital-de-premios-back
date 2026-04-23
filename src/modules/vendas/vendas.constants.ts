@@ -53,6 +53,23 @@ export const VENDA_INCLUDE = {
  */
 export const VENDA_INCLUDE_DETALHES = {
   ...VENDA_INCLUDE,
+  cliente: {
+    select: {
+      id: true,
+      codigo: true,
+      cpf: true,
+      nome: true,
+      telefone: true,
+      email: true,
+      dataNascimento: true,
+      cep: true,
+      endereco: true,
+      numero: true,
+      bairro: true,
+      cidade: true,
+      estado: true,
+    },
+  },
   bilhetes: {
     select: {
       id: true,

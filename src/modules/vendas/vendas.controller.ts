@@ -21,6 +21,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { VendasService } from './vendas.service';
 import { CreateVendaDto } from './dto/create-venda.dto';
 import { UpdateVendaStatusDto } from './dto/update-venda-status.dto';
+import { UpdateVendaDto } from './dto/update-venda.dto';
 import { FiltroVendasDto } from './dto/filtro-vendas.dto';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { ListarCombosAdminDto } from './dto/listar-combos-admin.dto';
@@ -37,6 +38,7 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
  *   - GET    /admin/vendas/:id/status     → Consultar status da venda
  *   - GET    /admin/vendas/:id            → Detalhes da venda (com bilhetes)
  *   - GET    /admin/vendas/cliente/:cpf   → Vendas por CPF do cliente
+ *   - PATCH  /admin/vendas/:id            → Editar dados pessoais da venda
  *   - PATCH  /admin/vendas/:id/status     → Atualizar status manualmente (ADMIN)
  *   - PATCH  /admin/vendas/:id/cancelar   → Cancelar venda (ADMIN)
  */
@@ -127,6 +129,18 @@ export class VendasController {
   @ApiOperation({ summary: 'Detalhes de uma venda (com bilhetes)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.vendasService.findOne(id);
+  }
+
+  @Patch(':id')
+  @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
+  @ApiOperation({
+    summary: 'Editar dados pessoais do cliente vinculado a uma venda',
+  })
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateVendaDto,
+  ) {
+    return this.vendasService.update(id, dto);
   }
 
   @Patch(':id/status')

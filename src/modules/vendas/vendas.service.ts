@@ -24,6 +24,7 @@ import {
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { CreateVendaDto } from './dto/create-venda.dto';
 import { UpdateVendaStatusDto } from './dto/update-venda-status.dto';
+import { UpdateVendaDto } from './dto/update-venda.dto';
 import { FiltroVendasDto } from './dto/filtro-vendas.dto';
 import {
   VENDA_INCLUDE,
@@ -469,14 +470,7 @@ export class VendasService {
   // ─── FIND ONE ──────────────────────────────────────────
 
   async findOne(id: string) {
-    const venda = await this.prisma.venda.findUnique({
-      where: { id },
-      include: VENDA_INCLUDE_DETALHES,
-    });
-
-    if (!venda) {
-      throw new NotFoundException('Venda não encontrada');
-    }
+    const venda = await this.buscarVendaComContextoEdicao(id);
 
     return {
       message: 'Venda encontrada com sucesso',
@@ -485,15 +479,20 @@ export class VendasService {
   }
 
   async consultarStatus(id: string) {
+    const venda = await this.buscarVendaComContextoEdicao(id);
+
+    return {
+      message: 'Status da venda consultado com sucesso',
+      data: venda,
+    };
+  }
+
+  async update(id: string, dto: UpdateVendaDto) {
     const venda = await this.prisma.venda.findUnique({
       where: { id },
       select: {
         id: true,
-        status: true,
-        tipoPagamento: true,
-        gatewayId: true,
-        gatewayPayload: true,
-        createdAt: true,
+        clienteId: true,
       },
     });
 
@@ -501,9 +500,26 @@ export class VendasService {
       throw new NotFoundException('Venda não encontrada');
     }
 
+    const clienteUpdateData = this.normalizarDadosClienteParaEdicao(dto);
+
+    if (Object.keys(clienteUpdateData).length === 0) {
+      throw new BadRequestException(
+        'Informe ao menos um campo editável dos dados pessoais da venda',
+      );
+    }
+
+    await this.prisma.cliente.update({
+      where: { id: venda.clienteId },
+      data: clienteUpdateData,
+    });
+
+    const vendaAtualizada = await this.buscarVendaComContextoEdicao(id);
+
+    this.logger.log(`Venda ${id} atualizada com sucesso`);
+
     return {
-      message: 'Status da venda consultado com sucesso',
-      data: venda,
+      message: 'Venda atualizada com sucesso',
+      data: vendaAtualizada,
     };
   }
 
@@ -802,6 +818,150 @@ export class VendasService {
   }
 
   // ─── HELPERS PRIVADOS ─────────────────────────────────
+
+  private async buscarVendaComContextoEdicao(id: string) {
+    const venda = await this.prisma.venda.findUnique({
+      where: { id },
+      include: VENDA_INCLUDE_DETALHES,
+    });
+
+    if (!venda) {
+      throw new NotFoundException('Venda não encontrada');
+    }
+
+    if (!venda.distribuidorId) {
+      return {
+        ...venda,
+        distribuidor: null,
+      };
+    }
+
+    const distribuidor = await this.prisma.distribuidor.findUnique({
+      where: { id: venda.distribuidorId },
+      select: {
+        id: true,
+        codigo: true,
+        nome: true,
+        email: true,
+        telefone: true,
+      },
+    });
+
+    return {
+      ...venda,
+      distribuidor,
+    };
+  }
+
+  private normalizarDadosClienteParaEdicao(
+    dto: UpdateVendaDto,
+  ): Prisma.ClienteUpdateInput {
+    const data: Prisma.ClienteUpdateInput = {};
+
+    if (dto.nome !== undefined) {
+      data.nome = this.normalizarTextoObrigatorio(dto.nome, 'nome');
+    }
+
+    if (dto.telefone !== undefined) {
+      data.telefone = this.normalizarTextoObrigatorio(
+        dto.telefone,
+        'telefone',
+      );
+    }
+
+    if (dto.dataNascimento !== undefined) {
+      const valorNormalizado = dto.dataNascimento.trim();
+      data.dataNascimento = valorNormalizado
+        ? this.parseDataNascimento(valorNormalizado)
+        : null;
+    }
+
+    if (dto.cep !== undefined) {
+      data.cep = this.normalizarTextoOpcional(dto.cep);
+    }
+
+    if (dto.endereco !== undefined) {
+      data.endereco = this.normalizarTextoOpcional(dto.endereco);
+    }
+
+    if (dto.numero !== undefined) {
+      data.numero = this.normalizarTextoOpcional(dto.numero);
+    }
+
+    if (dto.bairro !== undefined) {
+      data.bairro = this.normalizarTextoOpcional(dto.bairro);
+    }
+
+    if (dto.cidade !== undefined) {
+      data.cidade = this.normalizarTextoOpcional(dto.cidade);
+    }
+
+    if (dto.estado !== undefined) {
+      const estadoNormalizado = this.normalizarTextoOpcional(dto.estado);
+      data.estado = estadoNormalizado ? estadoNormalizado.toUpperCase() : null;
+    }
+
+    if (dto.email !== undefined) {
+      const emailNormalizado = this.normalizarTextoOpcional(dto.email);
+      data.email = emailNormalizado ? emailNormalizado.toLowerCase() : null;
+    }
+
+    return data;
+  }
+
+  private normalizarTextoObrigatorio(value: string, fieldName: string): string {
+    const normalizedValue = value.trim();
+
+    if (!normalizedValue) {
+      throw new BadRequestException(`${fieldName} não pode ser vazio`);
+    }
+
+    return normalizedValue;
+  }
+
+  private normalizarTextoOpcional(value: string): string | null {
+    const normalizedValue = value.trim();
+    return normalizedValue ? normalizedValue : null;
+  }
+
+  private parseDataNascimento(value: string): Date {
+    const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (isoMatch) {
+      return this.validarDataCalendario(
+        Number(isoMatch[1]),
+        Number(isoMatch[2]),
+        Number(isoMatch[3]),
+      );
+    }
+
+    const brMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
+    if (brMatch) {
+      return this.validarDataCalendario(
+        Number(brMatch[3]),
+        Number(brMatch[2]),
+        Number(brMatch[1]),
+      );
+    }
+
+    throw new BadRequestException(
+      'dataNascimento deve estar no formato DD/MM/YYYY ou YYYY-MM-DD',
+    );
+  }
+
+  private validarDataCalendario(year: number, month: number, day: number): Date {
+    const candidate = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      Number.isNaN(candidate.getTime()) ||
+      candidate.getUTCFullYear() !== year ||
+      candidate.getUTCMonth() !== month - 1 ||
+      candidate.getUTCDate() !== day
+    ) {
+      throw new BadRequestException('dataNascimento inválida');
+    }
+
+    return candidate;
+  }
 
   private async buscarOuCriarCliente(
     cpf: string,
