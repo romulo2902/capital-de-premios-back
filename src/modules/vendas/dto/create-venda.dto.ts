@@ -11,6 +11,7 @@ import {
   MinLength,
   IsArray,
   ValidateNested,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { OrigemParticipacao, TipoCartela, TipoPagamento } from '@prisma/client';
@@ -52,12 +53,15 @@ export class CreateVendaDto {
   tipoPagamento: TipoPagamento;
 
   @ApiPropertyOptional({
-    enum: OrigemParticipacao,
+    enum: [OrigemParticipacao.DIGITAL, OrigemParticipacao.POS],
     example: OrigemParticipacao.DIGITAL,
     description: 'Origem da participação. Default: DIGITAL.',
   })
   @IsOptional()
   @IsEnum(OrigemParticipacao)
+  @IsIn([OrigemParticipacao.DIGITAL, OrigemParticipacao.POS], {
+    message: 'origemParticipacao aceita apenas DIGITAL ou POS',
+  })
   origemParticipacao?: OrigemParticipacao;
 
   @ApiPropertyOptional({

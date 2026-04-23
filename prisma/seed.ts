@@ -145,47 +145,54 @@ async function main(): Promise<void> {
   console.log('✅ 3 clientes criados');
 
   // 5. Edição ativa
-  await prisma.edicao.upsert({
-    where: { numero: 1 },
-    update: {},
-    create: {
-      numero: 1,
-      dataSorteio: new Date('2025-03-01T20:00:00.000Z'),
-      dataEncerramento: new Date('2025-02-28T23:59:59.000Z'),
-      valorCartela: 10.00,
-      qtdNumerosCartela: 15,
-      rangeInicio: BigInt(1),
-      rangeFinal: BigInt(100000),
-      qtdPremios: 3,
-      destino: DestinoEdicao.AMBOS,
-      raspadinha: false,
-      frase: 'Concorra e boa sorte',
-      status: StatusEdicao.ATIVA,
-      detalhes: {
-        create: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.UMA_CHANCE,
-            rangeInicio: BigInt(1),
-            rangeFinal: BigInt(50000),
-          },
-          {
-            origemParticipacao: OrigemParticipacao.FISICO,
-            tipoCartela: TipoCartela.UMA_CHANCE,
-            rangeInicio: BigInt(50001),
-            rangeFinal: BigInt(100000),
-          },
-        ],
-      },
-      premios: {
-        create: [
-          { ordem: 1, descricao: '1º Prêmio', valor: 5000.00 },
-          { ordem: 2, descricao: '2º Prêmio', valor: 2000.00 },
-          { ordem: 3, descricao: '3º Prêmio', valor: 1000.00 },
-        ],
-      },
-    },
+  const edicaoSeedExistente = await prisma.edicao.findFirst({
+    where: { numero: '1' },
+    select: { id: true },
   });
+
+  if (!edicaoSeedExistente) {
+    await prisma.edicao.create({
+      data: {
+        numero: '1',
+        dataSorteio: new Date('2025-03-01T20:00:00.000Z'),
+        dataEncerramento: new Date('2025-02-28T23:59:59.000Z'),
+        valorCartela: 10.00,
+        qtdNumerosCartela: 15,
+        rangeInicio: BigInt(1),
+        rangeFinal: BigInt(100000),
+        qtdPremios: 3,
+        destino: DestinoEdicao.AMBOS,
+        raspadinha: false,
+        frase: 'Concorra e boa sorte',
+        status: StatusEdicao.ATIVA,
+        detalhes: {
+          create: [
+            {
+              origemParticipacao: OrigemParticipacao.DIGITAL,
+              tipoCartela: TipoCartela.UMA_CHANCE,
+              indiceRange: 1,
+              rangeInicio: BigInt(1),
+              rangeFinal: BigInt(50000),
+            },
+            {
+              origemParticipacao: OrigemParticipacao.FISICO,
+              tipoCartela: TipoCartela.UMA_CHANCE,
+              indiceRange: 1,
+              rangeInicio: BigInt(50001),
+              rangeFinal: BigInt(100000),
+            },
+          ],
+        },
+        premios: {
+          create: [
+            { ordem: 1, descricao: '1º Prêmio', valor: 5000.00 },
+            { ordem: 2, descricao: '2º Prêmio', valor: 2000.00 },
+            { ordem: 3, descricao: '3º Prêmio', valor: 1000.00 },
+          ],
+        },
+      },
+    });
+  }
   console.log('✅ Edição #1 criada (ATIVA)');
 
   // 6. Matriz de Ranges

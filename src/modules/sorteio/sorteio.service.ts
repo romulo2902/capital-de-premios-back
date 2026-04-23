@@ -59,7 +59,7 @@ export interface EstadoPremio {
 
 export interface EstadoSorteio {
   edicaoId: string;
-  edicaoNumero: number;
+  edicaoNumero: string;
   status: string;
   premios: EstadoPremio[];
 }
@@ -571,7 +571,7 @@ export class SorteioService {
   private async syncStatusFirestore(
     edicaoId: string,
     estado: 'aguardando' | 'em_andamento' | 'finalizado',
-    edicaoNumero: number,
+    edicaoNumero: string,
     totalPremios: number,
   ): Promise<void> {
     await this.firebase.setDocument(SORTEIO_COLLECTION, edicaoId, {

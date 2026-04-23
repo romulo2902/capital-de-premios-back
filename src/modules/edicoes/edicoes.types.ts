@@ -4,6 +4,7 @@ import type { UploadFile } from '../../common/types/upload-file.type';
 export type EdicaoComRelacoes = Prisma.EdicaoGetPayload<{
   include: {
     detalhes: true;
+    combos: true;
     premios: true;
   };
 }>;
@@ -13,8 +14,8 @@ export interface DetalheRangeNormalizado {
   tipoCartela: TipoCartela;
   rangeInicio: bigint;
   rangeFinal: bigint;
+  indiceRange: number;
   preco?: string;
-  indiceChance?: number;
   ordemConfiguracao?: number;
 }
 

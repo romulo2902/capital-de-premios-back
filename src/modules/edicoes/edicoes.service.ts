@@ -8,7 +8,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   DestinoEdicao,
-  EdicaoDetalhe,
   OrigemParticipacao,
   Prisma,
   StatusEdicao,
@@ -22,6 +21,7 @@ import {
   normalizePagination,
 } from '../../common/utils/pagination.util';
 import { CreateEdicaoDto } from './dto/create-edicao.dto';
+import { CreateEdicaoComboDto } from './dto/create-edicao-combo.dto';
 import { CreateEdicaoDetalheDto } from './dto/create-edicao-detalhe.dto';
 import { CreateEdicaoPremioDto } from './dto/create-edicao-premio.dto';
 import { UpdateEdicaoDto } from './dto/update-edicao.dto';
@@ -35,11 +35,8 @@ import {
   calcularResumoDosRanges as calcularResumoDosRangesUtil,
   expandirSetoresDosDetalhes as expandirSetoresDosDetalhesUtil,
   inferirDestinoPorDetalhes as inferirDestinoPorDetalhesUtil,
-  isOrigemDigital as isOrigemDigitalUtil,
-  isOrigemFisica as isOrigemFisicaUtil,
   normalizarDetalhes as normalizarDetalhesUtil,
   normalizarDetalhesExistentes as normalizarDetalhesExistentesUtil,
-  obterDetalhesComFallback as obterDetalhesComFallbackUtil,
   obterQuantidadeChances as obterQuantidadeChancesUtil,
   possuiSobreposicao as possuiSobreposicaoUtil,
   validarDestinoComDetalhes as validarDestinoComDetalhesUtil,
@@ -52,6 +49,12 @@ import type {
   EdicaoComRelacoes,
 } from './edicoes.types';
 
+interface ComboEdicaoNormalizado {
+  origemParticipacao: OrigemParticipacao;
+  tipoCartela: TipoCartela;
+  preco: Prisma.Decimal;
+}
+
 @Injectable()
 export class EdicoesService {
   private readonly logger = new Logger(EdicoesService.name);
@@ -63,10 +66,10 @@ export class EdicoesService {
   ) {}
 
   async create(dto: CreateEdicaoDto, imagem?: ArquivoImagemUpload) {
-    await this.validarNumeroEdicaoUnico(dto.numero);
-
     const detalhes = this.normalizarDetalhes(dto.detalhes);
+    const combos = this.normalizarCombos(dto.combos);
     this.validarDetalhesInternos(detalhes);
+    this.validarCombosComDetalhes(combos, detalhes);
     const qtdNumerosCartela =
       await this.resolverQtdNumerosCartelaPelaMatriz(detalhes);
     this.validarCapacidadeCartelas(detalhes, qtdNumerosCartela);
@@ -95,7 +98,7 @@ export class EdicoesService {
           numero: dto.numero,
           dataSorteio,
           dataEncerramento,
-          valorCartela: this.normalizarValorCartela(dto.valorCartela),
+          valorCartela: this.resolverValorCartelaEdicao(dto.valorCartela, combos),
           qtdNumerosCartela,
           rangeInicio,
           rangeFinal,
@@ -109,11 +112,17 @@ export class EdicoesService {
             create: detalhes.map((detalhe) => ({
               origemParticipacao: detalhe.origemParticipacao,
               tipoCartela: detalhe.tipoCartela,
+              indiceRange: detalhe.indiceRange,
               rangeInicio: detalhe.rangeInicio,
               rangeFinal: detalhe.rangeFinal,
-              preco: detalhe.preco
-                ? new Prisma.Decimal(detalhe.preco.replace(',', '.'))
-                : null,
+              preco: null,
+            })),
+          },
+          combos: {
+            create: combos.map((combo) => ({
+              origemParticipacao: combo.origemParticipacao,
+              tipoCartela: combo.tipoCartela,
+              preco: combo.preco,
             })),
           },
         },
@@ -186,21 +195,24 @@ export class EdicoesService {
   async update(id: string, dto: UpdateEdicaoDto, imagem?: ArquivoImagemUpload) {
     const atual = await this.obterEdicaoOuFalhar(id);
 
-    if (dto.numero !== undefined) {
-      await this.validarNumeroEdicaoUnico(dto.numero, id);
-    }
-
     const detalhesEfetivos = dto.detalhes
       ? this.normalizarDetalhes(dto.detalhes)
       : this.normalizarDetalhesExistentes(atual);
     const qtdNumerosCartelaEfetivo = dto.detalhes
       ? await this.resolverQtdNumerosCartelaPelaMatriz(detalhesEfetivos)
       : atual.qtdNumerosCartela;
+    const combosEfetivos = dto.combos
+      ? this.normalizarCombos(dto.combos)
+      : this.normalizarCombosExistentes(atual);
     const qtdPremiosEfetivo = dto.premios ? dto.premios.length : atual.qtdPremios;
 
     if (dto.detalhes) {
       this.validarDetalhesInternos(detalhesEfetivos);
       this.validarCapacidadeCartelas(detalhesEfetivos, qtdNumerosCartelaEfetivo);
+    }
+
+    if (dto.combos || dto.detalhes) {
+      this.validarCombosComDetalhes(combosEfetivos, detalhesEfetivos);
     }
 
     const destinoEfetivo =
@@ -222,6 +234,12 @@ export class EdicoesService {
     const resumoRanges = dto.detalhes
       ? this.calcularResumoDosRanges(detalhesEfetivos)
       : undefined;
+    const valorCartelaEfetivo =
+      dto.valorCartela !== undefined
+        ? this.normalizarValorCartela(dto.valorCartela)
+        : dto.combos
+          ? this.resolverValorCartelaEdicao(undefined, combosEfetivos)
+          : undefined;
     const imagemUrl = await this.resolverImagemUrl(
       imagem,
       `edicoes/${dto.numero ?? atual.numero}`,
@@ -232,8 +250,8 @@ export class EdicoesService {
         ...(dto.numero !== undefined ? { numero: dto.numero } : {}),
         ...(dto.dataSorteio ? { dataSorteio } : {}),
         ...(dto.dataEncerramento !== undefined ? { dataEncerramento } : {}),
-        ...(dto.valorCartela
-          ? { valorCartela: this.normalizarValorCartela(dto.valorCartela) }
+        ...(valorCartelaEfetivo !== undefined
+          ? { valorCartela: valorCartelaEfetivo }
           : {}),
         ...(dto.detalhes ? { qtdNumerosCartela: qtdNumerosCartelaEfetivo } : {}),
         ...(dto.premios ? { qtdPremios: qtdPremiosEfetivo } : {}),
@@ -250,11 +268,21 @@ export class EdicoesService {
           create: detalhesEfetivos.map((detalhe) => ({
             origemParticipacao: detalhe.origemParticipacao,
             tipoCartela: detalhe.tipoCartela,
+            indiceRange: detalhe.indiceRange,
             rangeInicio: detalhe.rangeInicio,
             rangeFinal: detalhe.rangeFinal,
-            preco: detalhe.preco
-              ? new Prisma.Decimal(detalhe.preco.replace(',', '.'))
-              : null,
+            preco: null,
+          })),
+        };
+      }
+
+      if (dto.combos) {
+        data.combos = {
+          deleteMany: {},
+          create: combosEfetivos.map((combo) => ({
+            origemParticipacao: combo.origemParticipacao,
+            tipoCartela: combo.tipoCartela,
+            preco: combo.preco,
           })),
         };
       }
@@ -423,23 +451,6 @@ export class EdicoesService {
     return item;
   }
 
-  private async validarNumeroEdicaoUnico(
-    numero: number,
-    ignoreId?: string,
-  ): Promise<void> {
-    const conflict = await this.prisma.edicao.findFirst({
-      where: {
-        numero,
-        ...(ignoreId ? { NOT: { id: ignoreId } } : {}),
-      },
-      select: { id: true },
-    });
-
-    if (conflict) {
-      throw new ConflictException('Já existe uma edição com esse número');
-    }
-  }
-
   private async validarEdicaoEmOperacaoUnica(
     status: StatusEdicao,
     ignoreId?: string,
@@ -508,14 +519,6 @@ export class EdicoesService {
     detalhes: DetalheRangeNormalizado[],
   ): DestinoEdicao {
     return inferirDestinoPorDetalhesUtil(detalhes);
-  }
-
-  private isOrigemDigital(origem: OrigemParticipacao): boolean {
-    return isOrigemDigitalUtil(origem);
-  }
-
-  private isOrigemFisica(origem: OrigemParticipacao): boolean {
-    return isOrigemFisicaUtil(origem);
   }
 
   private validarDatas(dataEncerramento: Date, dataSorteio: Date): void {
@@ -623,6 +626,128 @@ export class EdicoesService {
     detalhes: DetalheRangeNormalizado[],
   ): bigint {
     return calcularTotalBilhetesDosDetalhesUtil(detalhes);
+  }
+
+  private normalizarCombos(
+    combos: CreateEdicaoComboDto[],
+  ): ComboEdicaoNormalizado[] {
+    return combos.map((combo) => ({
+      origemParticipacao: combo.origemParticipacao,
+      tipoCartela: combo.tipoCartela,
+      preco: this.normalizarValorCartela(combo.preco),
+    }));
+  }
+
+  private normalizarCombosExistentes(
+    edicao: EdicaoComRelacoes,
+  ): ComboEdicaoNormalizado[] {
+    return edicao.combos.map((combo) => ({
+      origemParticipacao: combo.origemParticipacao,
+      tipoCartela: combo.tipoCartela,
+      preco: combo.preco,
+    }));
+  }
+
+  private validarCombosComDetalhes(
+    combos: ComboEdicaoNormalizado[],
+    detalhes: DetalheRangeNormalizado[],
+  ): void {
+    if (combos.length === 0) {
+      throw new BadRequestException(
+        'Informe ao menos um combo para a edição',
+      );
+    }
+
+    const chavesCombos = new Set<string>();
+
+    for (const combo of combos) {
+      if (
+        combo.origemParticipacao !== OrigemParticipacao.DIGITAL &&
+        combo.origemParticipacao !== OrigemParticipacao.POS
+      ) {
+        throw new BadRequestException(
+          `origemParticipacao em combos aceita apenas DIGITAL ou POS. Recebido: ${combo.origemParticipacao}`,
+        );
+      }
+
+      const chave = `${combo.origemParticipacao}:${combo.tipoCartela}`;
+
+      if (chavesCombos.has(chave)) {
+        throw new ConflictException(
+          `Combo duplicado para ${combo.origemParticipacao}/${combo.tipoCartela}`,
+        );
+      }
+
+      chavesCombos.add(chave);
+
+      const detalheDaOrigem = detalhes.find(
+        (detalhe) =>
+          detalhe.origemParticipacao ===
+          (combo.origemParticipacao === OrigemParticipacao.POS
+            ? OrigemParticipacao.FISICO
+            : OrigemParticipacao.DIGITAL),
+      );
+
+      if (!detalheDaOrigem) {
+        throw new BadRequestException(
+          `A origem ${combo.origemParticipacao} do combo não possui ranges configurados`,
+        );
+      }
+
+      const origemDetalhe =
+        combo.origemParticipacao === OrigemParticipacao.POS
+          ? OrigemParticipacao.FISICO
+          : OrigemParticipacao.DIGITAL;
+      const quantidadeRangesDaOrigem = detalhes.filter(
+        (detalhe) => detalhe.origemParticipacao === origemDetalhe,
+      ).length;
+      const quantidadeChancesCombo = this.obterQuantidadeChances(
+        combo.tipoCartela,
+      );
+
+      if (quantidadeChancesCombo > quantidadeRangesDaOrigem) {
+        throw new BadRequestException(
+          `O combo ${combo.tipoCartela} da origem ${combo.origemParticipacao} exige ${quantidadeChancesCombo} chances, mas essa origem possui apenas ${quantidadeRangesDaOrigem} ranges configurados`,
+        );
+      }
+    }
+  }
+
+  private resolverValorCartelaEdicao(
+    valorCartela: string | undefined,
+    combos: ComboEdicaoNormalizado[],
+  ): Prisma.Decimal {
+    if (valorCartela !== undefined) {
+      return this.normalizarValorCartela(valorCartela);
+    }
+
+    const comboUmaChanceDigital = combos.find(
+      (combo) =>
+        combo.origemParticipacao === OrigemParticipacao.DIGITAL &&
+        combo.tipoCartela === TipoCartela.UMA_CHANCE,
+    );
+
+    if (comboUmaChanceDigital) {
+      return comboUmaChanceDigital.preco;
+    }
+
+    const comboUmaChance = combos.find(
+      (combo) => combo.tipoCartela === TipoCartela.UMA_CHANCE,
+    );
+
+    if (comboUmaChance) {
+      return comboUmaChance.preco;
+    }
+
+    const primeiroCombo = combos[0];
+
+    if (!primeiroCombo) {
+      throw new BadRequestException(
+        'Não foi possível definir valorCartela sem combos configurados',
+      );
+    }
+
+    return primeiroCombo.preco;
   }
 
   private normalizarValorCartela(valorCartela: string): Prisma.Decimal {
@@ -741,17 +866,6 @@ export class EdicoesService {
     comparado: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
   ): boolean {
     return possuiSobreposicaoUtil(atual, comparado);
-  }
-
-  private obterDetalhesComFallback(edicao: EdicaoComRelacoes): Array<
-    | EdicaoDetalhe
-    | (DetalheRangeNormalizado & {
-        id: string;
-        createdAt: Date;
-        updatedAt: Date;
-      })
-  > {
-    return obterDetalhesComFallbackUtil(edicao);
   }
 
   private serializarEdicao(edicao: EdicaoComRelacoes) {

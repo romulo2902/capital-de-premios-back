@@ -20,28 +20,71 @@ export interface SetorDetalheRange {
   quantidadeCombos: bigint;
 }
 
+type DetalheRangeExpandivel = Pick<
+  DetalheRangeNormalizado,
+  | 'origemParticipacao'
+  | 'tipoCartela'
+  | 'rangeInicio'
+  | 'rangeFinal'
+  | 'indiceRange'
+  | 'ordemConfiguracao'
+>;
+
+interface GrupoDetalhesPorTipo {
+  origemParticipacao: OrigemParticipacao;
+  tipoCartela: TipoCartela;
+  detalhes: DetalheRangeExpandivel[];
+}
+
+export interface GrupoDetalhesRangeConfiguracao {
+  origemParticipacao: OrigemParticipacao;
+  tipoCartela: TipoCartela;
+  detalhes: DetalheRangeExpandivel[];
+}
+
 export function normalizarDetalhes(
   detalhes: CreateEdicaoDetalheDto[],
 ): DetalheRangeNormalizado[] {
-  return detalhes.map((detalhe, index) => ({
-    origemParticipacao: detalhe.origemParticipacao,
-    tipoCartela: detalhe.tipoCartela,
-    rangeInicio: BigInt(detalhe.rangeInicio),
-    rangeFinal: BigInt(detalhe.rangeFinal),
-    preco: detalhe.preco,
-    indiceChance: detalhe.indiceChance,
-    ordemConfiguracao: index,
-  }));
+  const quantidadePorOrigem = contarDetalhesPorOrigem(detalhes);
+  const proximoIndicePorOrigem = new Map<OrigemParticipacao, number>();
+
+  return detalhes.map((detalhe, index) => {
+    const proximoIndice = (proximoIndicePorOrigem.get(detalhe.origemParticipacao) ?? 0) + 1;
+    const indiceRange = detalhe.indiceRange ?? proximoIndice;
+    const quantidadeDaOrigem =
+      quantidadePorOrigem.get(detalhe.origemParticipacao) ?? 1;
+
+    proximoIndicePorOrigem.set(
+      detalhe.origemParticipacao,
+      Math.max(proximoIndice, indiceRange),
+    );
+
+    return {
+      origemParticipacao: detalhe.origemParticipacao,
+      tipoCartela: resolverTipoCartelaBasePorQuantidade(quantidadeDaOrigem),
+      indiceRange,
+      rangeInicio: BigInt(detalhe.rangeInicio),
+      rangeFinal: BigInt(detalhe.rangeFinal),
+      ordemConfiguracao: index,
+    };
+  });
 }
 
 export function normalizarDetalhesExistentes(
   edicao: EdicaoComRelacoes,
 ): DetalheRangeNormalizado[] {
   const detalhes = obterDetalhesComFallback(edicao);
+  const quantidadePorOrigem = contarDetalhesPorOrigem(detalhes);
 
   return detalhes.map((detalhe, index) => ({
     origemParticipacao: detalhe.origemParticipacao,
-    tipoCartela: detalhe.tipoCartela,
+    tipoCartela: resolverTipoCartelaBasePorQuantidade(
+      quantidadePorOrigem.get(detalhe.origemParticipacao) ?? 1,
+    ),
+    indiceRange:
+      'indiceRange' in detalhe && typeof detalhe.indiceRange === 'number'
+        ? detalhe.indiceRange
+        : index + 1,
     rangeInicio: detalhe.rangeInicio,
     rangeFinal: detalhe.rangeFinal,
     preco:
@@ -55,91 +98,75 @@ export function normalizarDetalhesExistentes(
 export function validarDetalhesInternos(
   detalhes: DetalheRangeNormalizado[],
 ): void {
+  if (detalhes.length === 0) {
+    throw new BadRequestException(
+      'Informe ao menos um range em detalhes para a edição',
+    );
+  }
+
+  const porOrigem = new Map<OrigemParticipacao, DetalheRangeNormalizado[]>();
+
   for (const detalhe of detalhes) {
+    if (!isOrigemRangeValida(detalhe.origemParticipacao)) {
+      throw new BadRequestException(
+        `detalhes aceita apenas origem DIGITAL ou FISICO. Recebido: ${detalhe.origemParticipacao}`,
+      );
+    }
+
     if (detalhe.rangeFinal < detalhe.rangeInicio) {
       throw new BadRequestException(
         'rangeFinal deve ser maior ou igual ao rangeInicio',
       );
     }
 
-    if (detalhe.rangeFinal - detalhe.rangeInicio + 1n < 1n) {
+    if (
+      !Number.isInteger(detalhe.indiceRange) ||
+      (detalhe.indiceRange ?? 0) < 1
+    ) {
       throw new BadRequestException(
-        `O intervalo ${detalhe.rangeInicio.toString()}-${detalhe.rangeFinal.toString()} não suporta ao menos 1 combo para ${detalhe.tipoCartela}`,
+        'indiceRange deve ser um inteiro maior ou igual a 1',
       );
     }
+
+    const detalhesOrigem = porOrigem.get(detalhe.origemParticipacao) ?? [];
+    if (
+      detalhesOrigem.some(
+        (item) => item.indiceRange === detalhe.indiceRange,
+      )
+    ) {
+      throw new ConflictException(
+        `indiceRange duplicado para origem ${detalhe.origemParticipacao}: ${detalhe.indiceRange}`,
+      );
+    }
+
+    detalhesOrigem.push(detalhe);
+    porOrigem.set(detalhe.origemParticipacao, detalhesOrigem);
   }
 
-  const grupos = agruparDetalhesPorOrigemETipo(detalhes);
+  for (const [origem, detalhesOrigem] of porOrigem.entries()) {
+    const ordenados = [...detalhesOrigem].sort(
+      (a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0),
+    );
 
-  for (const grupo of grupos) {
-    const quantidadeChances = obterQuantidadeChances(grupo.tipoCartela);
-    if (grupo.detalhes.length !== 1 && grupo.detalhes.length !== quantidadeChances) {
+    for (let i = 0; i < ordenados.length; i += 1) {
+      const esperado = i + 1;
+      if (ordenados[i].indiceRange !== esperado) {
+        throw new BadRequestException(
+          `Os índices de range para ${origem} devem formar uma sequência contínua iniciando em 1 (1..N)`,
+        );
+      }
+    }
+
+    const tamanhoBase = ordenados[0].rangeFinal - ordenados[0].rangeInicio + 1n;
+    const possuiTamanhoDiferente = ordenados.some(
+      (detalhe) =>
+        detalhe.rangeFinal - detalhe.rangeInicio + 1n !== tamanhoBase,
+    );
+
+    if (possuiTamanhoDiferente) {
       throw new BadRequestException(
-        `A configuração ${grupo.origemParticipacao}/${grupo.tipoCartela} deve ter 1 range (automático) ou ${quantidadeChances} ranges (manual por chance). Recebido: ${grupo.detalhes.length}`,
+        `Todos os ranges da origem ${origem} devem ter o mesmo tamanho para manter o pareamento de chances`,
       );
-    }
-
-    if (grupo.detalhes.length === quantidadeChances) {
-      const todosComIndice = grupo.detalhes.every(
-        (detalhe) => typeof detalhe.indiceChance === 'number',
-      );
-      const algumComIndice = grupo.detalhes.some(
-        (detalhe) => typeof detalhe.indiceChance === 'number',
-      );
-
-      if (algumComIndice && !todosComIndice) {
-        throw new BadRequestException(
-          `A configuração ${grupo.origemParticipacao}/${grupo.tipoCartela} deve informar indiceChance em todos os ranges ou em nenhum`,
-        );
-      }
-
-      if (todosComIndice) {
-        const indices = grupo.detalhes.map((detalhe) => detalhe.indiceChance ?? 0);
-        const indicesUnicos = new Set(indices);
-        const possuiForaDoIntervalo = indices.some(
-          (indice) => indice < 1 || indice > quantidadeChances,
-        );
-
-        if (possuiForaDoIntervalo) {
-          throw new BadRequestException(
-            `indiceChance inválido para ${grupo.origemParticipacao}/${grupo.tipoCartela}. Use valores de 1 até ${quantidadeChances}`,
-          );
-        }
-
-        if (indicesUnicos.size !== quantidadeChances) {
-          throw new BadRequestException(
-            `indiceChance duplicado ou ausente em ${grupo.origemParticipacao}/${grupo.tipoCartela}. Informe os índices de 1 até ${quantidadeChances} sem repetição`,
-          );
-        }
-      }
-
-      const tamanhos = grupo.detalhes.map(
-        (detalhe) => detalhe.rangeFinal - detalhe.rangeInicio + 1n,
-      );
-      const primeiro = tamanhos[0];
-      const tamanhosDiferentes = tamanhos.some((tamanho) => tamanho !== primeiro);
-      if (tamanhosDiferentes) {
-        throw new BadRequestException(
-          `Os ranges de ${grupo.origemParticipacao}/${grupo.tipoCartela} devem ter o mesmo tamanho para manter o pareamento dos bilhetes`,
-        );
-      }
-    }
-
-    const precosInformados = grupo.detalhes
-      .map((detalhe) => detalhe.preco?.replace(',', '.').trim())
-      .filter((preco): preco is string => Boolean(preco));
-
-    if (precosInformados.length > 1) {
-      const precoBase = precosInformados[0];
-      const possuiPrecoDiferente = precosInformados.some(
-        (preco) => preco !== precoBase,
-      );
-
-      if (possuiPrecoDiferente) {
-        throw new BadRequestException(
-          `Preço inconsistente em ${grupo.origemParticipacao}/${grupo.tipoCartela}. O preço é por combo e deve ser igual em todas as chances do mesmo tipo`,
-        );
-      }
     }
   }
 
@@ -153,7 +180,7 @@ export function validarDetalhesInternos(
 
     if (possuiSobreposicao(anterior, atual)) {
       throw new ConflictException(
-        `Os intervalos configurados para a edição se sobrepõem: ${anterior.tipoCartela} (${anterior.rangeInicio.toString()}-${anterior.rangeFinal.toString()}) e ${atual.tipoCartela} (${atual.rangeInicio.toString()}-${atual.rangeFinal.toString()})`,
+        `Os intervalos configurados para a edição se sobrepõem: ${anterior.origemParticipacao}/${anterior.indiceRange} (${anterior.rangeInicio.toString()}-${anterior.rangeFinal.toString()}) e ${atual.origemParticipacao}/${atual.indiceRange} (${atual.rangeInicio.toString()}-${atual.rangeFinal.toString()})`,
       );
     }
   }
@@ -172,7 +199,7 @@ export function validarDestinoComDetalhes(
 
   if (possuiDigital && possuiFisica && destino !== DestinoEdicao.AMBOS) {
     throw new BadRequestException(
-      'Quando houver participação DIGITAL e FISICA na mesma edição, o destino deve ser AMBOS',
+      'Quando houver participação DIGITAL e FISICO na mesma edição, o destino deve ser AMBOS',
     );
   }
 
@@ -215,15 +242,23 @@ export function isOrigemDigital(origem: OrigemParticipacao): boolean {
 }
 
 export function isOrigemFisica(origem: OrigemParticipacao): boolean {
-  return (
-    origem === OrigemParticipacao.FISICO || origem === OrigemParticipacao.POS
-  );
+  return origem === OrigemParticipacao.FISICO;
+}
+
+function isOrigemRangeValida(origem: OrigemParticipacao): boolean {
+  return isOrigemDigital(origem) || isOrigemFisica(origem);
 }
 
 export function calcularResumoDosRanges(detalhes: DetalheRangeNormalizado[]): {
   rangeInicio: bigint;
   rangeFinal: bigint;
 } {
+  if (detalhes.length === 0) {
+    throw new BadRequestException(
+      'Não é possível calcular resumo sem ranges configurados',
+    );
+  }
+
   const rangeInicio = detalhes.reduce(
     (menor, detalhe) =>
       detalhe.rangeInicio < menor ? detalhe.rangeInicio : menor,
@@ -240,87 +275,46 @@ export function calcularResumoDosRanges(detalhes: DetalheRangeNormalizado[]): {
 }
 
 export function expandirSetoresDoDetalhe(
-  detalhe: Pick<
-    DetalheRangeNormalizado,
-    | 'origemParticipacao'
-    | 'tipoCartela'
-    | 'rangeInicio'
-    | 'rangeFinal'
-    | 'indiceChance'
-    | 'ordemConfiguracao'
-  >,
+  detalhe: DetalheRangeExpandivel,
 ): SetorDetalheRange[] {
   return expandirSetoresDosDetalhes([detalhe]);
 }
 
 export function expandirSetoresDosDetalhes(
-  detalhes: Array<
-    Pick<
-      DetalheRangeNormalizado,
-      | 'origemParticipacao'
-      | 'tipoCartela'
-      | 'rangeInicio'
-      | 'rangeFinal'
-      | 'indiceChance'
-      | 'ordemConfiguracao'
-    >
-  >,
+  detalhes: DetalheRangeExpandivel[],
 ): SetorDetalheRange[] {
   const grupos = agruparDetalhesPorOrigemETipo(detalhes);
   const setores: SetorDetalheRange[] = [];
 
   for (const grupo of grupos) {
-    const quantidadeChances = obterQuantidadeChances(grupo.tipoCartela);
     const detalhesDoGrupo = ordenarDetalhesDoGrupo(grupo.detalhes);
 
-    if (detalhesDoGrupo.length === quantidadeChances) {
-      const rangeTotalInicio = detalhesDoGrupo.reduce(
-        (menor, detalhe) =>
-          detalhe.rangeInicio < menor ? detalhe.rangeInicio : menor,
-        detalhesDoGrupo[0].rangeInicio,
-      );
-      const rangeTotalFinal = detalhesDoGrupo.reduce(
-        (maior, detalhe) =>
-          detalhe.rangeFinal > maior ? detalhe.rangeFinal : maior,
-        detalhesDoGrupo[0].rangeFinal,
-      );
-      const quantidadeCombos =
-        detalhesDoGrupo[0].rangeFinal - detalhesDoGrupo[0].rangeInicio + 1n;
-
-      detalhesDoGrupo.forEach((detalhe, index) => {
-        setores.push({
-          origemParticipacao: detalhe.origemParticipacao,
-          tipoCartela: detalhe.tipoCartela,
-          indiceChance: index + 1,
-          rangeInicio: detalhe.rangeInicio,
-          rangeFinal: detalhe.rangeFinal,
-          rangeTotalInicio,
-          rangeTotalFinal,
-          quantidadeCombos,
-        });
-      });
+    if (detalhesDoGrupo.length === 0) {
       continue;
     }
 
-    const detalhe = detalhesDoGrupo[0];
-    const quantidadeCombos = calcularQuantidadeCombosDoDetalhe(detalhe);
+    const rangeTotalInicio = detalhesDoGrupo.reduce(
+      (menor, detalhe) =>
+        detalhe.rangeInicio < menor ? detalhe.rangeInicio : menor,
+      detalhesDoGrupo[0].rangeInicio,
+    );
+    const rangeTotalFinal = detalhesDoGrupo.reduce(
+      (maior, detalhe) =>
+        detalhe.rangeFinal > maior ? detalhe.rangeFinal : maior,
+      detalhesDoGrupo[0].rangeFinal,
+    );
+    const quantidadeCombos =
+      detalhesDoGrupo[0].rangeFinal - detalhesDoGrupo[0].rangeInicio + 1n;
 
-    if (quantidadeCombos < 1n) {
-      continue;
-    }
-
-    Array.from({ length: quantidadeChances }, (_, index) => {
-      const deslocamento = BigInt(index) * quantidadeCombos;
-      const rangeInicio = detalhe.rangeInicio + deslocamento;
-
+    detalhesDoGrupo.forEach((detalhe, index) => {
       setores.push({
         origemParticipacao: detalhe.origemParticipacao,
         tipoCartela: detalhe.tipoCartela,
-        indiceChance: index + 1,
-        rangeInicio,
-        rangeFinal: rangeInicio + quantidadeCombos - 1n,
-        rangeTotalInicio: detalhe.rangeInicio,
-        rangeTotalFinal: detalhe.rangeFinal,
+        indiceChance: detalhe.indiceRange ?? index + 1,
+        rangeInicio: detalhe.rangeInicio,
+        rangeFinal: detalhe.rangeFinal,
+        rangeTotalInicio,
+        rangeTotalFinal,
         quantidadeCombos,
       });
     });
@@ -332,27 +326,18 @@ export function expandirSetoresDosDetalhes(
 export function calcularTotalBilhetesDoDetalhe(
   detalhe: Pick<
     DetalheRangeNormalizado,
-    'tipoCartela' | 'rangeInicio' | 'rangeFinal'
+    'rangeInicio' | 'rangeFinal'
   >,
 ): bigint {
   return detalhe.rangeFinal - detalhe.rangeInicio + 1n;
 }
 
 export function calcularTotalBilhetesDosDetalhes(
-  detalhes: Array<
-    Pick<
-      DetalheRangeNormalizado,
-      | 'origemParticipacao'
-      | 'tipoCartela'
-      | 'rangeInicio'
-      | 'rangeFinal'
-      | 'indiceChance'
-      | 'ordemConfiguracao'
-    >
-  >,
+  detalhes: DetalheRangeExpandivel[],
 ): bigint {
-  return expandirSetoresDosDetalhes(detalhes).reduce(
-    (total, setor) => total + (setor.rangeFinal - setor.rangeInicio + 1n),
+  return detalhes.reduce(
+    (total, detalhe) =>
+      total + (detalhe.rangeFinal - detalhe.rangeInicio + 1n),
     0n,
   );
 }
@@ -384,6 +369,7 @@ export function obterDetalhesComFallback(edicao: EdicaoComRelacoes): Array<
       id: `legacy-${edicao.id}`,
       origemParticipacao: OrigemParticipacao.DIGITAL,
       tipoCartela: TipoCartela.UMA_CHANCE,
+      indiceRange: 1,
       rangeInicio: edicao.rangeInicio,
       rangeFinal: edicao.rangeFinal,
       createdAt: edicao.createdAt,
@@ -397,71 +383,68 @@ export function obterQuantidadeChances(tipoCartela: TipoCartela): number {
 }
 
 export function calcularQuantidadeCombosDoDetalhe(
-  detalhe: Pick<
-    DetalheRangeNormalizado,
-    'tipoCartela' | 'rangeInicio' | 'rangeFinal'
-  >,
+  detalhe: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
 ): bigint {
-  const totalNumeros = detalhe.rangeFinal - detalhe.rangeInicio + 1n;
-  return totalNumeros / BigInt(obterQuantidadeChances(detalhe.tipoCartela));
+  return detalhe.rangeFinal - detalhe.rangeInicio + 1n;
 }
 
 export function calcularPassoEntreChancesDoDetalhe(
-  detalhe: Pick<
-    DetalheRangeNormalizado,
-    'tipoCartela' | 'rangeInicio' | 'rangeFinal'
-  >,
+  detalhe: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
 ): bigint {
   return calcularQuantidadeCombosDoDetalhe(detalhe);
 }
 
-interface GrupoDetalhesPorTipo {
-  origemParticipacao: OrigemParticipacao;
-  tipoCartela: TipoCartela;
-  detalhes: Array<
-    Pick<
-      DetalheRangeNormalizado,
-      | 'origemParticipacao'
-      | 'tipoCartela'
-      | 'rangeInicio'
-      | 'rangeFinal'
-      | 'indiceChance'
-      | 'ordemConfiguracao'
-      | 'preco'
-    >
-  >;
+export function agruparDetalhesPorOrigemETipoCartela(
+  detalhes: DetalheRangeExpandivel[],
+): GrupoDetalhesRangeConfiguracao[] {
+  return agruparDetalhesPorOrigemETipo(detalhes).map((grupo) => ({
+    origemParticipacao: grupo.origemParticipacao,
+    tipoCartela: grupo.tipoCartela,
+    detalhes: ordenarDetalhesDoGrupo(grupo.detalhes),
+  }));
 }
 
-export interface GrupoDetalhesRangeConfiguracao {
-  origemParticipacao: OrigemParticipacao;
-  tipoCartela: TipoCartela;
-  detalhes: Array<
-    Pick<
-      DetalheRangeNormalizado,
-      | 'origemParticipacao'
-      | 'tipoCartela'
-      | 'rangeInicio'
-      | 'rangeFinal'
-      | 'indiceChance'
-      | 'ordemConfiguracao'
-      | 'preco'
-    >
-  >;
+function contarDetalhesPorOrigem<
+  T extends Pick<DetalheRangeExpandivel, 'origemParticipacao'>,
+>(detalhes: T[]): Map<OrigemParticipacao, number> {
+  const quantidadePorOrigem = new Map<OrigemParticipacao, number>();
+
+  for (const detalhe of detalhes) {
+    quantidadePorOrigem.set(
+      detalhe.origemParticipacao,
+      (quantidadePorOrigem.get(detalhe.origemParticipacao) ?? 0) + 1,
+    );
+  }
+
+  return quantidadePorOrigem;
+}
+
+function resolverTipoCartelaBasePorQuantidade(
+  quantidadeRanges: number,
+): TipoCartela {
+  const tipoCartelaPorQuantidade = new Map<number, TipoCartela>([
+    [1, TipoCartela.UMA_CHANCE],
+    [2, TipoCartela.DUAS_CHANCES],
+    [3, TipoCartela.TRES_CHANCES],
+    [4, TipoCartela.QUATRO_CHANCES],
+    [5, TipoCartela.CINCO_CHANCES],
+    [6, TipoCartela.SEIS_CHANCES],
+    [7, TipoCartela.SETE_CHANCES],
+    [8, TipoCartela.OITO_CHANCES],
+    [9, TipoCartela.NOVE_CHANCES],
+    [10, TipoCartela.DEZ_CHANCES],
+    [11, TipoCartela.ONZE_CHANCES],
+    [12, TipoCartela.DOZE_CHANCES],
+  ]);
+
+  return (
+    tipoCartelaPorQuantidade.get(quantidadeRanges) ??
+    TipoCartela.DOZE_CHANCES
+  );
 }
 
 function agruparDetalhesPorOrigemETipo(
-  detalhes: Array<
-    Pick<
-      DetalheRangeNormalizado,
-      | 'origemParticipacao'
-      | 'tipoCartela'
-      | 'rangeInicio'
-      | 'rangeFinal'
-      | 'indiceChance'
-      | 'ordemConfiguracao'
-      | 'preco'
-    >
-  >,
+  detalhes: DetalheRangeExpandivel[],
 ): GrupoDetalhesPorTipo[] {
   const grupos = new Map<string, GrupoDetalhesPorTipo>();
 
@@ -484,43 +467,27 @@ function agruparDetalhesPorOrigemETipo(
   return Array.from(grupos.values());
 }
 
-export function agruparDetalhesPorOrigemETipoCartela(
-  detalhes: Array<
-    Pick<
-      DetalheRangeNormalizado,
-      | 'origemParticipacao'
-      | 'tipoCartela'
-      | 'rangeInicio'
-      | 'rangeFinal'
-      | 'indiceChance'
-      | 'ordemConfiguracao'
-      | 'preco'
-    >
-  >,
-): GrupoDetalhesRangeConfiguracao[] {
-  return agruparDetalhesPorOrigemETipo(detalhes).map((grupo) => ({
-    origemParticipacao: grupo.origemParticipacao,
-    tipoCartela: grupo.tipoCartela,
-    detalhes: ordenarDetalhesDoGrupo(grupo.detalhes),
-  }));
-}
-
-function ordenarDetalhesDoGrupo<T extends { indiceChance?: number; ordemConfiguracao?: number }>(
+function ordenarDetalhesDoGrupo<T extends DetalheRangeExpandivel>(
   detalhes: T[],
 ): T[] {
   const todosComIndice = detalhes.every(
-    (detalhe) => typeof detalhe.indiceChance === 'number',
+    (detalhe) => typeof detalhe.indiceRange === 'number',
   );
 
   if (todosComIndice) {
     return [...detalhes].sort(
-      (a, b) => (a.indiceChance ?? 0) - (b.indiceChance ?? 0),
+      (a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0),
     );
   }
 
   return [...detalhes].sort((a, b) => {
     const ordemA = a.ordemConfiguracao ?? 0;
     const ordemB = b.ordemConfiguracao ?? 0;
-    return ordemA - ordemB;
+
+    if (ordemA !== ordemB) {
+      return ordemA - ordemB;
+    }
+
+    return a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0;
   });
 }

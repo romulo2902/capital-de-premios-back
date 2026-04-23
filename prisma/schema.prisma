@@ -205,7 +205,7 @@ model Cliente {
 
 model Edicao {
   id               String       @id @default(uuid())
-  numero           Int          @unique
+  numero           String
   dataSorteio      DateTime
   dataEncerramento DateTime
   valorCartela     Decimal
@@ -222,6 +222,7 @@ model Edicao {
   createdAt        DateTime     @default(now())
   premios          Premio[]
   detalhes         EdicaoDetalhe[]
+  combos           EdicaoCombo[]
   vendas           Venda[]
   resultado        Resultado?
   resultadosPremio ResultadoPremio[]
@@ -232,6 +233,7 @@ model EdicaoDetalhe {
   edicaoId           String
   origemParticipacao OrigemParticipacao
   tipoCartela        TipoCartela
+  indiceRange        Int
   rangeInicio        BigInt
   rangeFinal         BigInt
   preco              Decimal?
@@ -240,7 +242,21 @@ model EdicaoDetalhe {
   edicao             Edicao               @relation(fields: [edicaoId], references: [id], onDelete: Cascade)
 
   @@index([edicaoId])
-  @@unique([edicaoId, origemParticipacao, tipoCartela, rangeInicio, rangeFinal])
+  @@unique([edicaoId, origemParticipacao, indiceRange])
+}
+
+model EdicaoCombo {
+  id                 String             @id @default(uuid())
+  edicaoId           String
+  origemParticipacao OrigemParticipacao
+  tipoCartela        TipoCartela
+  preco              Decimal
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  edicao             Edicao             @relation(fields: [edicaoId], references: [id], onDelete: Cascade)
+
+  @@index([edicaoId])
+  @@unique([edicaoId, origemParticipacao, tipoCartela])
 }
 
 model Premio {

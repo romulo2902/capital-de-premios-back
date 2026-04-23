@@ -361,6 +361,7 @@ export class RangesService {
               tipoCartela: detalhe.tipoCartela,
               rangeInicio: detalhe.rangeInicio,
               rangeFinal: detalhe.rangeFinal,
+              indiceRange: detalhe.indiceRange,
             }))
           : [
               {
@@ -368,6 +369,7 @@ export class RangesService {
                 tipoCartela: TipoCartela.UMA_CHANCE,
                 rangeInicio: edicao.rangeInicio,
                 rangeFinal: edicao.rangeFinal,
+                indiceRange: 1,
               },
             ];
 

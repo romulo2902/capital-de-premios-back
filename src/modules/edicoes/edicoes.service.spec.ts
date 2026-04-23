@@ -109,7 +109,7 @@ describe('EdicoesService', () => {
       valorCartela: new Prisma.Decimal('10.00'),
       qtdNumerosCartela: 15,
       rangeInicio: BigInt(1000000),
-      rangeFinal: BigInt(1999999),
+      rangeFinal: BigInt(1999995),
       qtdPremios: 1,
       destino: DestinoEdicao.SITE,
       raspadinha: false,
@@ -124,9 +124,21 @@ describe('EdicoesService', () => {
           id: 'detalhe-1',
           edicaoId: 'edicao-1',
           origemParticipacao: OrigemParticipacao.DIGITAL,
-          tipoCartela: TipoCartela.UMA_CHANCE,
+          tipoCartela: TipoCartela.DOZE_CHANCES,
           rangeInicio: BigInt(1000000),
-          rangeFinal: BigInt(1999999),
+          rangeFinal: BigInt(1999995),
+          quantidadeSetores: 12,
+          createdAt: new Date('2026-03-20T10:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        },
+      ],
+      combos: [
+        {
+          id: 'combo-1',
+          edicaoId: 'edicao-1',
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          tipoCartela: TipoCartela.UMA_CHANCE,
+          preco: new Prisma.Decimal('10.00'),
           createdAt: new Date('2026-03-20T10:00:00.000Z'),
           updatedAt: new Date('2026-03-20T10:00:00.000Z'),
         },
@@ -177,9 +189,16 @@ describe('EdicoesService', () => {
         detalhes: [
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.UMA_CHANCE,
             rangeInicio: '1000000',
-            rangeFinal: '1999999',
+            rangeFinal: '1999995',
+            quantidadeSetores: 12,
+          },
+        ],
+        combos: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            preco: '10.00',
           },
         ],
         premios: [
@@ -238,15 +257,22 @@ describe('EdicoesService', () => {
         detalhes: [
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.DUAS_CHANCES,
             rangeInicio: '1000000',
             rangeFinal: '1000199',
+            quantidadeSetores: 1,
           },
+          {
+            origemParticipacao: OrigemParticipacao.POS,
+            rangeInicio: '1000150',
+            rangeFinal: '1000250',
+            quantidadeSetores: 1,
+          },
+        ],
+        combos: [
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.UMA_CHANCE,
-            rangeInicio: '1000150',
-            rangeFinal: '1000250',
+            preco: '10.00',
           },
         ],
         premios: [
@@ -265,6 +291,7 @@ describe('EdicoesService', () => {
       numero: 125,
       status: StatusEdicao.RASCUNHO,
       detalhes: [],
+      combos: [],
       premios: [],
       createdAt: new Date(),
       dataSorteio: new Date(),
@@ -335,6 +362,7 @@ describe('EdicoesService', () => {
       numero: 125,
       status: StatusEdicao.ATIVA,
       detalhes: [],
+      combos: [],
       premios: [],
       createdAt: new Date(),
       dataSorteio: new Date(),

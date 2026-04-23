@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -26,12 +27,15 @@ export class ListarCombosLojaDto {
   tipoCartela: TipoCartela;
 
   @ApiPropertyOptional({
-    enum: OrigemParticipacao,
+    enum: [OrigemParticipacao.DIGITAL, OrigemParticipacao.POS],
     example: OrigemParticipacao.DIGITAL,
     description: 'Origem da participação. Na loja pública, o padrão é DIGITAL.',
   })
   @IsOptional()
   @IsEnum(OrigemParticipacao)
+  @IsIn([OrigemParticipacao.DIGITAL, OrigemParticipacao.POS], {
+    message: 'origemParticipacao aceita apenas DIGITAL ou POS',
+  })
   origemParticipacao?: OrigemParticipacao;
 
   @ApiPropertyOptional({

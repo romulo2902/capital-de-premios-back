@@ -75,30 +75,38 @@ async function main() {
   console.log('Criando edições...');
   const edicoes = [];
   for (let i = 1; i <= 5; i++) {
-    const ed = await prisma.edicao.upsert({
-      where: { numero: 1000 + i },
-      update: {},
-      create: {
-        numero: 1000 + i,
-        dataSorteio: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7 * i),
-        dataEncerramento: new Date(Date.now() + 1000 * 60 * 60 * 24 * 6 * i),
-        valorCartela: 10,
-        qtdNumerosCartela: 15,
-        rangeInicio: 1,
-        rangeFinal: 100000,
-        qtdPremios: 5,
-        destino: DestinoEdicao.SITE,
-        status: i === 1 ? StatusEdicao.ATIVA : StatusEdicao.RASCUNHO,
-        detalhes: {
-          create: {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.UMA_CHANCE,
+    const numeroEdicao = String(1000 + i);
+    const edicaoExistente = await prisma.edicao.findFirst({
+      where: { numero: numeroEdicao },
+    });
+
+    const ed = edicaoExistente
+      ? edicaoExistente
+      : await prisma.edicao.create({
+          data: {
+            numero: numeroEdicao,
+            dataSorteio: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7 * i),
+            dataEncerramento: new Date(
+              Date.now() + 1000 * 60 * 60 * 24 * 6 * i,
+            ),
+            valorCartela: 10,
+            qtdNumerosCartela: 15,
             rangeInicio: 1,
             rangeFinal: 100000,
-          }
-        }
-      },
-    });
+            qtdPremios: 5,
+            destino: DestinoEdicao.SITE,
+            status: i === 1 ? StatusEdicao.ATIVA : StatusEdicao.RASCUNHO,
+            detalhes: {
+              create: {
+                origemParticipacao: OrigemParticipacao.DIGITAL,
+                tipoCartela: TipoCartela.UMA_CHANCE,
+                indiceRange: 1,
+                rangeInicio: 1,
+                rangeFinal: 100000,
+              },
+            },
+          },
+        });
     edicoes.push(ed);
   }
 

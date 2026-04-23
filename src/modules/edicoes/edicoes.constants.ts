@@ -4,9 +4,11 @@ export const EDICAO_INCLUDE = {
   detalhes: {
     orderBy: [
       { origemParticipacao: 'asc' },
-      { tipoCartela: 'asc' },
-      { rangeInicio: 'asc' },
+      { indiceRange: 'asc' },
     ],
+  },
+  combos: {
+    orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
   },
   premios: {
     orderBy: { ordem: 'asc' },

@@ -1,6 +1,5 @@
 import { formatDateTimeForInput } from '../../common/utils/business-date-time.util';
 import {
-  agruparDetalhesPorOrigemETipoCartela,
   calcularTotalBilhetesDosDetalhes,
   expandirSetoresDosDetalhes,
   obterDetalhesComFallback,
@@ -16,29 +15,24 @@ export function serializarEdicao(
     (detalhe, index) => ({
       ...detalhe,
       ordemConfiguracao: index,
-      preco:
-        'preco' in detalhe && detalhe.preco
-          ? detalhe.preco.toString()
-          : undefined,
+      indiceRange:
+        'indiceRange' in detalhe && typeof detalhe.indiceRange === 'number'
+          ? detalhe.indiceRange
+          : index + 1,
     }),
   );
 
-  const configuracoes = agruparDetalhesPorOrigemETipoCartela(
-    detalhesNormalizados,
-  ).map((grupo) => {
-    const setores = expandirSetoresDosDetalhes(grupo.detalhes);
+  const detalhesConfigurados = detalhesNormalizados.map((detalhe) => {
+    const setores = expandirSetoresDosDetalhes([detalhe]);
     const primeiroSetor = setores[0];
     const segundoSetor = setores[1];
-    const quantidadeBilhetes = calcularTotalBilhetesDosDetalhes(grupo.detalhes);
+    const quantidadeBilhetes = calcularTotalBilhetesDosDetalhes([detalhe]);
     const quantidadeCombos = primeiroSetor?.quantidadeCombos ?? 0n;
-    const precoConfigurado = grupo.detalhes.find((detalhe) => detalhe.preco)?.preco;
-    const quantidadeChances = obterQuantidadeChances(grupo.tipoCartela);
-    const isManualPorChance = grupo.detalhes.length === quantidadeChances;
 
     return {
-      origemParticipacao: grupo.origemParticipacao,
-      tipoCartela: grupo.tipoCartela,
-      quantidadeChances,
+      origemParticipacao: detalhe.origemParticipacao,
+      indiceRange: detalhe.indiceRange,
+      tipoCartelaBase: detalhe.tipoCartela,
       quantidadeCombos: quantidadeCombos.toString(),
       quantidadeBilhetes: quantidadeBilhetes.toString(),
       passoEntreChances: primeiroSetor && segundoSetor
@@ -47,21 +41,24 @@ export function serializarEdicao(
       rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
       rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
       legado: edicao.detalhes.length === 0,
-      preco: precoConfigurado ?? edicao.valorCartela.toString(),
       setores: setores.map((setor) => ({
         indiceChance: setor.indiceChance,
         rangeInicio: setor.rangeInicio.toString(),
         rangeFinal: setor.rangeFinal.toString(),
       })),
-      rangesConfigurados: grupo.detalhes.map((detalhe, index) => ({
-        indiceChance:
-          detalhe.indiceChance ?? (isManualPorChance ? index + 1 : null),
+      rangeConfigurado: {
         rangeInicio: detalhe.rangeInicio.toString(),
         rangeFinal: detalhe.rangeFinal.toString(),
         intervalo: (detalhe.rangeFinal - detalhe.rangeInicio + 1n).toString(),
-      })),
+      },
     };
   });
+
+  const combos = edicao.combos.map((combo) => ({
+    ...combo,
+    quantidadeChances: obterQuantidadeChances(combo.tipoCartela),
+    preco: combo.preco.toString(),
+  }));
 
   return {
     ...edicao,
@@ -78,7 +75,8 @@ export function serializarEdicao(
       businessTimeZone,
     ),
     timezone: businessTimeZone,
-    detalhes: configuracoes,
+    detalhes: detalhesConfigurados,
+    combos,
     premios: edicao.premios.map((premio) => ({
       ...premio,
       valor: premio.valor.toString(),

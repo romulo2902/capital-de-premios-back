@@ -150,7 +150,7 @@ type SeedCliente = {
 
 type SeedEdicao = {
   id: string;
-  numero: number;
+  numero: string;
   valorCartela: Prisma.Decimal;
   rangeInicio: bigint;
   rangeFinal: bigint;
@@ -492,108 +492,87 @@ async function garantirEdicoes(): Promise<SeedEdicao[]> {
       (edicaoBase.rangeInicio + edicaoBase.rangeFinal) / 2,
     );
 
-    const edicao = await prisma.edicao.upsert({
-      where: {
-        numero: edicaoBase.numero,
-      },
-      update: {
-        dataSorteio: edicaoBase.dataSorteio,
-        dataEncerramento: edicaoBase.dataEncerramento,
-        valorCartela: decimal(edicaoBase.valorCartela),
-        qtdNumerosCartela: edicaoBase.qtdNumerosCartela,
+    const numeroEdicao = String(edicaoBase.numero);
+    const detalhesCreate = [
+      {
+        origemParticipacao: OrigemParticipacao.DIGITAL,
+        tipoCartela: TipoCartela.UMA_CHANCE,
+        indiceRange: 1,
         rangeInicio: BigInt(edicaoBase.rangeInicio),
-        rangeFinal: BigInt(edicaoBase.rangeFinal),
-        qtdPremios: 3,
-        destino: DestinoEdicao.AMBOS,
-        frase: 'Seed de vendas de marco de 2026',
-        status: edicaoBase.status,
-        detalhes: {
-          deleteMany: {},
-          create: [
-            {
-              origemParticipacao: OrigemParticipacao.DIGITAL,
-              tipoCartela: TipoCartela.UMA_CHANCE,
-              rangeInicio: BigInt(edicaoBase.rangeInicio),
-              rangeFinal: BigInt(meioRange),
-            },
-            {
-              origemParticipacao: OrigemParticipacao.FISICO,
-              tipoCartela: TipoCartela.UMA_CHANCE,
-              rangeInicio: BigInt(meioRange + 1),
-              rangeFinal: BigInt(edicaoBase.rangeFinal),
-            },
-          ],
-        },
-        premios: {
-          deleteMany: {},
-          create: [
-            {
-              ordem: 1,
-              descricao: '1 premio',
-              valor: decimal(edicaoBase.valorCartela * 500),
-            },
-            {
-              ordem: 2,
-              descricao: '2 premio',
-              valor: decimal(edicaoBase.valorCartela * 250),
-            },
-            {
-              ordem: 3,
-              descricao: '3 premio',
-              valor: decimal(edicaoBase.valorCartela * 125),
-            },
-          ],
-        },
+        rangeFinal: BigInt(meioRange),
       },
-      create: {
-        numero: edicaoBase.numero,
-        dataSorteio: edicaoBase.dataSorteio,
-        dataEncerramento: edicaoBase.dataEncerramento,
-        valorCartela: decimal(edicaoBase.valorCartela),
-        qtdNumerosCartela: edicaoBase.qtdNumerosCartela,
-        rangeInicio: BigInt(edicaoBase.rangeInicio),
+      {
+        origemParticipacao: OrigemParticipacao.FISICO,
+        tipoCartela: TipoCartela.UMA_CHANCE,
+        indiceRange: 1,
+        rangeInicio: BigInt(meioRange + 1),
         rangeFinal: BigInt(edicaoBase.rangeFinal),
-        qtdPremios: 3,
-        destino: DestinoEdicao.AMBOS,
-        frase: 'Seed de vendas de marco de 2026',
-        status: edicaoBase.status,
-        detalhes: {
-          create: [
-            {
-              origemParticipacao: OrigemParticipacao.DIGITAL,
-              tipoCartela: TipoCartela.UMA_CHANCE,
-              rangeInicio: BigInt(edicaoBase.rangeInicio),
-              rangeFinal: BigInt(meioRange),
-            },
-            {
-              origemParticipacao: OrigemParticipacao.FISICO,
-              tipoCartela: TipoCartela.UMA_CHANCE,
-              rangeInicio: BigInt(meioRange + 1),
-              rangeFinal: BigInt(edicaoBase.rangeFinal),
-            },
-          ],
-        },
-        premios: {
-          create: [
-            {
-              ordem: 1,
-              descricao: '1 premio',
-              valor: decimal(edicaoBase.valorCartela * 500),
-            },
-            {
-              ordem: 2,
-              descricao: '2 premio',
-              valor: decimal(edicaoBase.valorCartela * 250),
-            },
-            {
-              ordem: 3,
-              descricao: '3 premio',
-              valor: decimal(edicaoBase.valorCartela * 125),
-            },
-          ],
-        },
       },
+    ];
+
+    const premiosCreate = [
+      {
+        ordem: 1,
+        descricao: '1 premio',
+        valor: decimal(edicaoBase.valorCartela * 500),
+      },
+      {
+        ordem: 2,
+        descricao: '2 premio',
+        valor: decimal(edicaoBase.valorCartela * 250),
+      },
+      {
+        ordem: 3,
+        descricao: '3 premio',
+        valor: decimal(edicaoBase.valorCartela * 125),
+      },
+    ];
+
+    const dadosBaseEdicao = {
+      dataSorteio: edicaoBase.dataSorteio,
+      dataEncerramento: edicaoBase.dataEncerramento,
+      valorCartela: decimal(edicaoBase.valorCartela),
+      qtdNumerosCartela: edicaoBase.qtdNumerosCartela,
+      rangeInicio: BigInt(edicaoBase.rangeInicio),
+      rangeFinal: BigInt(edicaoBase.rangeFinal),
+      qtdPremios: 3,
+      destino: DestinoEdicao.AMBOS,
+      frase: 'Seed de vendas de marco de 2026',
+      status: edicaoBase.status,
+    };
+
+    const edicaoExistente = await prisma.edicao.findFirst({
+      where: { numero: numeroEdicao },
+      select: { id: true },
     });
+
+    const edicao = edicaoExistente
+      ? await prisma.edicao.update({
+          where: { id: edicaoExistente.id },
+          data: {
+            ...dadosBaseEdicao,
+            detalhes: {
+              deleteMany: {},
+              create: detalhesCreate,
+            },
+            premios: {
+              deleteMany: {},
+              create: premiosCreate,
+            },
+          },
+        })
+      : await prisma.edicao.create({
+          data: {
+            numero: numeroEdicao,
+            ...dadosBaseEdicao,
+            detalhes: {
+              create: detalhesCreate,
+            },
+            premios: {
+              create: premiosCreate,
+            },
+          },
+        });
 
     edicoes.push({
       id: edicao.id,

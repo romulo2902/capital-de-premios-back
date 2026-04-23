@@ -21,7 +21,6 @@ import {
 } from '@prisma/client';
 import { ConteudoService } from '../conteudo/conteudo.service';
 import {
-  agruparDetalhesPorOrigemETipoCartela,
   expandirSetoresDosDetalhes,
   obterQuantidadeChances,
 } from '../edicoes/edicoes-range.util';
@@ -56,6 +55,10 @@ export class LojaPublicaService {
         premios: { orderBy: { ordem: 'asc' } },
         detalhes: {
           where: { origemParticipacao: OrigemParticipacao.DIGITAL },
+          orderBy: { indiceRange: 'asc' },
+        },
+        combos: {
+          where: { origemParticipacao: OrigemParticipacao.DIGITAL },
           orderBy: { tipoCartela: 'asc' },
         },
       },
@@ -67,6 +70,7 @@ export class LojaPublicaService {
 
     const opcoesDeCompra = this.mapearOpcoesCompraDaEdicao(
       edicaoAtiva.detalhes,
+      edicaoAtiva.combos,
       edicaoAtiva.valorCartela,
     );
 
@@ -124,6 +128,12 @@ export class LojaPublicaService {
         detalhes: {
           where: {
             origemParticipacao: OrigemParticipacao.DIGITAL,
+          },
+          orderBy: { indiceRange: 'asc' },
+        },
+        combos: {
+          where: {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: dto.tipoCartela,
           },
         },
@@ -136,7 +146,8 @@ export class LojaPublicaService {
     this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
     const detalheSelecionado = edicao.detalhes[0];
-    if (!detalheSelecionado) {
+    const comboSelecionado = edicao.combos[0];
+    if (!detalheSelecionado || !comboSelecionado) {
       throw new BadRequestException(
         'Tipo de cartela não está disponível para esta edição',
       );
@@ -155,9 +166,7 @@ export class LojaPublicaService {
     }
 
     // Calcula total
-    const precoUnitario = Number(
-      detalheSelecionado.preco ?? edicao.valorCartela,
-    );
+    const precoUnitario = Number(comboSelecionado.preco ?? edicao.valorCartela);
     const total = precoUnitario * dto.quantidade;
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
@@ -367,6 +376,10 @@ export class LojaPublicaService {
             premios: { orderBy: { ordem: 'asc' } },
             detalhes: {
               where: { origemParticipacao: OrigemParticipacao.DIGITAL },
+              orderBy: { indiceRange: 'asc' },
+            },
+            combos: {
+              where: { origemParticipacao: OrigemParticipacao.DIGITAL },
               orderBy: { tipoCartela: 'asc' },
             },
           },
@@ -435,6 +448,7 @@ export class LojaPublicaService {
             qtdNumerosCartela: v.edicao.qtdNumerosCartela,
             opcoesCompra: this.mapearOpcoesCompraDaEdicao(
               v.edicao.detalhes,
+              v.edicao.combos,
               v.edicao.valorCartela,
             ).map((opcao) => ({
               tipoCartela: opcao.tipoCartela,
@@ -559,6 +573,7 @@ export class LojaPublicaService {
       rangeInicio: bigint;
       rangeFinal: bigint;
       preco: Prisma.Decimal | null;
+      indiceRange: number;
     }>,
     tipoCartela?: TipoCartela | null,
   ) {
@@ -574,6 +589,7 @@ export class LojaPublicaService {
     const setores = expandirSetoresDosDetalhes(
       detalhes.map((detalhe, index) => ({
         ...detalhe,
+        indiceRange: detalhe.indiceRange ?? index + 1,
         ordemConfiguracao: index,
       })),
     );
@@ -631,45 +647,92 @@ export class LojaPublicaService {
       tipoCartela: TipoCartela;
       rangeInicio: bigint;
       rangeFinal: bigint;
-      preco: Prisma.Decimal | null;
+      indiceRange: number;
+    }>,
+    combos: Array<{
+      origemParticipacao: OrigemParticipacao;
+      tipoCartela: TipoCartela;
+      preco: Prisma.Decimal;
     }>,
     valorCartelaPadrao: Prisma.Decimal,
   ) {
-    const grupos = agruparDetalhesPorOrigemETipoCartela(
-      detalhes.map((detalhe, index) => ({
+    const detalhesDigitais = detalhes.filter(
+      (detalhe) => detalhe.origemParticipacao === OrigemParticipacao.DIGITAL,
+    )
+      .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
+
+    if (detalhesDigitais.length === 0) {
+      return [];
+    }
+
+    const setoresBase = expandirSetoresDosDetalhes(
+      detalhesDigitais.map((detalhe, index) => ({
         ...detalhe,
-        preco: detalhe.preco?.toString(),
+        indiceRange: detalhe.indiceRange ?? index + 1,
         ordemConfiguracao: index,
       })),
     );
 
-    return grupos
-      .filter((grupo) => grupo.origemParticipacao === OrigemParticipacao.DIGITAL)
-      .map((grupo) => {
-        const setores = expandirSetoresDosDetalhes(grupo.detalhes);
-        const primeiroSetor = setores[0];
-        const segundoSetor = setores[1];
-        const preco =
-          grupo.detalhes.find((detalhe) => detalhe.preco)?.preco ??
-          valorCartelaPadrao.toString();
+    if (setoresBase.length === 0) {
+      return [];
+    }
 
-        return {
-          tipoCartela: grupo.tipoCartela,
-          quantidadeChances: obterQuantidadeChances(grupo.tipoCartela),
-          rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
-          rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
+    const combosDigitais = combos.filter(
+      (combo) => combo.origemParticipacao === OrigemParticipacao.DIGITAL,
+    );
+
+    if (combosDigitais.length === 0) {
+      return [
+        {
+          tipoCartela: TipoCartela.UMA_CHANCE,
+          quantidadeChances: 1,
+          rangeTotalInicio: setoresBase[0].rangeTotalInicio.toString(),
+          rangeTotalFinal: setoresBase[0].rangeTotalFinal.toString(),
           passoEntreChances:
-            primeiroSetor && segundoSetor
-              ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
+            setoresBase.length > 1
+              ? (
+                  setoresBase[1].rangeInicio - setoresBase[0].rangeInicio
+                ).toString()
               : '0',
-          setores: setores.map((setor) => ({
-            indiceChance: setor.indiceChance,
-            rangeInicio: setor.rangeInicio.toString(),
-            rangeFinal: setor.rangeFinal.toString(),
-          })),
-          preco,
-        };
-      });
+          setores: [
+            {
+              indiceChance: 1,
+              rangeInicio: setoresBase[0].rangeInicio.toString(),
+              rangeFinal: setoresBase[0].rangeFinal.toString(),
+            },
+          ],
+          preco: valorCartelaPadrao.toString(),
+        },
+      ];
+    }
+
+    return combosDigitais.map((combo) => {
+      const quantidadeChances = obterQuantidadeChances(combo.tipoCartela);
+      const setores = setoresBase.slice(0, quantidadeChances);
+      const primeiroSetor = setores[0];
+      const segundoSetor = setores[1];
+
+      if (setores.length < quantidadeChances) {
+        return null;
+      }
+
+      return {
+        tipoCartela: combo.tipoCartela,
+        quantidadeChances,
+        rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
+        rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
+        passoEntreChances:
+          primeiroSetor && segundoSetor
+            ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
+            : '0',
+        setores: setores.map((setor) => ({
+          indiceChance: setor.indiceChance,
+          rangeInicio: setor.rangeInicio.toString(),
+          rangeFinal: setor.rangeFinal.toString(),
+        })),
+        preco: combo.preco.toString(),
+      };
+    }).filter((item): item is NonNullable<typeof item> => item !== null);
   }
 
   private normalizarTexto(valor: string): string {
@@ -823,7 +886,7 @@ export class LojaPublicaService {
   }
 
   private validarJanelaDeVenda(
-    edicaoNumero: number,
+    edicaoNumero: string,
     dataEncerramento: Date,
   ): void {
     const agora = Date.now();

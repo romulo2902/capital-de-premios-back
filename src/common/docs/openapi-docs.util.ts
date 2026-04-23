@@ -10,6 +10,8 @@ import type { Response } from 'express';
 const DOCS_BASE_PATH = 'api/docs';
 const SWAGGER_BASE_PATH = 'api/swagger';
 const DOCS_JSON_BASE_PATH = 'api/docs-json';
+const SWAGGER_ADMIN_FLAT_PATH = 'api/swagger-admin';
+const SWAGGER_GERAL_FLAT_PATH = 'api/swagger-geral';
 const ADMIN_TAG_PREFIX = 'Admin /';
 const REDOC_STANDALONE_JS_URL =
   'https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js';
@@ -76,6 +78,30 @@ export function setupOpenApiDocs(
     response.type('html').send(buildDocsIndexHtml(port));
   });
   expressApp.get(
+    `/${SWAGGER_BASE_PATH}/admin`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_ADMIN_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
+    `/${SWAGGER_BASE_PATH}/admin/`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_ADMIN_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
+    `/${SWAGGER_BASE_PATH}/geral`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_GERAL_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
+    `/${SWAGGER_BASE_PATH}/geral/`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_GERAL_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
     `/${DOCS_JSON_BASE_PATH}/admin`,
     (_request: unknown, response: Response) => {
       response.json(adminDocument);
@@ -113,16 +139,18 @@ export function setupOpenApiDocs(
         );
     },
   );
-  SwaggerModule.setup(`${SWAGGER_BASE_PATH}/admin`, app, adminDocument, {
+  SwaggerModule.setup(SWAGGER_ADMIN_FLAT_PATH, app, adminDocument, {
     customSiteTitle: 'Capital de Prêmios API - Swagger Admin',
     swaggerOptions: {
       persistAuthorization: true,
+      url: `/${DOCS_JSON_BASE_PATH}/admin`,
     },
   });
-  SwaggerModule.setup(`${SWAGGER_BASE_PATH}/geral`, app, generalDocument, {
+  SwaggerModule.setup(SWAGGER_GERAL_FLAT_PATH, app, generalDocument, {
     customSiteTitle: 'Capital de Prêmios API - Swagger Geral',
     swaggerOptions: {
       persistAuthorization: true,
+      url: `/${DOCS_JSON_BASE_PATH}/geral`,
     },
   });
 
