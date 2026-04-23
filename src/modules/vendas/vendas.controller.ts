@@ -34,6 +34,7 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
  *
  *   - POST   /admin/vendas                → Criar venda + iniciar pagamento
  *   - GET    /admin/vendas                → Listar vendas (paginado, com filtros)
+ *   - GET    /admin/vendas/:id/status     → Consultar status da venda
  *   - GET    /admin/vendas/:id            → Detalhes da venda (com bilhetes)
  *   - GET    /admin/vendas/cliente/:cpf   → Vendas por CPF do cliente
  *   - PATCH  /admin/vendas/:id/status     → Atualizar status manualmente (ADMIN)
@@ -112,6 +113,13 @@ export class VendasController {
       pagination.page,
       pagination.limit,
     );
+  }
+
+  @Get(':id/status')
+  @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
+  @ApiOperation({ summary: 'Consultar status atual da venda' })
+  consultarStatus(@Param('id', ParseUUIDPipe) id: string) {
+    return this.vendasService.consultarStatus(id);
   }
 
   @Get(':id')

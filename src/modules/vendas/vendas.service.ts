@@ -484,6 +484,29 @@ export class VendasService {
     };
   }
 
+  async consultarStatus(id: string) {
+    const venda = await this.prisma.venda.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        tipoPagamento: true,
+        gatewayId: true,
+        gatewayPayload: true,
+        createdAt: true,
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException('Venda não encontrada');
+    }
+
+    return {
+      message: 'Status da venda consultado com sucesso',
+      data: venda,
+    };
+  }
+
   // ─── FIND BY CLIENTE CPF ──────────────────────────────
 
   async findByCliente(cpf: string, page = 1, limit = 20) {
