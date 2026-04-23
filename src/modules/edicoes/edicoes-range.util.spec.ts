@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
 import {
   expandirSetoresDosDetalhes,
@@ -6,71 +6,74 @@ import {
 } from './edicoes-range.util';
 
 describe('edicoes-range.util', () => {
-  it('expande DUAS_CHANCES manual respeitando pares por indiceChance', () => {
+  it('expande setores individuais preservando a ordem por indiceRange', () => {
     const setores = expandirSetoresDosDetalhes([
       {
         origemParticipacao: OrigemParticipacao.DIGITAL,
         tipoCartela: TipoCartela.DUAS_CHANCES,
-        indiceChance: 1,
-        rangeInicio: 950000n,
-        rangeFinal: 959980n,
+        indiceRange: 1,
+        rangeInicio: 1n,
+        rangeFinal: 1000n,
         ordemConfiguracao: 0,
       },
       {
         origemParticipacao: OrigemParticipacao.DIGITAL,
         tipoCartela: TipoCartela.DUAS_CHANCES,
-        indiceChance: 2,
-        rangeInicio: 1050000n,
-        rangeFinal: 1059980n,
+        indiceRange: 2,
+        rangeInicio: 1001n,
+        rangeFinal: 2000n,
         ordemConfiguracao: 1,
       },
     ]);
 
     expect(setores).toHaveLength(2);
     expect(setores[0].indiceChance).toBe(1);
+    expect(setores[0].rangeInicio).toBe(1n);
+    expect(setores[0].rangeFinal).toBe(1000n);
     expect(setores[1].indiceChance).toBe(2);
-    expect(setores[0].quantidadeCombos).toBe(9981n);
-    expect(setores[1].quantidadeCombos).toBe(9981n);
+    expect(setores[1].rangeInicio).toBe(1001n);
+    expect(setores[1].rangeFinal).toBe(2000n);
   });
 
-  it('rejeita grupo manual com tamanhos diferentes', () => {
+  it('permite ranges consecutivos sem sobreposicao', () => {
     expect(() =>
       validarDetalhesInternos([
         {
           origemParticipacao: OrigemParticipacao.DIGITAL,
           tipoCartela: TipoCartela.DUAS_CHANCES,
-          indiceChance: 1,
-          rangeInicio: 950000n,
-          rangeFinal: 959980n,
+          indiceRange: 1,
+          rangeInicio: 1n,
+          rangeFinal: 1000n,
         },
         {
           origemParticipacao: OrigemParticipacao.DIGITAL,
           tipoCartela: TipoCartela.DUAS_CHANCES,
-          indiceChance: 2,
-          rangeInicio: 1050000n,
-          rangeFinal: 1059999n,
+          indiceRange: 2,
+          rangeInicio: 1001n,
+          rangeFinal: 2000n,
         },
       ]),
-    ).toThrow(BadRequestException);
+    ).not.toThrow();
   });
 
-  it('rejeita grupo manual com indiceChance parcial', () => {
+  it('rejeita ranges que se sobrepoem', () => {
     expect(() =>
       validarDetalhesInternos([
         {
           origemParticipacao: OrigemParticipacao.DIGITAL,
           tipoCartela: TipoCartela.DUAS_CHANCES,
-          indiceChance: 1,
-          rangeInicio: 950000n,
-          rangeFinal: 959980n,
+          indiceRange: 1,
+          rangeInicio: 1n,
+          rangeFinal: 1000n,
         },
         {
           origemParticipacao: OrigemParticipacao.DIGITAL,
           tipoCartela: TipoCartela.DUAS_CHANCES,
-          rangeInicio: 1050000n,
-          rangeFinal: 1059980n,
+          indiceRange: 2,
+          rangeInicio: 900n,
+          rangeFinal: 1899n,
         },
       ]),
-    ).toThrow(BadRequestException);
+    ).toThrow(ConflictException);
   });
 });
