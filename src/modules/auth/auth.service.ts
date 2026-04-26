@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
@@ -12,6 +13,7 @@ import { LoginDto } from './dto/login.dto';
 import { LoginLojaDto } from './dto/login-loja.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RedefinirSenhaPrimeiroAcessoDto } from './dto/redefinir-senha-primeiro-acesso.dto';
+import { RedefinirSenhaAdminDto } from './dto/redefinir-senha-admin.dto';
 
 type UsuarioRow = {
   id: string;
@@ -272,6 +274,38 @@ export class AuthService {
     this.logger.log(
       `Senha redefinida no primeiro acesso: ${usuario.email} [${usuario.perfil}]`,
     );
+    return { message: 'Senha redefinida com sucesso' };
+  }
+
+  async redefinirSenhaPorAdmin(
+    dto: RedefinirSenhaAdminDto,
+  ): Promise<{ message: string }> {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: dto.usuarioId },
+    });
+
+    if (!usuario) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    if (usuario.perfil !== 'VENDEDOR' && usuario.perfil !== 'DISTRIBUIDOR') {
+      throw new ForbiddenException(
+        'Operação permitida apenas para vendedor ou distribuidor',
+      );
+    }
+
+    await this.prisma.usuario.update({
+      where: { id: usuario.id },
+      data: {
+        senhaHash: await bcrypt.hash(dto.novaSenha, 10),
+        deveRedefinirSenha: false,
+      },
+    });
+
+    this.logger.log(
+      `Senha redefinida pelo ADMIN: ${usuario.email} [${usuario.perfil}]`,
+    );
+
     return { message: 'Senha redefinida com sucesso' };
   }
 

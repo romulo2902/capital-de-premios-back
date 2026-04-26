@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -15,6 +19,7 @@ describe('AuthService', () => {
     usuario: {
       findUnique: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     cliente: {
       findUnique: jest.fn(),
@@ -202,7 +207,11 @@ describe('AuthService', () => {
       mockPrisma.cliente.findUnique.mockResolvedValue(null);
       mockPrisma.cliente.create.mockResolvedValue({ id: 'c-1', cpf: '12345678900', nome: '', telefone: '' });
 
-      const result = await service.loginLoja({ cpf: '123.456.789-00' });
+      const result = await service.loginLoja({
+        cpf: '123.456.789-00',
+        nome: 'Cliente Teste',
+        telefone: '(11) 99999-9999',
+      });
       expect(result.data).toHaveProperty('accessToken');
       expect(result.data).toHaveProperty('perfil', 'CLIENTE');
       expect(mockPrisma.cliente.create).toHaveBeenCalled();
@@ -226,6 +235,61 @@ describe('AuthService', () => {
       await expect(service.loginLoja({})).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  describe('redefinirSenhaPorAdmin()', () => {
+    it('deve redefinir senha de vendedor/distribuidor com sucesso', async () => {
+      mockPrisma.usuario.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'vendedor@test.com',
+        perfil: 'VENDEDOR',
+      });
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-new-password');
+      mockPrisma.usuario.update.mockResolvedValue({
+        id: 'user-1',
+      });
+
+      const result = await service.redefinirSenhaPorAdmin({
+        usuarioId: 'user-1',
+        novaSenha: 'NovaSenha@123',
+      });
+
+      expect(bcrypt.hash).toHaveBeenCalledWith('NovaSenha@123', 10);
+      expect(mockPrisma.usuario.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: {
+          senhaHash: 'hashed-new-password',
+          deveRedefinirSenha: false,
+        },
+      });
+      expect(result).toEqual({ message: 'Senha redefinida com sucesso' });
+    });
+
+    it('deve lançar NotFoundException quando usuário não existir', async () => {
+      mockPrisma.usuario.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.redefinirSenhaPorAdmin({
+          usuarioId: 'user-inexistente',
+          novaSenha: 'NovaSenha@123',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('deve lançar ForbiddenException para perfil não permitido', async () => {
+      mockPrisma.usuario.findUnique.mockResolvedValue({
+        id: 'user-admin',
+        email: 'admin@test.com',
+        perfil: 'ADMIN',
+      });
+
+      await expect(
+        service.redefinirSenhaPorAdmin({
+          usuarioId: 'user-admin',
+          novaSenha: 'NovaSenha@123',
+        }),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

@@ -1,10 +1,21 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { LoginLojaDto } from './dto/login-loja.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RedefinirSenhaPrimeiroAcessoDto } from './dto/redefinir-senha-primeiro-acesso.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RedefinirSenhaAdminDto } from './dto/redefinir-senha-admin.dto';
 
 /**
  * Controller de autenticação — Capital de Prêmios
@@ -14,6 +25,7 @@ import { RedefinirSenhaPrimeiroAcessoDto } from './dto/redefinir-senha-primeiro-
  *  - POST /auth/loja       → Painel Cliente (CLIENTE) — CPF, sem senha
  *  - POST /auth/refresh    → Renovar access token (todos os perfis)
  *  - POST /auth/redefinir-senha-primeiro-acesso → Redefinir senha migrada (DISTRIBUIDOR, VENDEDOR)
+ *  - POST /auth/admin/redefinir-senha → ADMIN redefine senha de vendedor/distribuidor
  */
 @ApiTags('Auth')
 @Controller('auth')
@@ -64,5 +76,19 @@ export class AuthController {
   })
   redefinirSenhaPrimeiroAcesso(@Body() dto: RedefinirSenhaPrimeiroAcessoDto) {
     return this.authService.redefinirSenhaPrimeiroAcesso(dto);
+  }
+
+  @Post('admin/redefinir-senha')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'ADMIN redefine senha de vendedor/distribuidor (sem SMTP)',
+    description:
+      'Atualiza a senha diretamente no banco com hash bcrypt, informando o usuarioId alvo (VENDEDOR ou DISTRIBUIDOR).',
+  })
+  redefinirSenhaPorAdmin(@Body() dto: RedefinirSenhaAdminDto) {
+    return this.authService.redefinirSenhaPorAdmin(dto);
   }
 }
