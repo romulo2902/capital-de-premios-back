@@ -35,13 +35,51 @@ describe('DashboardService', () => {
   // ─── ADMIN ────────────────────────────────────────────────────────
 
   describe('getAdminVisaoGeral', () => {
-    it('should return aggregated counts for admin', async () => {
+    it('should return aggregated counts and top 10 vendedor ranking for admin', async () => {
       mockPrisma.cliente.count.mockResolvedValue(100);
       mockPrisma.vendedor.count.mockResolvedValue(20);
       mockPrisma.distribuidor.count.mockResolvedValue(5);
+      mockPrisma.vendedor.findMany.mockResolvedValue([
+        {
+          id: 'vend-1',
+          nome: 'Carlos',
+          vendas: [
+            { total: new Prisma.Decimal(300), quantidade: 2 },
+            { total: new Prisma.Decimal(200), quantidade: 1 },
+          ],
+        },
+        {
+          id: 'vend-2',
+          nome: 'Bianca',
+          vendas: [{ total: new Prisma.Decimal(600), quantidade: 4 }],
+        },
+        {
+          id: 'vend-3',
+          nome: 'Zeca',
+          vendas: [],
+        },
+      ]);
 
       const res = await service.getAdminVisaoGeral();
-      expect(res).toEqual({ totalClientes: 100, totalVendedores: 20, totalDistribuidores: 5 });
+      expect(res.totalClientes).toBe(100);
+      expect(res.totalVendedores).toBe(20);
+      expect(res.totalDistribuidores).toBe(5);
+      expect(res.rankingVendedores).toEqual([
+        {
+          vendedorId: 'vend-2',
+          nome: 'Bianca',
+          totalVendas: 1,
+          totalCartelas: 4,
+          totalVendasValor: 600,
+        },
+        {
+          vendedorId: 'vend-1',
+          nome: 'Carlos',
+          totalVendas: 2,
+          totalCartelas: 3,
+          totalVendasValor: 500,
+        },
+      ]);
     });
   });
 

@@ -14,13 +14,60 @@ export class DashboardService {
 
   async getAdminVisaoGeral() {
     this.logger.log('Buscando visão geral (ADMIN)');
-    const [totalClientes, totalVendedores, totalDistribuidores] = await Promise.all([
+    const [totalClientes, totalVendedores, totalDistribuidores, vendedores] = await Promise.all([
       this.prisma.cliente.count(),
       this.prisma.vendedor.count(),
       this.prisma.distribuidor.count(),
+      this.prisma.vendedor.findMany({
+        select: {
+          id: true,
+          nome: true,
+          vendas: {
+            where: { status: StatusVenda.APROVADO },
+            select: { total: true, quantidade: true },
+          },
+        },
+      }),
     ]);
 
-    return { totalClientes, totalVendedores, totalDistribuidores };
+    const rankingVendedores = vendedores
+      .map((vendedor) => ({
+        vendedorId: vendedor.id,
+        nome: vendedor.nome,
+        totalVendas: vendedor.vendas.length,
+        totalCartelas: vendedor.vendas.reduce(
+          (acumulado, venda) => acumulado + venda.quantidade,
+          0,
+        ),
+        totalVendasValor: Number(
+          vendedor.vendas
+            .reduce(
+              (acumulado, venda) => acumulado + Number(venda.total),
+              0,
+            )
+            .toFixed(2),
+        ),
+      }))
+      .filter((vendedor) => vendedor.totalVendas > 0)
+      .sort((a, b) => {
+        if (b.totalVendasValor !== a.totalVendasValor) {
+          return b.totalVendasValor - a.totalVendasValor;
+        }
+
+        if (b.totalCartelas !== a.totalCartelas) {
+          return b.totalCartelas - a.totalCartelas;
+        }
+
+        return a.nome.localeCompare(b.nome, 'pt-BR');
+      })
+      .slice(0, 10);
+
+    return {
+      totalClientes,
+      totalVendedores,
+      totalDistribuidores,
+      rankingVendedores,
+    };
   }
 
   async getAdminVendasPorEdicao() {
