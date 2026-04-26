@@ -33,7 +33,7 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
  *
  * Rota base: /api/admin/vendas
  *
- *   - POST   /admin/vendas                → Criar venda + iniciar pagamento
+ *   - POST   /admin/vendas                → Criar venda (ADMIN = manual, sem gateway)
  *   - GET    /admin/vendas                → Listar vendas (paginado, com filtros)
  *   - GET    /admin/vendas/:id/status     → Consultar status da venda
  *   - GET    /admin/vendas/:id            → Detalhes da venda (com bilhetes)
@@ -52,7 +52,8 @@ export class VendasController {
   @Post()
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({
-    summary: 'Criar venda + iniciar pagamento (ADMIN, DISTRIBUIDOR, VENDEDOR)',
+    summary:
+      'Criar venda (ADMIN manual sem gateway; DISTRIBUIDOR/VENDEDOR com pagamento)',
   })
   create(@Body() dto: CreateVendaDto, @CurrentUser() user: RequestUser) {
     if (user.perfil === 'VENDEDOR' && user.vendedorId) {
@@ -60,7 +61,7 @@ export class VendasController {
     } else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
       dto.distribuidorId = user.distribuidorId;
     }
-    return this.vendasService.create(dto);
+    return this.vendasService.create(dto, user);
   }
 
   @Get('edicoes/:edicaoId/combos')
@@ -93,7 +94,11 @@ export class VendasController {
     required: false,
     enum: ['PENDENTE', 'APROVADO', 'RECUSADO', 'CANCELADO'],
   })
-  @ApiQuery({ name: 'tipoPagamento', required: false, enum: ['PIX', 'CARTAO'] })
+  @ApiQuery({
+    name: 'tipoPagamento',
+    required: false,
+    enum: ['PIX', 'CARTAO', 'MANUAL'],
+  })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })

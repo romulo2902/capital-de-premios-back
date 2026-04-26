@@ -15,6 +15,7 @@ import {
   StatusEdicao,
   StatusVenda,
   TipoCartela,
+  TipoPagamento,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -31,6 +32,7 @@ import {
   VENDA_INCLUDE_DETALHES,
   PIX_EXPIRACAO_SEGUNDOS,
 } from './vendas.constants';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 import {
   expandirSetoresDosDetalhes,
   obterQuantidadeChances,
@@ -82,7 +84,7 @@ export class VendasService {
 
   // ─── CREATE ────────────────────────────────────────────
 
-  async create(dto: CreateVendaDto) {
+  async create(dto: CreateVendaDto, user?: RequestUser) {
     // 1. Validar edição
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: dto.edicaoId },
@@ -167,6 +169,8 @@ export class VendasService {
       }
     }
 
+    const tipoPagamentoResolvido = this.resolverTipoPagamento(dto, user);
+
     // 4. Calcular total
     const valorCartela = Number(
       configuracaoVenda.precoCombo ?? edicao.valorCartela,
@@ -185,7 +189,7 @@ export class VendasService {
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao,
-        tipoPagamento: dto.tipoPagamento,
+        tipoPagamento: tipoPagamentoResolvido,
         ...(dto.combosSelecionados && dto.combosSelecionados.length > 0
           ? { gatewayPayload: { combosSelecionados: dto.combosSelecionados } as unknown as Prisma.InputJsonValue }
           : {}),
@@ -194,8 +198,16 @@ export class VendasService {
     });
 
     this.logger.log(
-      `Venda ${venda.id} criada — ${dto.quantidade}x cartela — R$ ${total.toFixed(2)} — ${dto.tipoPagamento}`,
+      `Venda ${venda.id} criada — ${dto.quantidade}x cartela — R$ ${total.toFixed(2)} — ${tipoPagamentoResolvido}`,
     );
+
+    if (tipoPagamentoResolvido === TipoPagamento.MANUAL) {
+      return this.confirmarPagamento(venda.id, {
+        origem: 'ADMIN',
+        tipoPagamento: TipoPagamento.MANUAL,
+        confirmadoEm: new Date().toISOString(),
+      });
+    }
 
     // 6. Criar cobrança no gateway de pagamento
     let dadosPagamento: {
@@ -205,7 +217,9 @@ export class VendasService {
     } = {};
 
     try {
-      const gateway = this.paymentGatewayFactory.getGateway(dto.tipoPagamento);
+      const gateway = this.paymentGatewayFactory.getGateway(
+        tipoPagamentoResolvido,
+      );
       const descricaoCartela = detalheVenda.tipoCartela;
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
@@ -917,6 +931,23 @@ export class VendasService {
     }
 
     return normalizedValue;
+  }
+
+  private resolverTipoPagamento(
+    dto: CreateVendaDto,
+    user?: RequestUser,
+  ): TipoPagamento {
+    if (user?.perfil === 'ADMIN') {
+      return TipoPagamento.MANUAL;
+    }
+
+    if (dto.tipoPagamento === TipoPagamento.MANUAL) {
+      throw new BadRequestException(
+        'tipoPagamento MANUAL é permitido apenas para venda direta do ADMIN',
+      );
+    }
+
+    return dto.tipoPagamento;
   }
 
   private normalizarTextoOpcional(value: string): string | null {

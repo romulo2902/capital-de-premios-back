@@ -55,6 +55,12 @@ describe('PaymentGateway', () => {
       const gateway = factory.getGateway(TipoPagamento.CARTAO);
       expect(gateway).toBe(cartaoCreditGateway);
     });
+
+    it('should throw for TipoPagamento.MANUAL', () => {
+      expect(() => factory.getGateway(TipoPagamento.MANUAL)).toThrow(
+        'TipoPagamento.MANUAL não utiliza gateway de pagamento',
+      );
+    });
   });
 
   // ─── CartaoCreditGateway (stub) ───────────────────────

@@ -40,6 +40,7 @@ enum StatusVenda {
 enum TipoPagamento {
   PIX
   CARTAO
+  MANUAL
 }
 
 enum StatusSaque {

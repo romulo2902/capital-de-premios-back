@@ -526,6 +526,7 @@ export class LojaPublicaService {
     const labels: Record<TipoPagamento, string> = {
       [TipoPagamento.PIX]: 'PIX',
       [TipoPagamento.CARTAO]: 'Cartão',
+      [TipoPagamento.MANUAL]: 'Manual',
     };
 
     return labels[tipoPagamento];

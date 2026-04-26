@@ -21,6 +21,10 @@ export class PaymentGatewayFactory {
         return this.interPixGateway;
       case TipoPagamento.CARTAO:
         return this.cartaoCreditGateway;
+      case TipoPagamento.MANUAL:
+        throw new Error(
+          'TipoPagamento.MANUAL não utiliza gateway de pagamento',
+        );
       default: {
         const _exhaustive: never = tipo;
         throw new Error(`Tipo de pagamento desconhecido: ${String(_exhaustive)}`);

@@ -59,8 +59,9 @@ export class CreateVendaDto {
 
   @ApiProperty({
     enum: TipoPagamento,
-    example: TipoPagamento.PIX,
-    description: 'Método de pagamento: PIX ou CARTAO.',
+    example: TipoPagamento.MANUAL,
+    description:
+      'Método de pagamento: ADMIN usa MANUAL; demais perfis usam PIX ou CARTAO.',
   })
   @IsEnum(TipoPagamento)
   tipoPagamento: TipoPagamento;
