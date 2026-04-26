@@ -64,6 +64,15 @@ export class EdicoesController {
     return this.edicoesService.findAll(pagination.page, pagination.limit);
   }
 
+  @Get('ultima')
+  @ApiOperation({
+    summary:
+      'Retornar a última edição cadastrada, independente do status (ADMIN). Útil para pré-preencher o formulário de nova edição.',
+  })
+  findUltima() {
+    return this.edicoesService.findUltima();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Buscar edição por ID (ADMIN)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {

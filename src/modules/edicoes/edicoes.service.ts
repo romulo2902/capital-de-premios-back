@@ -442,6 +442,24 @@ export class EdicoesService {
     };
   }
 
+  async findUltima() {
+    this.logger.log('Buscando última edição cadastrada');
+
+    const item = await this.prisma.edicao.findFirst({
+      orderBy: { numero: 'desc' },
+      include: EDICAO_INCLUDE,
+    });
+
+    if (!item) {
+      throw new NotFoundException('Nenhuma edição encontrada');
+    }
+
+    return {
+      message: 'Última edição encontrada com sucesso',
+      data: await this.serializarEdicaoComEstoque(item),
+    };
+  }
+
   private async obterEdicaoOuFalhar(id: string): Promise<EdicaoComRelacoes> {
     const item = await this.prisma.edicao.findUnique({
       where: { id },
