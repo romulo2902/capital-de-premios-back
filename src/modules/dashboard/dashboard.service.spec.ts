@@ -80,6 +80,25 @@ describe('DashboardService', () => {
       expect(res.resumo.totalAcumuladoRS).toBe(350);
     });
 
+    it('Admin timeline should ignore dataInicio/dataFim and filter only by edicaoIds', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue(mockVendas);
+
+      await service.getAdminAnaliseTimeline({
+        edicaoIds: ['edicao-123'],
+        dataInicio: '2026-01-01',
+        dataFim: '2026-12-31',
+      });
+
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            status: 'APROVADO',
+            edicaoId: { in: ['edicao-123'] },
+          },
+        }),
+      );
+    });
+
     it('Distribuidor timeline filters by distribuidorId', async () => {
       mockPrisma.venda.findMany.mockResolvedValue(mockVendas);
       const user = { distribuidorId: 'dist-1' } as RequestUser;

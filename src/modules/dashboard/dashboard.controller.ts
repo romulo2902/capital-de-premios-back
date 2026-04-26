@@ -36,8 +36,6 @@ export class DashboardController {
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Análise de vendas combinadas e timeline diária (ADMIN)' })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
-  @ApiQuery({ name: 'dataInicio', required: false, type: String })
-  @ApiQuery({ name: 'dataFim', required: false, type: String })
   getAdminAnaliseTimeline(@Query() filtros: DashboardFilterDto) {
     return this.dashboardService.getAdminAnaliseTimeline(filtros);
   }

@@ -48,7 +48,7 @@ export class DashboardService {
 
   async getAdminAnaliseTimeline(filtros: DashboardFilterDto) {
     this.logger.log('Buscando análise/timeline (ADMIN)');
-    const vendaWhere = this.buildTimelineWhere(filtros);
+    const vendaWhere = this.buildTimelineWhereSemPeriodo(filtros);
 
     const vendas = await this.prisma.venda.findMany({
       where: vendaWhere,
@@ -198,6 +198,21 @@ export class DashboardService {
         const dataFim = new Date(filtros.dataFim);
         dataFim.setHours(23, 59, 59, 999);
         where.createdAt.lte = dataFim;
+      }
+    }
+
+    return where;
+  }
+
+  private buildTimelineWhereSemPeriodo(
+    filtros: DashboardFilterDto,
+  ): Prisma.VendaWhereInput {
+    const where: Prisma.VendaWhereInput = { status: StatusVenda.APROVADO };
+
+    if (filtros.edicaoIds) {
+      const ids = filtros.edicaoIds;
+      if (ids.length > 0) {
+        where.edicaoId = { in: ids };
       }
     }
 
