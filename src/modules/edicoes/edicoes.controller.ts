@@ -45,6 +45,8 @@ export class EdicoesController {
   @Post()
   @ApiOperation({
     summary: 'Criar edição com matriz, combos e prêmios detalhados (ADMIN)',
+    description:
+      'Cria uma nova edição em RASCUNHO. Para os campos de data no Swagger, use o formato `YYYY-MM-DDTHH:mm`, por exemplo `2026-04-28T15:30`.',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: CreateEdicaoUploadDto })
@@ -82,6 +84,8 @@ export class EdicoesController {
   @Patch(':id')
   @ApiOperation({
     summary: 'Atualizar edição, combos e prêmios detalhados (ADMIN)',
+    description:
+      'Atualiza a edição e seus relacionamentos. Para os campos de data no Swagger, use o formato `YYYY-MM-DDTHH:mm`, por exemplo `2026-04-28T15:30`.',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: UpdateEdicaoUploadDto })
@@ -95,13 +99,21 @@ export class EdicoesController {
   }
 
   @Patch(':id/ativar')
-  @ApiOperation({ summary: 'Ativar edição (ADMIN)' })
+  @ApiOperation({
+    summary: 'Ativar edição (ADMIN)',
+    description:
+      'Move a edição para ATIVA, liberando a operação normal de vendas. Para testar sorteio, o fluxo esperado é: criar/ajustar a edição, ativar e aguardar o autoencerramento quando `dataEncerramento` for atingida.',
+  })
   ativar(@Param('id', ParseUUIDPipe) id: string) {
     return this.edicoesService.ativar(id);
   }
 
   @Patch(':id/desativar')
-  @ApiOperation({ summary: 'Desativar edição (ADMIN)' })
+  @ApiOperation({
+    summary: 'Desativar edição (ADMIN)',
+    description:
+      'Retorna a edição para RASCUNHO, desde que ela ainda não tenha sido encerrada ou sorteada.',
+  })
   desativar(@Param('id', ParseUUIDPipe) id: string) {
     return this.edicoesService.desativar(id);
   }

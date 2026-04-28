@@ -49,6 +49,8 @@ export class SorteioController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Obter estado atual do sorteio em tempo real (ADMIN)',
+    description:
+      'Consulta o estado atual da apuração da edição, incluindo status, prêmios e números já marcados.',
   })
   @ApiParam({ name: 'edicaoId', description: 'ID da edição (UUID)' })
   obterEstado(@Param('edicaoId') edicaoId: string) {
@@ -57,7 +59,11 @@ export class SorteioController {
 
   @Post(':edicaoId/iniciar')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Iniciar apuração do sorteio (ADMIN apenas)' })
+  @ApiOperation({
+    summary: 'Iniciar apuração do sorteio (ADMIN apenas)',
+    description:
+      'Inicia o sorteio da edição. A edição precisa estar com status ENCERRADA. Ao iniciar, o status muda para SORTEANDO e a estrutura de resultado dos prêmios é preparada.',
+  })
   @ApiParam({ name: 'edicaoId', description: 'ID da edição (UUID)' })
   iniciarSorteio(@Param('edicaoId') edicaoId: string) {
     return this.sorteioService.iniciarSorteio(edicaoId);
@@ -67,6 +73,8 @@ export class SorteioController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Marcar número sorteado em um prêmio (ADMIN apenas)',
+    description:
+      'Marca um número no prêmio informado. A edição precisa já estar em SORTEANDO.',
   })
   @ApiParam({ name: 'edicaoId', description: 'ID da edição (UUID)' })
   @ApiParam({ name: 'premioId', description: 'ID do prêmio (UUID)' })
@@ -80,7 +88,11 @@ export class SorteioController {
 
   @Post(':edicaoId/premio/:premioId/desmarcar')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Desmarcar número de um prêmio (ADMIN apenas)' })
+  @ApiOperation({
+    summary: 'Desmarcar número de um prêmio (ADMIN apenas)',
+    description:
+      'Remove um número previamente marcado no prêmio informado. A edição precisa estar em SORTEANDO.',
+  })
   @ApiParam({ name: 'edicaoId', description: 'ID da edição (UUID)' })
   @ApiParam({ name: 'premioId', description: 'ID do prêmio (UUID)' })
   desmarcarNumero(
@@ -93,7 +105,11 @@ export class SorteioController {
 
   @Post(':edicaoId/finalizar')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Finalizar sorteio da edição (ADMIN apenas)' })
+  @ApiOperation({
+    summary: 'Finalizar sorteio da edição (ADMIN apenas)',
+    description:
+      'Finaliza a apuração do sorteio e altera o status da edição para FINALIZADA.',
+  })
   @ApiParam({ name: 'edicaoId', description: 'ID da edição (UUID)' })
   finalizarSorteio(@Param('edicaoId') edicaoId: string) {
     return this.sorteioService.finalizarSorteio(edicaoId);

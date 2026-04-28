@@ -57,6 +57,15 @@ export function setupOpenApiDocs(
       '- Refresh token: `POST /api/auth/refresh`',
       '- Redefinir senha migrada: `POST /api/auth/redefinir-senha-primeiro-acesso`',
       '- Demais endpoints administrativos em `/api/admin/*`',
+      '',
+      '**Fluxo de teste do sorteio**',
+      '',
+      '- Criar ou ajustar a edição em `POST /api/admin/edicoes` ou `PATCH /api/admin/edicoes/{id}`',
+      '- Usar datas no formato `YYYY-MM-DDTHH:mm`, por exemplo `2026-04-28T15:30`',
+      '- Ativar a edição em `PATCH /api/admin/edicoes/{id}/ativar`',
+      '- A edição precisa chegar em `ENCERRADA` para permitir `POST /api/admin/sorteio/{edicaoId}/iniciar`',
+      '- Após iniciar, usar `POST /api/admin/sorteio/{edicaoId}/premio/{premioId}/marcar` para marcar números',
+      '- Finalizar em `POST /api/admin/sorteio/{edicaoId}/finalizar`',
     ].join('\n'),
   );
   const generalDocument = buildAudienceDocument(
