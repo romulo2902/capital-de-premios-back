@@ -574,11 +574,15 @@ export class SorteioService {
     edicaoNumero: string,
     totalPremios: number,
   ): Promise<void> {
-    await this.firebase.setDocument(SORTEIO_COLLECTION, edicaoId, {
-      estado,
-      edicaoNumero,
-      totalPremios,
-    });
+    await this.safeFirestoreSync(
+      `status da edição ${edicaoId}`,
+      async () =>
+        this.firebase.setDocument(SORTEIO_COLLECTION, edicaoId, {
+          estado,
+          edicaoNumero,
+          totalPremios,
+        }),
+    );
   }
 
   private async syncPremioFirestore(
@@ -593,6 +597,24 @@ export class SorteioService {
     },
   ): Promise<void> {
     const collectionPath = `${SORTEIO_COLLECTION}/${edicaoId}/${PREMIOS_SUBCOLLECTION}`;
-    await this.firebase.setDocument(collectionPath, premioId, data);
+    await this.safeFirestoreSync(
+      `prêmio ${premioId} da edição ${edicaoId}`,
+      async () => this.firebase.setDocument(collectionPath, premioId, data),
+    );
+  }
+
+  private async safeFirestoreSync(
+    target: string,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await action();
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao sincronizar ${target} no Firestore. A operação principal foi concluída no banco de dados. Motivo: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }
