@@ -630,6 +630,15 @@ describe('VendasService', () => {
           update: jest.fn().mockResolvedValue({
             ...vendaPendente,
             status: StatusVenda.APROVADO,
+            bilhetes: [
+              {
+                id: 'bilhete-1',
+                numero: BigInt(1000000),
+                sequenciaBolas: [1, 2, 3],
+                ganhador: false,
+                premioId: null,
+              },
+            ],
           }),
         },
       };
@@ -642,6 +651,11 @@ describe('VendasService', () => {
       const result = await service.confirmarPagamento('venda-1');
 
       expect(result.message).toBe('Pagamento confirmado com sucesso');
+      expect(result.data.bilhetes).toEqual([
+        expect.objectContaining({
+          numero: '1000000',
+        }),
+      ]);
       expect(txMock.bilhete.createMany).toHaveBeenCalled();
       expect(txMock.comissao.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -733,6 +747,15 @@ describe('VendasService', () => {
           update: jest.fn().mockResolvedValue({
             ...vendaPendente,
             status: StatusVenda.APROVADO,
+            bilhetes: [
+              {
+                id: 'bilhete-1',
+                numero: BigInt(1000000),
+                sequenciaBolas: [1, 2, 3],
+                ganhador: false,
+                premioId: null,
+              },
+            ],
           }),
         },
       };

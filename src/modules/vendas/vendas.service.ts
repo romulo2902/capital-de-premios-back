@@ -470,7 +470,7 @@ export class VendasService {
     ]);
 
     return buildPaginatedResponse(
-      data,
+      data.map((venda) => this.serializarVendaParaResposta(venda)),
       total,
       pagination.page,
       pagination.limit,
@@ -488,7 +488,7 @@ export class VendasService {
 
     return {
       message: 'Venda encontrada com sucesso',
-      data: venda,
+      data: this.serializarVendaParaResposta(venda),
     };
   }
 
@@ -497,7 +497,7 @@ export class VendasService {
 
     return {
       message: 'Status da venda consultado com sucesso',
-      data: venda,
+      data: this.serializarVendaParaResposta(venda),
     };
   }
 
@@ -533,7 +533,7 @@ export class VendasService {
 
     return {
       message: 'Venda atualizada com sucesso',
-      data: vendaAtualizada,
+      data: this.serializarVendaParaResposta(vendaAtualizada),
     };
   }
 
@@ -566,7 +566,7 @@ export class VendasService {
     ]);
 
     return buildPaginatedResponse(
-      data,
+      data.map((venda) => this.serializarVendaParaResposta(venda)),
       total,
       pagination.page,
       pagination.limit,
@@ -707,7 +707,7 @@ export class VendasService {
 
     return {
       message: 'Pagamento confirmado com sucesso',
-      data: resultado.vendaAtualizada,
+      data: this.serializarVendaParaResposta(resultado.vendaAtualizada),
     };
   }
 
@@ -788,7 +788,7 @@ export class VendasService {
 
     return {
       message: 'Venda cancelada com sucesso',
-      data: vendaAtualizada,
+      data: this.serializarVendaParaResposta(vendaAtualizada),
     };
   }
 
@@ -827,7 +827,7 @@ export class VendasService {
 
     return {
       message: 'Status da venda atualizado com sucesso',
-      data: vendaAtualizada,
+      data: this.serializarVendaParaResposta(vendaAtualizada),
     };
   }
 
@@ -921,6 +921,39 @@ export class VendasService {
     }
 
     return data;
+  }
+
+  private serializarVendaParaResposta<T>(venda: T): T {
+    if (!venda || typeof venda !== 'object') {
+      return venda;
+    }
+
+    return this.serializarBigIntRecursivo(venda) as T;
+  }
+
+  private serializarBigIntRecursivo(value: unknown): unknown {
+    if (typeof value === 'bigint') {
+      return this.formatarNumeroBilhete(value);
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.serializarBigIntRecursivo(item));
+    }
+
+    if (value instanceof Date || value === null || value === undefined) {
+      return value;
+    }
+
+    if (typeof value !== 'object') {
+      return value;
+    }
+
+    const serializedEntries = Object.entries(value).map(([key, entryValue]) => [
+      key,
+      this.serializarBigIntRecursivo(entryValue),
+    ]);
+
+    return Object.fromEntries(serializedEntries);
   }
 
   private normalizarTextoObrigatorio(value: string, fieldName: string): string {
