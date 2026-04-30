@@ -1,4 +1,5 @@
 import { formatDateTimeForInput } from '../../common/utils/business-date-time.util';
+import { serializarEstadoManutencao } from './edicao-manutencao.util';
 import {
   calcularTotalBilhetesDosDetalhes,
   expandirSetoresDosDetalhes,
@@ -66,6 +67,7 @@ export function serializarEdicao(
     rangeInicio: edicao.rangeInicio.toString(),
     rangeFinal: edicao.rangeFinal.toString(),
     valorCartela: edicao.valorCartela.toString(),
+    ...serializarEstadoManutencao(edicao),
     qtdNumerosCartela: edicao.qtdNumerosCartela,
     dataSorteioLocal: formatDateTimeForInput(
       edicao.dataSorteio,

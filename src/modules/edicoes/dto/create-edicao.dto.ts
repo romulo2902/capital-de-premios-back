@@ -112,6 +112,25 @@ export class CreateEdicaoDto {
   @IsString()
   frase?: string;
 
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Quando ativo, bloqueia todas as vendas da edição em qualquer canal até ser desativado pelo ADMIN.',
+  })
+  @IsOptional()
+  @Transform(parseBooleanInput)
+  @IsBoolean()
+  manutencaoAtiva?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'Vendas temporariamente indisponíveis para manutenção.',
+    description:
+      'Mensagem exibida ao frontend e retornada nos endpoints de venda bloqueados pela manutenção da edição.',
+  })
+  @IsOptional()
+  @IsString()
+  manutencaoMensagem?: string;
+
   @ApiProperty({
     type: 'object',
     additionalProperties: {

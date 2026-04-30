@@ -108,6 +108,10 @@ export class EdicoesService {
           raspadinha: dto.raspadinha,
           frase: dto.frase,
           imagemUrl: imagemUrl ?? null,
+          manutencaoAtiva: dto.manutencaoAtiva ?? false,
+          manutencaoMensagem: this.normalizarMensagemManutencao(
+            dto.manutencaoMensagem,
+          ),
           status,
           detalhes: {
             create: detalhes.map((detalhe) => ({
@@ -259,6 +263,16 @@ export class EdicoesService {
         ...(dto.destino ? { destino: dto.destino } : {}),
         ...(dto.raspadinha !== undefined ? { raspadinha: dto.raspadinha } : {}),
         ...(dto.frase !== undefined ? { frase: dto.frase } : {}),
+        ...(dto.manutencaoAtiva !== undefined
+          ? { manutencaoAtiva: dto.manutencaoAtiva }
+          : {}),
+        ...(dto.manutencaoMensagem !== undefined
+          ? {
+              manutencaoMensagem: this.normalizarMensagemManutencao(
+                dto.manutencaoMensagem,
+              ),
+            }
+          : {}),
         ...(imagemUrl !== undefined ? { imagemUrl } : {}),
         ...(resumoRanges ? resumoRanges : {}),
       };
@@ -321,6 +335,15 @@ export class EdicoesService {
     }
 
     return this.s3UploadService.uploadImage(imagem, folder);
+  }
+
+  private normalizarMensagemManutencao(message?: string): string | null {
+    if (message === undefined) {
+      return null;
+    }
+
+    const normalizedMessage = message.trim();
+    return normalizedMessage ? normalizedMessage : null;
   }
 
   async ativar(id: string) {

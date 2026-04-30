@@ -219,6 +219,8 @@ model Edicao {
   frase            String?
   especie          String?
   imagemUrl        String?
+  manutencaoAtiva  Boolean       @default(false)
+  manutencaoMensagem String?
   status           StatusEdicao @default(RASCUNHO)
   createdAt        DateTime     @default(now())
   premios          Premio[]

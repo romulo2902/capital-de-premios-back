@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
 
 type ErrorMessage = string | string[];
+type ErrorData = unknown;
 
 const UNIQUE_FIELD_MESSAGES: Record<string, string> = {
   cpf: 'CPF já cadastrado',
@@ -37,7 +38,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    const { status, message } = this.normalizeException(exception, request);
+    const { status, message, data } = this.normalizeException(exception, request);
     const stack = this.shouldLogStack(exception, status)
       ? exception.stack
       : undefined;
@@ -50,18 +51,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       message,
-      data: null,
+      data: data ?? null,
     });
   }
 
   private normalizeException(
     exception: unknown,
     request: Request,
-  ): { status: number; message: ErrorMessage } {
+  ): { status: number; message: ErrorMessage; data?: ErrorData } {
     if (exception instanceof HttpException) {
       return {
         status: exception.getStatus(),
         message: this.extractHttpExceptionMessage(exception),
+        data: this.extractHttpExceptionData(exception),
       };
     }
 
@@ -115,6 +117,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     return exception.message || 'Erro interno do servidor';
+  }
+
+  private extractHttpExceptionData(exception: HttpException): ErrorData {
+    const response = exception.getResponse();
+
+    if (!response || typeof response !== 'object') {
+      return undefined;
+    }
+
+    return (response as Record<string, unknown>).data;
   }
 
   private mapPrismaKnownRequestError(

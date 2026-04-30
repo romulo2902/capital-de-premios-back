@@ -292,6 +292,19 @@ describe('VendasService', () => {
       );
     });
 
+    it('should block direct sales when the edition is under maintenance', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        ...edicaoAtiva,
+        manutencaoAtiva: true,
+        manutencaoMensagem: 'Vendas pausadas para manutenção',
+      });
+
+      await expect(service.create(createDto)).rejects.toThrow(
+        'Vendas pausadas para manutenção',
+      );
+      expect(mockPrisma.venda.create).not.toHaveBeenCalled();
+    });
+
     it('should auto-create cliente if CPF not found', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue(edicaoAtiva);
       mockPrisma.cliente.findUnique.mockResolvedValue(null); // CPF não existe
@@ -492,6 +505,27 @@ describe('VendasService', () => {
   });
 
   describe('listarCombosDisponiveis', () => {
+    it('should block combo navigation when the edition is under maintenance', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-1',
+        numero: 10,
+        status: StatusEdicao.ATIVA,
+        manutencaoAtiva: true,
+        manutencaoMensagem: 'Catálogo temporariamente indisponível',
+        rangeInicio: BigInt(1000000),
+        rangeFinal: BigInt(1199999),
+        detalhes: [],
+        combos: [],
+      });
+
+      await expect(
+        service.listarCombosDisponiveis({
+          edicaoId: 'edicao-1',
+          quantidadeCartelas: 1,
+        }),
+      ).rejects.toThrow('Catálogo temporariamente indisponível');
+    });
+
     it('should return grouped deterministic combos for the requested tipoCartela', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue({
         id: 'edicao-1',

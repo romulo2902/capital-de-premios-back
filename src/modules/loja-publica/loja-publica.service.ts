@@ -25,6 +25,10 @@ import {
   obterQuantidadeChances,
   obterTipoCartelaPorQuantidadeChances,
 } from '../edicoes/edicoes-range.util';
+import {
+  criarExcecaoEdicaoEmManutencao,
+  serializarEstadoManutencao,
+} from '../edicoes/edicao-manutencao.util';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { ListarCombosLojaDto } from './dto/listar-combos-loja.dto';
 import { CreateFaleConoscoDto } from './dto/create-fale-conosco.dto';
@@ -88,6 +92,7 @@ export class LojaPublicaService {
           status: edicaoAtiva.status,
           valorCartela: edicaoAtiva.valorCartela.toString(),
           qtdNumerosCartela: edicaoAtiva.qtdNumerosCartela,
+          ...serializarEstadoManutencao(edicaoAtiva),
         },
         premios: edicaoAtiva.premios.map((p) => ({
           ordem: p.ordem,
@@ -150,6 +155,7 @@ export class LojaPublicaService {
     if (!edicao) throw new NotFoundException('Edição não encontrada');
     if (edicao.status !== StatusEdicao.ATIVA)
       throw new BadRequestException('Edição não está ativa');
+    this.validarEdicaoForaDeManutencao(edicao);
     this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
     const detalheSelecionado = edicao.detalhes[0];
@@ -530,6 +536,19 @@ export class LojaPublicaService {
     };
 
     return labels[tipoPagamento];
+  }
+
+  private validarEdicaoForaDeManutencao(edicao: {
+    id: string;
+    numero: string;
+    manutencaoAtiva: boolean;
+    manutencaoMensagem: string | null;
+  }): void {
+    if (!edicao.manutencaoAtiva) {
+      return;
+    }
+
+    throw criarExcecaoEdicaoEmManutencao(edicao);
   }
 
   private mascararCPF(cpf: string): string {

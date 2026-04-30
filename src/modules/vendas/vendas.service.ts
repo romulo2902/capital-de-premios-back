@@ -38,6 +38,7 @@ import {
   obterQuantidadeChances,
   obterTipoCartelaPorQuantidadeChances,
 } from '../edicoes/edicoes-range.util';
+import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
 
 type DetalheVenda = Pick<
   EdicaoDetalhe,
@@ -103,6 +104,8 @@ export class VendasService {
         `A edição ${edicao.numero} não está ativa (status: ${edicao.status})`,
       );
     }
+
+    this.validarEdicaoForaDeManutencao(edicao);
 
     this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
@@ -293,6 +296,8 @@ export class VendasService {
         id: true,
         numero: true,
         status: true,
+        manutencaoAtiva: true,
+        manutencaoMensagem: true,
         dataEncerramento: true,
         rangeInicio: true,
         rangeFinal: true,
@@ -325,6 +330,8 @@ export class VendasService {
     if (edicao.status !== StatusEdicao.ATIVA) {
       throw new BadRequestException('Edição não está ativa para navegação');
     }
+
+    this.validarEdicaoForaDeManutencao(edicao);
 
     this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
@@ -964,6 +971,19 @@ export class VendasService {
     }
 
     return normalizedValue;
+  }
+
+  private validarEdicaoForaDeManutencao(edicao: {
+    id: string;
+    numero: string;
+    manutencaoAtiva: boolean;
+    manutencaoMensagem: string | null;
+  }): void {
+    if (!edicao.manutencaoAtiva) {
+      return;
+    }
+
+    throw criarExcecaoEdicaoEmManutencao(edicao);
   }
 
   private resolverTipoPagamento(
