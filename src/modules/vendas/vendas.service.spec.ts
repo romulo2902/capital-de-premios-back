@@ -362,6 +362,71 @@ describe('VendasService', () => {
       );
     });
 
+    it('should default tipoPagamento to MANUAL for direct ADMIN sales', async () => {
+      const confirmarPagamentoSpy = jest
+        .spyOn(service, 'confirmarPagamento')
+        .mockResolvedValue({
+          message: 'Pagamento confirmado com sucesso',
+          data: { id: 'venda-1', status: StatusVenda.APROVADO },
+        });
+
+      mockPrisma.edicao.findUnique.mockResolvedValue(edicaoAtiva);
+      mockPrisma.cliente.findUnique.mockResolvedValue(clienteMock);
+      mockPrisma.venda.create.mockResolvedValue({
+        ...vendaCriada,
+        tipoPagamento: TipoPagamento.MANUAL,
+      });
+
+      const result = await service.create(
+        {
+          edicaoId: 'edicao-1',
+          quantidade: 1,
+          cpf: '12345678900',
+          nome: 'Romulo Valadares',
+          telefone: '(00) 99999-9999',
+        },
+        {
+          id: 'admin-1',
+          email: 'admin@capitalpremios.com',
+          cpf: null,
+          perfil: 'ADMIN',
+          status: 'ATIVO',
+        },
+      );
+
+      expect(result.message).toBe('Pagamento confirmado com sucesso');
+      expect(mockPrisma.venda.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tipoPagamento: TipoPagamento.MANUAL,
+          }),
+        }),
+      );
+      expect(confirmarPagamentoSpy).toHaveBeenCalledWith(
+        'venda-1',
+        expect.objectContaining({
+          tipoPagamento: TipoPagamento.MANUAL,
+        }),
+      );
+    });
+
+    it('should require tipoPagamento for non-admin sales', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue(edicaoAtiva);
+      mockPrisma.cliente.findUnique.mockResolvedValue(clienteMock);
+
+      await expect(
+        service.create({
+          edicaoId: 'edicao-1',
+          quantidade: 1,
+          cpf: '12345678900',
+          nome: 'Romulo Valadares',
+          telefone: '(00) 99999-9999',
+        }),
+      ).rejects.toThrow(
+        'tipoPagamento é obrigatório para vendas que não são diretas do ADMIN',
+      );
+    });
+
     it('should use detalhe price and persist tipoCartela when informed', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue({
         ...edicaoAtiva,

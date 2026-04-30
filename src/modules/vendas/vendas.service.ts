@@ -974,6 +974,12 @@ export class VendasService {
       return TipoPagamento.MANUAL;
     }
 
+    if (!dto.tipoPagamento) {
+      throw new BadRequestException(
+        'tipoPagamento é obrigatório para vendas que não são diretas do ADMIN',
+      );
+    }
+
     if (dto.tipoPagamento === TipoPagamento.MANUAL) {
       throw new BadRequestException(
         'tipoPagamento MANUAL é permitido apenas para venda direta do ADMIN',

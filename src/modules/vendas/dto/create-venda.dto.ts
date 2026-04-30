@@ -57,14 +57,15 @@ export class CreateVendaDto {
   @Max(12)
   quantidadeCartelas?: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     enum: TipoPagamento,
     example: TipoPagamento.MANUAL,
     description:
-      'Método de pagamento: ADMIN usa MANUAL; demais perfis usam PIX ou CARTAO.',
+      'Método de pagamento. Em venda direta do ADMIN pode ser omitido, pois a API força `MANUAL` automaticamente; demais perfis devem informar `PIX` ou `CARTAO`.',
   })
+  @IsOptional()
   @IsEnum(TipoPagamento)
-  tipoPagamento: TipoPagamento;
+  tipoPagamento?: TipoPagamento;
 
   @ApiPropertyOptional({
     enum: [OrigemParticipacao.DIGITAL, OrigemParticipacao.POS],
