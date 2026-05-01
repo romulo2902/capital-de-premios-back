@@ -943,6 +943,10 @@ export class VendasService {
       return this.formatarNumeroBilhete(value);
     }
 
+    if (value instanceof Prisma.Decimal) {
+      return value.toString();
+    }
+
     if (Array.isArray(value)) {
       return value.map((item) => this.serializarBigIntRecursivo(item));
     }

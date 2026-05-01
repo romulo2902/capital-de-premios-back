@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -12,6 +13,7 @@ import {
   buildPaginatedResponse,
   normalizePagination,
 } from '../../common/utils/pagination.util';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @Injectable()
 export class ClientesService {
@@ -59,16 +61,125 @@ export class ClientesService {
     }
   }
 
-  async create(dto: CreateClienteDto) {
+  private async resolverRelacionamentosParaCriacao(
+    vendedorIdInformado: string | null | undefined,
+    distribuidorIdInformado: string | null | undefined,
+    user: RequestUser,
+  ): Promise<{ vendedorId: string | null; distribuidorId: string | null }> {
+    const vendedorId = this.normalizeRelationId(vendedorIdInformado);
+    const distribuidorId = this.normalizeRelationId(distribuidorIdInformado);
+
+    const vendedor = vendedorId
+      ? await this.prisma.vendedor.findUnique({
+          where: { id: vendedorId },
+          select: { id: true, distribuidorId: true },
+        })
+      : null;
+
+    if (vendedorId && !vendedor) {
+      throw new NotFoundException('Vendedor não encontrado');
+    }
+
+    if (distribuidorId) {
+      const distribuidor = await this.prisma.distribuidor.findUnique({
+        where: { id: distribuidorId },
+        select: { id: true },
+      });
+      if (!distribuidor) {
+        throw new NotFoundException('Distribuidor não encontrado');
+      }
+    }
+
+    if (
+      vendedor &&
+      distribuidorId &&
+      vendedor.distribuidorId !== distribuidorId
+    ) {
+      throw new ConflictException(
+        'O vendedor informado não pertence ao distribuidor informado',
+      );
+    }
+
+    if (user.perfil === 'VENDEDOR') {
+      if (!user.vendedorId) {
+        throw new ForbiddenException(
+          'Usuário vendedor sem vínculo válido para cadastrar cliente',
+        );
+      }
+
+      const vendedorLogado = await this.prisma.vendedor.findUnique({
+        where: { id: user.vendedorId },
+        select: { id: true, distribuidorId: true },
+      });
+
+      if (!vendedorLogado) {
+        throw new NotFoundException('Vendedor não encontrado');
+      }
+
+      if (vendedor && vendedor.id !== vendedorLogado.id) {
+        throw new ForbiddenException(
+          'Vendedor só pode cadastrar cliente para si mesmo',
+        );
+      }
+
+      if (
+        distribuidorId &&
+        distribuidorId !== vendedorLogado.distribuidorId
+      ) {
+        throw new ForbiddenException(
+          'Vendedor só pode cadastrar cliente para seu distribuidor',
+        );
+      }
+
+      return {
+        vendedorId: vendedorLogado.id,
+        distribuidorId: vendedorLogado.distribuidorId,
+      };
+    }
+
+    if (user.perfil === 'DISTRIBUIDOR') {
+      if (!user.distribuidorId) {
+        throw new ForbiddenException(
+          'Usuário distribuidor sem vínculo válido para cadastrar cliente',
+        );
+      }
+
+      if (distribuidorId && distribuidorId !== user.distribuidorId) {
+        throw new ForbiddenException(
+          'Distribuidor só pode cadastrar cliente para sua própria rede',
+        );
+      }
+
+      if (vendedor && vendedor.distribuidorId !== user.distribuidorId) {
+        throw new ForbiddenException(
+          'Vendedor não pertence ao distribuidor autenticado',
+        );
+      }
+
+      return {
+        vendedorId: vendedor?.id ?? null,
+        distribuidorId: user.distribuidorId,
+      };
+    }
+
+    return {
+      vendedorId: vendedor?.id ?? null,
+      distribuidorId: distribuidorId ?? vendedor?.distribuidorId ?? null,
+    };
+  }
+
+  async create(dto: CreateClienteDto, user: RequestUser) {
     const existing = await this.prisma.cliente.findUnique({
       where: { cpf: dto.cpf },
     });
     if (existing) throw new ConflictException('CPF já cadastrado');
 
-    const vendedorId = this.normalizeRelationId(dto.vendedorId);
-    const distribuidorId = this.normalizeRelationId(dto.distribuidorId);
-
-    await this.validateRelacionamentos(vendedorId, distribuidorId);
+    const { vendedorId, distribuidorId } =
+      await this.resolverRelacionamentosParaCriacao(
+        dto.vendedorId,
+        dto.distribuidorId,
+        user,
+      );
 
     const data: Prisma.ClienteUncheckedCreateInput = {
       ...(dto.codigo ? { codigo: dto.codigo } : {}),

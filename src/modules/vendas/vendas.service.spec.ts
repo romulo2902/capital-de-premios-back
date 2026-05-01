@@ -120,6 +120,27 @@ describe('VendasService', () => {
       );
     });
 
+    it('should serialize Prisma Decimal fields in response data', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([
+        {
+          id: 'venda-1',
+          total: new Prisma.Decimal('60.00'),
+          quantidade: 1,
+          status: StatusVenda.PENDENTE,
+        },
+      ]);
+      mockPrisma.venda.count.mockResolvedValue(1);
+
+      const result = await service.findAll();
+
+      expect(result.data).toEqual([
+        expect.objectContaining({
+          id: 'venda-1',
+          total: '60.00',
+        }),
+      ]);
+    });
+
     it('should apply search filter on cliente', async () => {
       mockPrisma.venda.findMany.mockResolvedValue([]);
       mockPrisma.venda.count.mockResolvedValue(0);

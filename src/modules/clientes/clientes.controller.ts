@@ -20,10 +20,12 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ClientesService } from './clientes.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { FiltroClientesDto } from './dto/filtro-clientes.dto';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 /**
  * CRUD de Clientes — Painel Administrativo
@@ -49,8 +51,8 @@ export class ClientesController {
   @Post()
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({ summary: 'Criar cliente (ADMIN, DISTRIBUIDOR ou VENDEDOR)' })
-  create(@Body() dto: CreateClienteDto) {
-    return this.clientesService.create(dto);
+  create(@Body() dto: CreateClienteDto, @CurrentUser() user: RequestUser) {
+    return this.clientesService.create(dto, user);
   }
 
   @Get()

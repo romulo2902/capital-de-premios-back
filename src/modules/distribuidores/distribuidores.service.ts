@@ -21,11 +21,63 @@ export class DistribuidoresService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateDistribuidorDto) {
-    const existing = await this.prisma.distribuidor.findUnique({
-      where: { cpf: dto.cpf },
+  private normalizarCpf(cpf: string): string {
+    return cpf.replace(/\D/g, '');
+  }
+
+  private normalizarEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  private async validarCpfDisponivel(
+    cpf: string,
+    distribuidorId?: string,
+    usuarioId?: string,
+  ): Promise<void> {
+    const [distribuidorExistente, usuarioExistente] = await Promise.all([
+      this.prisma.distribuidor.findFirst({
+        where: {
+          cpf,
+          ...(distribuidorId ? { NOT: { id: distribuidorId } } : {}),
+        },
+      }),
+      this.prisma.usuario.findFirst({
+        where: {
+          cpf,
+          ...(usuarioId ? { NOT: { id: usuarioId } } : {}),
+        },
+      }),
+    ]);
+
+    if (distribuidorExistente || usuarioExistente) {
+      throw new ConflictException('CPF já cadastrado');
+    }
+  }
+
+  private async validarEmailDisponivel(
+    email: string,
+    usuarioId?: string,
+  ): Promise<void> {
+    const usuarioExistente = await this.prisma.usuario.findFirst({
+      where: {
+        email,
+        ...(usuarioId ? { NOT: { id: usuarioId } } : {}),
+      },
     });
-    if (existing) throw new ConflictException('CPF já cadastrado');
+
+    if (usuarioExistente) {
+      throw new ConflictException('Email já cadastrado');
+    }
+  }
+
+  async create(dto: CreateDistribuidorDto) {
+    const cpf = this.normalizarCpf(dto.cpf);
+    const email = this.normalizarEmail(dto.email);
+
+    await Promise.all([
+      this.validarCpfDisponivel(cpf),
+      this.validarEmailDisponivel(email),
+    ]);
 
     const senhaHash = dto.senha
       ? await bcrypt.hash(dto.senha, 10)
@@ -34,8 +86,8 @@ export class DistribuidoresService {
     return this.prisma.$transaction(async (tx) => {
       const usuario = await tx.usuario.create({
         data: {
-          email: dto.email,
-          cpf: dto.cpf,
+          email,
+          cpf,
           senhaHash,
           perfil: Perfil.DISTRIBUIDOR,
           deveRedefinirSenha: false,
@@ -48,9 +100,9 @@ export class DistribuidoresService {
           ...(dto.codigo ? { codigo: dto.codigo } : {}),
           usuarioId: usuario.id,
           nome: dto.nome,
-          cpf: dto.cpf,
+          cpf,
           telefone: dto.telefone,
-          email: dto.email,
+          email,
           dataNascimento: dto.dataNascimento
             ? new Date(dto.dataNascimento)
             : undefined,
@@ -135,35 +187,57 @@ export class DistribuidoresService {
   }
 
   async update(id: string, dto: UpdateDistribuidorDto) {
-    await this.findOne(id);
+    const distribuidorAtual = await this.prisma.distribuidor.findUnique({
+      where: { id },
+      select: { id: true, usuarioId: true },
+    });
+
+    if (!distribuidorAtual) {
+      throw new NotFoundException('Distribuidor não encontrado');
+    }
 
     if (dto.cpf) {
-      const conflict = await this.prisma.distribuidor.findFirst({
-        where: { cpf: dto.cpf, NOT: { id } },
-      });
-      if (conflict) throw new ConflictException('CPF já cadastrado');
+      await this.validarCpfDisponivel(
+        this.normalizarCpf(dto.cpf),
+        id,
+        distribuidorAtual.usuarioId,
+      );
+    }
+
+    if (dto.email) {
+      await this.validarEmailDisponivel(
+        this.normalizarEmail(dto.email),
+        distribuidorAtual.usuarioId,
+      );
     }
 
     const data: Record<string, unknown> = { ...dto };
     delete data.senha;
     delete data.codigo;
+    if (dto.cpf) data.cpf = this.normalizarCpf(dto.cpf);
+    if (dto.email) data.email = this.normalizarEmail(dto.email);
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
     if (dto.link !== undefined) data.qrcode = null;
 
+    const usuarioData: Prisma.UsuarioUpdateInput = {};
+    if (dto.cpf) usuarioData.cpf = this.normalizarCpf(dto.cpf);
+    if (dto.email) usuarioData.email = this.normalizarEmail(dto.email);
+
     if (dto.senha) {
-      const distribuidor = await this.prisma.distribuidor.findUnique({
-        where: { id },
-      });
-      await this.prisma.usuario.update({
-        where: { id: distribuidor!.usuarioId },
-        data: {
-          senhaHash: await bcrypt.hash(dto.senha, 10),
-          deveRedefinirSenha: false,
-        },
-      });
+      usuarioData.senhaHash = await bcrypt.hash(dto.senha, 10);
+      usuarioData.deveRedefinirSenha = false;
     }
 
-    return this.prisma.distribuidor.update({ where: { id }, data });
+    return this.prisma.$transaction(async (tx) => {
+      if (Object.keys(usuarioData).length > 0) {
+        await tx.usuario.update({
+          where: { id: distribuidorAtual.usuarioId },
+          data: usuarioData,
+        });
+      }
+
+      return tx.distribuidor.update({ where: { id }, data });
+    });
   }
 
   async remove(id: string) {

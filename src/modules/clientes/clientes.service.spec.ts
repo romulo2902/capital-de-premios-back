@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClientesService } from './clientes.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ForbiddenException } from '@nestjs/common';
 
 describe('ClientesService', () => {
   let service: ClientesService;
@@ -51,6 +52,71 @@ describe('ClientesService', () => {
       limit: 20,
       lastPage: 0,
     });
+  });
+
+  it('create should vincular cliente ao vendedor autenticado', async () => {
+    mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+    mockPrisma.vendedor.findUnique.mockResolvedValueOnce({
+      id: 'vendedor-logado',
+      distribuidorId: 'distribuidor-1',
+    });
+    mockPrisma.cliente.create.mockResolvedValue({
+      id: 'cliente-1',
+      vendedorId: 'vendedor-logado',
+      distribuidorId: 'distribuidor-1',
+    });
+
+    await service.create(
+      {
+        cpf: '200.074.694-20',
+        nome: 'Cliente Teste',
+        telefone: '(84) 99999-9999',
+      },
+      {
+        id: 'usuario-1',
+        email: 'vend@test.com',
+        cpf: '12345678900',
+        perfil: 'VENDEDOR',
+        status: 'ATIVO',
+        vendedorId: 'vendedor-logado',
+      },
+    );
+
+    expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          vendedorId: 'vendedor-logado',
+          distribuidorId: 'distribuidor-1',
+        }),
+      }),
+    );
+  });
+
+  it('create should impedir distribuidor de usar vendedor fora da propria rede', async () => {
+    mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+    mockPrisma.vendedor.findUnique.mockResolvedValueOnce({
+      id: 'vendedor-externo',
+      distribuidorId: 'distribuidor-externo',
+    });
+
+    await expect(
+      service.create(
+        {
+          cpf: '200.074.694-20',
+          nome: 'Cliente Teste',
+          telefone: '(84) 99999-9999',
+          vendedorId: 'vendedor-externo',
+        },
+        {
+          id: 'usuario-2',
+          email: 'dist@test.com',
+          cpf: '12345678900',
+          perfil: 'DISTRIBUIDOR',
+          status: 'ATIVO',
+          distribuidorId: 'distribuidor-1',
+        },
+      ),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('update should normalize empty distribuidorId to null', async () => {
