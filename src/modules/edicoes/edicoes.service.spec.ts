@@ -90,6 +90,7 @@ describe('EdicoesService', () => {
   it('findAll should return data array', async () => {
     mockPrisma.edicao.findMany.mockResolvedValue([]);
     mockPrisma.edicao.count.mockResolvedValue(0);
+    mockPrisma.edicao.findFirst.mockResolvedValue(null);
     const result = await service.findAll();
     expect(result.data).toBeDefined();
     expect(result.meta).toEqual({
@@ -98,6 +99,52 @@ describe('EdicoesService', () => {
       limit: 20,
       lastPage: 0,
     });
+  });
+
+  it('findAll should flag edicao atual, anteriores e proxima', async () => {
+    const edicoes = [
+      criarEdicaoMock({ id: 'edicao-103', numero: 103 }),
+      criarEdicaoMock({ id: 'edicao-102', numero: 102, status: StatusEdicao.ATIVA }),
+      criarEdicaoMock({ id: 'edicao-101', numero: 101 }),
+      criarEdicaoMock({ id: 'edicao-100', numero: 100 }),
+    ];
+
+    mockPrisma.edicao.findMany.mockResolvedValue(edicoes);
+    mockPrisma.edicao.count.mockResolvedValue(edicoes.length);
+    mockPrisma.edicao.findFirst
+      .mockResolvedValueOnce({ numero: 102 })
+      .mockResolvedValueOnce({ numero: 103 });
+
+    const result = await service.findAll();
+
+    expect(result.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          numero: 103,
+          isAtual: false,
+          isAnterior: false,
+          isProxima: true,
+        }),
+        expect.objectContaining({
+          numero: 102,
+          isAtual: true,
+          isAnterior: false,
+          isProxima: false,
+        }),
+        expect.objectContaining({
+          numero: 101,
+          isAtual: false,
+          isAnterior: true,
+          isProxima: false,
+        }),
+        expect.objectContaining({
+          numero: 100,
+          isAtual: false,
+          isAnterior: true,
+          isProxima: false,
+        }),
+      ]),
+    );
   });
 
   it('create should upload imagem para o s3 quando arquivo for enviado', async () => {
@@ -243,6 +290,72 @@ describe('EdicoesService', () => {
     });
     expect(result.data.imagemUrl).toBe(edicao.imagemUrl);
   });
+
+  function criarEdicaoMock(
+    overrides: Partial<{
+      id: string;
+      numero: number;
+      status: StatusEdicao;
+    }> = {},
+  ) {
+    return {
+      id: overrides.id ?? 'edicao-1',
+      numero: overrides.numero ?? 125,
+      dataSorteio: new Date('2026-03-27T13:20:00.000Z'),
+      dataEncerramento: new Date('2026-03-27T12:59:00.000Z'),
+      valorCartela: new Prisma.Decimal('10.00'),
+      qtdNumerosCartela: 15,
+      rangeInicio: BigInt(1000000),
+      rangeFinal: BigInt(1999995),
+      qtdPremios: 1,
+      destino: DestinoEdicao.SITE,
+      raspadinha: false,
+      frase: null,
+      imagemUrl: null,
+      manutencaoAtiva: false,
+      manutencaoMensagem: null,
+      status: overrides.status ?? StatusEdicao.RASCUNHO,
+      createdAt: new Date('2026-03-20T10:00:00.000Z'),
+      updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+      detalhes: [
+        {
+          id: 'detalhe-1',
+          edicaoId: overrides.id ?? 'edicao-1',
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          tipoCartela: TipoCartela.DOZE_CHANCES,
+          indiceRange: 1,
+          rangeInicio: BigInt(1000000),
+          rangeFinal: BigInt(1999995),
+          preco: null,
+          createdAt: new Date('2026-03-20T10:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        },
+      ],
+      combos: [
+        {
+          id: 'combo-1',
+          edicaoId: overrides.id ?? 'edicao-1',
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          tipoCartela: TipoCartela.UMA_CHANCE,
+          preco: new Prisma.Decimal('10.00'),
+          createdAt: new Date('2026-03-20T10:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        },
+      ],
+      premios: [
+        {
+          id: 'premio-1',
+          edicaoId: overrides.id ?? 'edicao-1',
+          ordem: 1,
+          descricao: '1º Prêmio',
+          valor: new Prisma.Decimal('0'),
+          ganhadorBilheteId: null,
+          createdAt: new Date('2026-03-20T10:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        },
+      ],
+    };
+  }
 
   it('create should reject detalhes whose derived sectors overlap', async () => {
     mockPrisma.edicao.findFirst.mockResolvedValue(null);

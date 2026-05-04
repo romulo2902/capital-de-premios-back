@@ -158,7 +158,7 @@ export class EdicoesService {
   async findAll(page = 1, limit = 20) {
     this.logger.log('Listando edições');
     const pagination = normalizePagination(page, limit);
-    const [data, total] = await Promise.all([
+    const [data, total, contextoTimeline] = await Promise.all([
       this.prisma.edicao.findMany({
         orderBy: { numero: 'desc' },
         skip: pagination.skip,
@@ -166,10 +166,22 @@ export class EdicoesService {
         include: EDICAO_INCLUDE,
       }),
       this.prisma.edicao.count(),
+      this.obterContextoTimelineEdicoes(),
     ]);
 
     const serialized = await Promise.all(
-      data.map((item) => this.serializarEdicaoComEstoque(item)),
+      data.map(async (item) => {
+        const edicaoSerializada = await this.serializarEdicaoComEstoque(item);
+
+        return {
+          ...edicaoSerializada,
+          isAtual: contextoTimeline.numeroAtual === item.numero,
+          isAnterior:
+            contextoTimeline.numeroAtual !== null &&
+            item.numero < contextoTimeline.numeroAtual,
+          isProxima: contextoTimeline.numeroProxima === item.numero,
+        };
+      }),
     );
 
     return buildPaginatedResponse(
@@ -518,6 +530,43 @@ export class EdicoesService {
         `A edição ${conflito.numero} já está em operação com status ${conflito.status}`,
       );
     }
+  }
+
+  private async obterContextoTimelineEdicoes(): Promise<{
+    numeroAtual: number | null;
+    numeroProxima: number | null;
+  }> {
+    const edicaoAtual = await this.prisma.edicao.findFirst({
+      where: {
+        status: { in: STATUSS_EDICAO_EM_OPERACAO },
+      },
+      orderBy: { numero: 'desc' },
+      select: {
+        numero: true,
+      },
+    });
+
+    if (!edicaoAtual) {
+      return {
+        numeroAtual: null,
+        numeroProxima: null,
+      };
+    }
+
+    const proximaEdicao = await this.prisma.edicao.findFirst({
+      where: {
+        numero: { gt: edicaoAtual.numero },
+      },
+      orderBy: { numero: 'asc' },
+      select: {
+        numero: true,
+      },
+    });
+
+    return {
+      numeroAtual: edicaoAtual.numero,
+      numeroProxima: proximaEdicao?.numero ?? null,
+    };
   }
 
   private normalizarDetalhes(
