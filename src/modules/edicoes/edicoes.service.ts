@@ -172,13 +172,18 @@ export class EdicoesService {
     const serialized = await Promise.all(
       data.map(async (item) => {
         const edicaoSerializada = await this.serializarEdicaoComEstoque(item);
+        const numeroEdicao = this.converterNumeroEdicaoParaBigInt(item.numero);
+        const numeroAtual = contextoTimeline.numeroAtual
+          ? this.converterNumeroEdicaoParaBigInt(contextoTimeline.numeroAtual)
+          : null;
 
         return {
           ...edicaoSerializada,
           isAtual: contextoTimeline.numeroAtual === item.numero,
           isAnterior:
-            contextoTimeline.numeroAtual !== null &&
-            item.numero < contextoTimeline.numeroAtual,
+            numeroAtual !== null &&
+            numeroEdicao !== null &&
+            numeroEdicao < numeroAtual,
           isProxima: contextoTimeline.numeroProxima === item.numero,
         };
       }),
@@ -533,8 +538,8 @@ export class EdicoesService {
   }
 
   private async obterContextoTimelineEdicoes(): Promise<{
-    numeroAtual: number | null;
-    numeroProxima: number | null;
+    numeroAtual: string | null;
+    numeroProxima: string | null;
   }> {
     const edicaoAtual = await this.prisma.edicao.findFirst({
       where: {
@@ -553,20 +558,52 @@ export class EdicoesService {
       };
     }
 
-    const proximaEdicao = await this.prisma.edicao.findFirst({
-      where: {
-        numero: { gt: edicaoAtual.numero },
-      },
-      orderBy: { numero: 'asc' },
+    const numeroAtual = this.converterNumeroEdicaoParaBigInt(edicaoAtual.numero);
+
+    if (numeroAtual === null) {
+      return {
+        numeroAtual: edicaoAtual.numero,
+        numeroProxima: null,
+      };
+    }
+
+    const edicoes = await this.prisma.edicao.findMany({
       select: {
         numero: true,
       },
     });
 
+    const proximaEdicao = edicoes
+      .map((edicao) => ({
+        numeroOriginal: edicao.numero,
+        numeroConvertido: this.converterNumeroEdicaoParaBigInt(edicao.numero),
+      }))
+      .filter(
+        (
+          edicao,
+        ): edicao is { numeroOriginal: string; numeroConvertido: bigint } =>
+          edicao.numeroConvertido !== null && edicao.numeroConvertido > numeroAtual,
+      )
+      .sort((a, b) =>
+        a.numeroConvertido < b.numeroConvertido
+          ? -1
+          : a.numeroConvertido > b.numeroConvertido
+            ? 1
+            : 0,
+      )[0];
+
     return {
       numeroAtual: edicaoAtual.numero,
-      numeroProxima: proximaEdicao?.numero ?? null,
+      numeroProxima: proximaEdicao?.numeroOriginal ?? null,
     };
+  }
+
+  private converterNumeroEdicaoParaBigInt(numero: string): bigint | null {
+    if (!/^\d+$/.test(numero)) {
+      return null;
+    }
+
+    return BigInt(numero);
   }
 
   private normalizarDetalhes(

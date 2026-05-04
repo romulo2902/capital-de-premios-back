@@ -103,42 +103,46 @@ describe('EdicoesService', () => {
 
   it('findAll should flag edicao atual, anteriores e proxima', async () => {
     const edicoes = [
-      criarEdicaoMock({ id: 'edicao-103', numero: 103 }),
-      criarEdicaoMock({ id: 'edicao-102', numero: 102, status: StatusEdicao.ATIVA }),
-      criarEdicaoMock({ id: 'edicao-101', numero: 101 }),
-      criarEdicaoMock({ id: 'edicao-100', numero: 100 }),
+      criarEdicaoMock({ id: 'edicao-103', numero: '103' }),
+      criarEdicaoMock({
+        id: 'edicao-102',
+        numero: '102',
+        status: StatusEdicao.ATIVA,
+      }),
+      criarEdicaoMock({ id: 'edicao-101', numero: '101' }),
+      criarEdicaoMock({ id: 'edicao-100', numero: '100' }),
     ];
 
     mockPrisma.edicao.findMany.mockResolvedValue(edicoes);
     mockPrisma.edicao.count.mockResolvedValue(edicoes.length);
     mockPrisma.edicao.findFirst
-      .mockResolvedValueOnce({ numero: 102 })
-      .mockResolvedValueOnce({ numero: 103 });
+      .mockResolvedValueOnce({ numero: '102' })
+      .mockResolvedValueOnce({ numero: '103' });
 
     const result = await service.findAll();
 
     expect(result.data).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          numero: 103,
+          numero: '103',
           isAtual: false,
           isAnterior: false,
           isProxima: true,
         }),
         expect.objectContaining({
-          numero: 102,
+          numero: '102',
           isAtual: true,
           isAnterior: false,
           isProxima: false,
         }),
         expect.objectContaining({
-          numero: 101,
+          numero: '101',
           isAtual: false,
           isAnterior: true,
           isProxima: false,
         }),
         expect.objectContaining({
-          numero: 100,
+          numero: '100',
           isAtual: false,
           isAnterior: true,
           isProxima: false,
@@ -294,13 +298,13 @@ describe('EdicoesService', () => {
   function criarEdicaoMock(
     overrides: Partial<{
       id: string;
-      numero: number;
+      numero: string;
       status: StatusEdicao;
     }> = {},
   ) {
     return {
       id: overrides.id ?? 'edicao-1',
-      numero: overrides.numero ?? 125,
+      numero: overrides.numero ?? '125',
       dataSorteio: new Date('2026-03-27T13:20:00.000Z'),
       dataEncerramento: new Date('2026-03-27T12:59:00.000Z'),
       valorCartela: new Prisma.Decimal('10.00'),
