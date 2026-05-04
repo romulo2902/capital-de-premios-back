@@ -180,6 +180,51 @@ export class VendasService {
     );
     const total = valorCartela * dto.quantidade;
 
+    if (tipoPagamentoResolvido === TipoPagamento.MANUAL) {
+      const resultadoManual = await this.prisma.$transaction(async (tx) => {
+        const venda = await tx.venda.create({
+          data: {
+            edicaoId: dto.edicaoId,
+            clienteId: cliente.id,
+            vendedorId: dto.vendedorId ?? null,
+            distribuidorId: dto.distribuidorId ?? null,
+            quantidade: dto.quantidade,
+            tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
+            total: new Prisma.Decimal(total.toFixed(2)),
+            status: StatusVenda.APROVADO,
+            origemParticipacao,
+            tipoPagamento: tipoPagamentoResolvido,
+            ...(dto.combosSelecionados && dto.combosSelecionados.length > 0
+              ? {
+                  gatewayPayload: {
+                    combosSelecionados: dto.combosSelecionados,
+                  } as unknown as Prisma.InputJsonValue,
+                }
+              : {}),
+          },
+          include: {
+            edicao: true,
+            vendedor: true,
+          },
+        });
+
+        return this.processarAprovacaoDaVenda(tx, venda, {
+          origem: 'ADMIN',
+          tipoPagamento: TipoPagamento.MANUAL,
+          confirmadoEm: new Date().toISOString(),
+        });
+      });
+
+      this.logger.log(
+        `Venda manual ${resultadoManual.vendaAtualizada.id} criada e aprovada — ${dto.quantidade}x cartela — R$ ${total.toFixed(2)}`,
+      );
+
+      return {
+        message: 'Venda criada com sucesso',
+        data: this.serializarVendaParaResposta(resultadoManual.vendaAtualizada),
+      };
+    }
+
     // 5. Criar venda com status PENDENTE
     const venda = await this.prisma.venda.create({
       data: {
@@ -194,7 +239,11 @@ export class VendasService {
         origemParticipacao,
         tipoPagamento: tipoPagamentoResolvido,
         ...(dto.combosSelecionados && dto.combosSelecionados.length > 0
-          ? { gatewayPayload: { combosSelecionados: dto.combosSelecionados } as unknown as Prisma.InputJsonValue }
+          ? {
+              gatewayPayload: {
+                combosSelecionados: dto.combosSelecionados,
+              } as unknown as Prisma.InputJsonValue,
+            }
           : {}),
       },
       include: VENDA_INCLUDE,
@@ -203,14 +252,6 @@ export class VendasService {
     this.logger.log(
       `Venda ${venda.id} criada — ${dto.quantidade}x cartela — R$ ${total.toFixed(2)} — ${tipoPagamentoResolvido}`,
     );
-
-    if (tipoPagamentoResolvido === TipoPagamento.MANUAL) {
-      return this.confirmarPagamento(venda.id, {
-        origem: 'ADMIN',
-        tipoPagamento: TipoPagamento.MANUAL,
-        confirmadoEm: new Date().toISOString(),
-      });
-    }
 
     // 6. Criar cobrança no gateway de pagamento
     let dadosPagamento: {
@@ -608,105 +649,9 @@ export class VendasService {
       );
     }
 
-    const resultado = await this.prisma.$transaction(async (tx) => {
-      // 1. Alocar bilhetes (ranges disponíveis)
-      const bilhetesAlocados = await this.alocarBilhetes(tx, venda);
-
-      // 2. Criar comissões (Macro p/ Distribuidor e Micro p/ Vendedor)
-      if (venda.distribuidorId) {
-        const distribuidor = await tx.distribuidor.findUnique({
-          where: { id: venda.distribuidorId },
-          select: { comissaoPercent: true },
-        });
-        if (distribuidor) {
-          const distPercent = Number(distribuidor.comissaoPercent);
-          if (distPercent > 0) {
-            const fatiaBrutaDistribuidor =
-              Number(venda.total) * (distPercent / 100);
-            let comissaoVendedor = 0;
-
-            // Se houver vendedor envolvido, ele fica com a fatia dele acordada com o distribuidor
-            if (venda.vendedorId && venda.vendedor) {
-              const vendPercentDaFatia =
-                Number(venda.vendedor.comissaoPercent) || 0; // 0 to 100
-              comissaoVendedor =
-                fatiaBrutaDistribuidor * (vendPercentDaFatia / 100);
-
-              if (comissaoVendedor > 0) {
-                await tx.comissao.create({
-                  data: {
-                    vendedorId: venda.vendedorId,
-                    vendaId: venda.id,
-                    valor: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
-                    status: StatusComissao.PENDENTE,
-                  },
-                });
-
-                await tx.vendedor.update({
-                  where: { id: venda.vendedorId },
-                  data: {
-                    saldo: {
-                      increment: new Prisma.Decimal(
-                        comissaoVendedor.toFixed(2),
-                      ),
-                    },
-                  },
-                });
-
-                this.logger.log(
-                  `Comissão Vendedor (R$ ${comissaoVendedor.toFixed(2)}) creditada -> ${venda.vendedorId}`,
-                );
-              }
-            }
-
-            // O saldo remanescente da fatia distribuída vai para o próprio Distribuidor (Spread)
-            const comissaoLiquidaDistribuidor =
-              fatiaBrutaDistribuidor - comissaoVendedor;
-            if (comissaoLiquidaDistribuidor > 0) {
-              await tx.comissaoDistribuidor.create({
-                data: {
-                  distribuidorId: venda.distribuidorId,
-                  vendaId: venda.id,
-                  valor: new Prisma.Decimal(
-                    comissaoLiquidaDistribuidor.toFixed(2),
-                  ),
-                  status: StatusComissao.PENDENTE,
-                },
-              });
-
-              await tx.distribuidor.update({
-                where: { id: venda.distribuidorId },
-                data: {
-                  saldo: {
-                    increment: new Prisma.Decimal(
-                      comissaoLiquidaDistribuidor.toFixed(2),
-                    ),
-                  },
-                },
-              });
-
-              this.logger.log(
-                `Comissão Distribuidor Líquida (R$ ${comissaoLiquidaDistribuidor.toFixed(2)}) creditada -> ${venda.distribuidorId}`,
-              );
-            }
-          }
-        }
-      }
-
-      // 3. Atualizar status da venda
-      const vendaAtualizada = await tx.venda.update({
-        where: { id: venda.id },
-        data: {
-          status: StatusVenda.APROVADO,
-          ...(gatewayPayload
-            ? { gatewayPayload: gatewayPayload as Prisma.InputJsonValue }
-            : {}),
-        },
-        include: VENDA_INCLUDE_DETALHES,
-      });
-
-      return { vendaAtualizada, bilhetesAlocados };
-    });
+    const resultado = await this.prisma.$transaction((tx) =>
+      this.processarAprovacaoDaVenda(tx, venda, gatewayPayload),
+    );
 
     this.logger.log(
       `Pagamento confirmado para venda ${vendaId} — ${resultado.bilhetesAlocados} bilhetes alocados`,
@@ -839,6 +784,112 @@ export class VendasService {
   }
 
   // ─── HELPERS PRIVADOS ─────────────────────────────────
+
+  private async processarAprovacaoDaVenda(
+    tx: Prisma.TransactionClient,
+    venda: {
+      id: string;
+      edicaoId: string;
+      quantidade: number;
+      origemParticipacao: OrigemParticipacao;
+      tipoCartela?: TipoCartela | null;
+      gatewayPayload?: Prisma.JsonValue | null;
+      distribuidorId?: string | null;
+      vendedorId?: string | null;
+      vendedor?: { comissaoPercent: Prisma.Decimal } | null;
+      total: Prisma.Decimal;
+    },
+    gatewayPayload?: Record<string, unknown>,
+  ) {
+    const bilhetesAlocados = await this.alocarBilhetes(tx, venda);
+
+    if (venda.distribuidorId) {
+      const distribuidor = await tx.distribuidor.findUnique({
+        where: { id: venda.distribuidorId },
+        select: { comissaoPercent: true },
+      });
+      if (distribuidor) {
+        const distPercent = Number(distribuidor.comissaoPercent);
+        if (distPercent > 0) {
+          const fatiaBrutaDistribuidor = Number(venda.total) * (distPercent / 100);
+          let comissaoVendedor = 0;
+
+          if (venda.vendedorId && venda.vendedor) {
+            const vendPercentDaFatia = Number(venda.vendedor.comissaoPercent) || 0;
+            comissaoVendedor =
+              fatiaBrutaDistribuidor * (vendPercentDaFatia / 100);
+
+            if (comissaoVendedor > 0) {
+              await tx.comissao.create({
+                data: {
+                  vendedorId: venda.vendedorId,
+                  vendaId: venda.id,
+                  valor: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
+                  status: StatusComissao.PENDENTE,
+                },
+              });
+
+              await tx.vendedor.update({
+                where: { id: venda.vendedorId },
+                data: {
+                  saldo: {
+                    increment: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
+                  },
+                },
+              });
+
+              this.logger.log(
+                `Comissão Vendedor (R$ ${comissaoVendedor.toFixed(2)}) creditada -> ${venda.vendedorId}`,
+              );
+            }
+          }
+
+          const comissaoLiquidaDistribuidor =
+            fatiaBrutaDistribuidor - comissaoVendedor;
+          if (comissaoLiquidaDistribuidor > 0) {
+            await tx.comissaoDistribuidor.create({
+              data: {
+                distribuidorId: venda.distribuidorId,
+                vendaId: venda.id,
+                valor: new Prisma.Decimal(
+                  comissaoLiquidaDistribuidor.toFixed(2),
+                ),
+                status: StatusComissao.PENDENTE,
+              },
+            });
+
+            await tx.distribuidor.update({
+              where: { id: venda.distribuidorId },
+              data: {
+                saldo: {
+                  increment: new Prisma.Decimal(
+                    comissaoLiquidaDistribuidor.toFixed(2),
+                  ),
+                },
+              },
+            });
+
+            this.logger.log(
+              `Comissão Distribuidor Líquida (R$ ${comissaoLiquidaDistribuidor.toFixed(2)}) creditada -> ${venda.distribuidorId}`,
+            );
+          }
+        }
+      }
+    }
+
+    const vendaAtualizada = await tx.venda.update({
+      where: { id: venda.id },
+      data: {
+        status: StatusVenda.APROVADO,
+        ...(gatewayPayload
+          ? { gatewayPayload: gatewayPayload as Prisma.InputJsonValue }
+          : {}),
+      },
+      include: VENDA_INCLUDE_DETALHES,
+    });
+
+    return { vendaAtualizada, bilhetesAlocados };
+  }
 
   private async buscarVendaComContextoEdicao(id: string) {
     const venda = await this.prisma.venda.findUnique({

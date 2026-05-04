@@ -396,20 +396,71 @@ describe('VendasService', () => {
       );
     });
 
-    it('should default tipoPagamento to MANUAL for direct ADMIN sales', async () => {
-      const confirmarPagamentoSpy = jest
-        .spyOn(service, 'confirmarPagamento')
-        .mockResolvedValue({
-          message: 'Pagamento confirmado com sucesso',
-          data: { id: 'venda-1', status: StatusVenda.APROVADO },
-        });
-
+    it('should default tipoPagamento to MANUAL for direct ADMIN sales and approve immediately', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue(edicaoAtiva);
       mockPrisma.cliente.findUnique.mockResolvedValue(clienteMock);
-      mockPrisma.venda.create.mockResolvedValue({
-        ...vendaCriada,
-        tipoPagamento: TipoPagamento.MANUAL,
-      });
+      const txMock = {
+        venda: {
+          create: jest.fn().mockResolvedValue({
+            ...vendaCriada,
+            status: StatusVenda.APROVADO,
+            tipoPagamento: TipoPagamento.MANUAL,
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            edicaoId: 'edicao-1',
+            vendedorId: null,
+            distribuidorId: null,
+            gatewayPayload: null,
+            vendedor: null,
+            edicao: {
+              id: 'edicao-1',
+            },
+            total: new Prisma.Decimal('30.00'),
+          }),
+          update: jest.fn().mockResolvedValue({
+            ...vendaCriada,
+            status: StatusVenda.APROVADO,
+            tipoPagamento: TipoPagamento.MANUAL,
+            bilhetes: [],
+          }),
+        },
+        edicao: {
+          findUnique: jest.fn().mockResolvedValue({
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1999999),
+            detalhes: edicaoAtiva.detalhes,
+            combos: edicaoAtiva.combos,
+          }),
+        },
+        matrizRange: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: 'matriz-1',
+              numero: BigInt(1000000),
+              sequenciaBolas: [1, 2, 3],
+            },
+          ]),
+        },
+        bilhete: {
+          createMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        distribuidor: {
+          findUnique: jest.fn(),
+          update: jest.fn(),
+        },
+        comissaoDistribuidor: {
+          create: jest.fn(),
+        },
+        comissao: {
+          create: jest.fn(),
+        },
+        vendedor: {
+          update: jest.fn(),
+        },
+      };
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
 
       const result = await service.create(
         {
@@ -428,20 +479,23 @@ describe('VendasService', () => {
         },
       );
 
-      expect(result.message).toBe('Pagamento confirmado com sucesso');
-      expect(mockPrisma.venda.create).toHaveBeenCalledWith(
+      expect(result.message).toBe('Venda criada com sucesso');
+      expect(txMock.venda.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             tipoPagamento: TipoPagamento.MANUAL,
+            status: StatusVenda.APROVADO,
           }),
         }),
       );
-      expect(confirmarPagamentoSpy).toHaveBeenCalledWith(
-        'venda-1',
+      expect(txMock.venda.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          tipoPagamento: TipoPagamento.MANUAL,
+          data: expect.objectContaining({
+            status: StatusVenda.APROVADO,
+          }),
         }),
       );
+      expect(result.data.status).toBe(StatusVenda.APROVADO);
     });
 
     it('should require tipoPagamento for non-admin sales', async () => {
