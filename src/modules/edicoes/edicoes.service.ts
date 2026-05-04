@@ -172,19 +172,15 @@ export class EdicoesService {
     const serialized = await Promise.all(
       data.map(async (item) => {
         const edicaoSerializada = await this.serializarEdicaoComEstoque(item);
-        const numeroEdicao = this.converterNumeroEdicaoParaBigInt(item.numero);
-        const numeroAtual = contextoTimeline.numeroAtual
-          ? this.converterNumeroEdicaoParaBigInt(contextoTimeline.numeroAtual)
-          : null;
 
         return {
           ...edicaoSerializada,
-          isAtual: contextoTimeline.numeroAtual === item.numero,
+          isAtual: contextoTimeline.edicaoAtualId === item.id,
           isAnterior:
-            numeroAtual !== null &&
-            numeroEdicao !== null &&
-            numeroEdicao < numeroAtual,
-          isProxima: contextoTimeline.numeroProxima === item.numero,
+            contextoTimeline.dataSorteioAtual !== null &&
+            item.dataSorteio.getTime() <
+              contextoTimeline.dataSorteioAtual.getTime(),
+          isProxima: contextoTimeline.edicaoProximaId === item.id,
         };
       }),
     );
@@ -538,72 +534,48 @@ export class EdicoesService {
   }
 
   private async obterContextoTimelineEdicoes(): Promise<{
-    numeroAtual: string | null;
-    numeroProxima: string | null;
+    edicaoAtualId: string | null;
+    dataSorteioAtual: Date | null;
+    edicaoProximaId: string | null;
   }> {
     const edicaoAtual = await this.prisma.edicao.findFirst({
       where: {
-        status: { in: STATUSS_EDICAO_EM_OPERACAO },
+        status: StatusEdicao.ATIVA,
       },
-      orderBy: { numero: 'desc' },
+      orderBy: { dataSorteio: 'desc' },
       select: {
-        numero: true,
+        id: true,
+        dataSorteio: true,
       },
     });
 
     if (!edicaoAtual) {
       return {
-        numeroAtual: null,
-        numeroProxima: null,
+        edicaoAtualId: null,
+        dataSorteioAtual: null,
+        edicaoProximaId: null,
       };
     }
 
-    const numeroAtual = this.converterNumeroEdicaoParaBigInt(edicaoAtual.numero);
-
-    if (numeroAtual === null) {
-      return {
-        numeroAtual: edicaoAtual.numero,
-        numeroProxima: null,
-      };
-    }
-
-    const edicoes = await this.prisma.edicao.findMany({
+    const proximaEdicao = await this.prisma.edicao.findFirst({
+      where: {
+        dataSorteio: {
+          gt: edicaoAtual.dataSorteio,
+        },
+      },
+      orderBy: {
+        dataSorteio: 'asc',
+      },
       select: {
-        numero: true,
+        id: true,
       },
     });
 
-    const proximaEdicao = edicoes
-      .map((edicao) => ({
-        numeroOriginal: edicao.numero,
-        numeroConvertido: this.converterNumeroEdicaoParaBigInt(edicao.numero),
-      }))
-      .filter(
-        (
-          edicao,
-        ): edicao is { numeroOriginal: string; numeroConvertido: bigint } =>
-          edicao.numeroConvertido !== null && edicao.numeroConvertido > numeroAtual,
-      )
-      .sort((a, b) =>
-        a.numeroConvertido < b.numeroConvertido
-          ? -1
-          : a.numeroConvertido > b.numeroConvertido
-            ? 1
-            : 0,
-      )[0];
-
     return {
-      numeroAtual: edicaoAtual.numero,
-      numeroProxima: proximaEdicao?.numeroOriginal ?? null,
+      edicaoAtualId: edicaoAtual.id,
+      dataSorteioAtual: edicaoAtual.dataSorteio,
+      edicaoProximaId: proximaEdicao?.id ?? null,
     };
-  }
-
-  private converterNumeroEdicaoParaBigInt(numero: string): bigint | null {
-    if (!/^\d+$/.test(numero)) {
-      return null;
-    }
-
-    return BigInt(numero);
   }
 
   private normalizarDetalhes(

@@ -103,46 +103,66 @@ describe('EdicoesService', () => {
 
   it('findAll should flag edicao atual, anteriores e proxima', async () => {
     const edicoes = [
-      criarEdicaoMock({ id: 'edicao-103', numero: '103' }),
+      criarEdicaoMock({
+        id: 'edicao-103',
+        numero: 'ABC-2026-003',
+        dataSorteio: new Date('2026-05-30T13:20:00.000Z'),
+      }),
       criarEdicaoMock({
         id: 'edicao-102',
-        numero: '102',
+        numero: 'ABC-2026-002',
         status: StatusEdicao.ATIVA,
+        dataSorteio: new Date('2026-05-27T13:20:00.000Z'),
       }),
-      criarEdicaoMock({ id: 'edicao-101', numero: '101' }),
-      criarEdicaoMock({ id: 'edicao-100', numero: '100' }),
+      criarEdicaoMock({
+        id: 'edicao-101',
+        numero: '001',
+        status: StatusEdicao.FINALIZADA,
+        dataSorteio: new Date('2026-04-30T12:00:00.000Z'),
+      }),
+      criarEdicaoMock({
+        id: 'edicao-100',
+        numero: '000',
+        status: StatusEdicao.ENCERRADA,
+        dataSorteio: new Date('2026-04-20T12:00:00.000Z'),
+      }),
     ];
 
     mockPrisma.edicao.findMany.mockResolvedValue(edicoes);
     mockPrisma.edicao.count.mockResolvedValue(edicoes.length);
     mockPrisma.edicao.findFirst
-      .mockResolvedValueOnce({ numero: '102' })
-      .mockResolvedValueOnce({ numero: '103' });
+      .mockResolvedValueOnce({
+        id: 'edicao-102',
+        dataSorteio: new Date('2026-05-27T13:20:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        id: 'edicao-103',
+      });
 
     const result = await service.findAll();
 
     expect(result.data).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          numero: '103',
+          id: 'edicao-103',
           isAtual: false,
           isAnterior: false,
           isProxima: true,
         }),
         expect.objectContaining({
-          numero: '102',
+          id: 'edicao-102',
           isAtual: true,
           isAnterior: false,
           isProxima: false,
         }),
         expect.objectContaining({
-          numero: '101',
+          id: 'edicao-101',
           isAtual: false,
           isAnterior: true,
           isProxima: false,
         }),
         expect.objectContaining({
-          numero: '100',
+          id: 'edicao-100',
           isAtual: false,
           isAnterior: true,
           isProxima: false,
@@ -300,12 +320,14 @@ describe('EdicoesService', () => {
       id: string;
       numero: string;
       status: StatusEdicao;
+      dataSorteio: Date;
     }> = {},
   ) {
     return {
       id: overrides.id ?? 'edicao-1',
       numero: overrides.numero ?? '125',
-      dataSorteio: new Date('2026-03-27T13:20:00.000Z'),
+      dataSorteio:
+        overrides.dataSorteio ?? new Date('2026-03-27T13:20:00.000Z'),
       dataEncerramento: new Date('2026-03-27T12:59:00.000Z'),
       valorCartela: new Prisma.Decimal('10.00'),
       qtdNumerosCartela: 15,
