@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Prisma } from '@prisma/client';
+import { Prisma, TipoCartela } from '@prisma/client';
 import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
@@ -78,6 +78,37 @@ describe('DashboardService', () => {
           totalVendas: 2,
           totalCartelas: 3,
           totalVendasValor: 500,
+        },
+      ]);
+    });
+
+    it('should count total cartelas using tipoCartela multiplier', async () => {
+      mockPrisma.cliente.count.mockResolvedValue(1);
+      mockPrisma.vendedor.count.mockResolvedValue(1);
+      mockPrisma.distribuidor.count.mockResolvedValue(1);
+      mockPrisma.vendedor.findMany.mockResolvedValue([
+        {
+          id: 'vend-1',
+          nome: 'Carlos',
+          vendas: [
+            {
+              total: new Prisma.Decimal(40),
+              quantidade: 2,
+              tipoCartela: TipoCartela.DUAS_CHANCES,
+            },
+          ],
+        },
+      ]);
+
+      const res = await service.getAdminVisaoGeral();
+
+      expect(res.rankingVendedores).toEqual([
+        {
+          vendedorId: 'vend-1',
+          nome: 'Carlos',
+          totalVendas: 1,
+          totalCartelas: 4,
+          totalVendasValor: 40,
         },
       ]);
     });

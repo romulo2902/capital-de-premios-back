@@ -1,8 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, StatusVenda, StatusComissao } from '@prisma/client';
+import {
+  Prisma,
+  StatusVenda,
+  StatusComissao,
+  TipoCartela,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardFilterDto } from './dto/filtro-dashboard.dto';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
+import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
 
 @Injectable()
 export class DashboardService {
@@ -24,7 +30,7 @@ export class DashboardService {
           nome: true,
           vendas: {
             where: { status: StatusVenda.APROVADO },
-            select: { total: true, quantidade: true },
+            select: { total: true, quantidade: true, tipoCartela: true },
           },
         },
       }),
@@ -36,7 +42,12 @@ export class DashboardService {
         nome: vendedor.nome,
         totalVendas: vendedor.vendas.length,
         totalCartelas: vendedor.vendas.reduce(
-          (acumulado, venda) => acumulado + venda.quantidade,
+          (acumulado, venda) =>
+            acumulado +
+            calcularQuantidadeCartelasDaVenda({
+              quantidade: venda.quantidade,
+              tipoCartela: venda.tipoCartela,
+            }),
           0,
         ),
         totalVendasValor: Number(
@@ -99,7 +110,7 @@ export class DashboardService {
 
     const vendas = await this.prisma.venda.findMany({
       where: vendaWhere,
-      select: { createdAt: true, quantidade: true, total: true },
+      select: { createdAt: true, quantidade: true, tipoCartela: true, total: true },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -115,7 +126,7 @@ export class DashboardService {
 
     const vendas = await this.prisma.venda.findMany({
       where,
-      select: { createdAt: true, quantidade: true, total: true },
+      select: { createdAt: true, quantidade: true, tipoCartela: true, total: true },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -131,7 +142,7 @@ export class DashboardService {
         nome: true,
         vendas: {
           where: { status: StatusVenda.APROVADO },
-          select: { total: true, quantidade: true },
+          select: { total: true, quantidade: true, tipoCartela: true },
         },
       },
     });
@@ -139,7 +150,15 @@ export class DashboardService {
     return vendedores.map(v => ({
       vendedorId: v.id,
       nome: v.nome,
-      quantidadeVendas: v.vendas.reduce((acc, venda) => acc + venda.quantidade, 0),
+      quantidadeVendas: v.vendas.reduce(
+        (acc, venda) =>
+          acc +
+          calcularQuantidadeCartelasDaVenda({
+            quantidade: venda.quantidade,
+            tipoCartela: venda.tipoCartela,
+          }),
+        0,
+      ),
       totalFaturamento: v.vendas.reduce((acc, venda) => acc + Number(venda.total), 0),
     })).sort((a, b) => b.totalFaturamento - a.totalFaturamento);
   }
@@ -209,7 +228,7 @@ export class DashboardService {
 
     const vendas = await this.prisma.venda.findMany({
       where,
-      select: { createdAt: true, quantidade: true, total: true },
+      select: { createdAt: true, quantidade: true, tipoCartela: true, total: true },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -266,7 +285,14 @@ export class DashboardService {
     return where;
   }
 
-  private aggregateTimeline(vendas: { createdAt: Date; quantidade: number; total: Prisma.Decimal }[]) {
+  private aggregateTimeline(
+    vendas: {
+      createdAt: Date;
+      quantidade: number;
+      tipoCartela?: TipoCartela | null;
+      total: Prisma.Decimal;
+    }[],
+  ) {
     const dailyMap = new Map<string, { dia: string; cartelas: number; totalR$: number }>();
     let totalAcumuladoR$ = 0;
     let totalCartelasAcumulado = 0;
@@ -275,7 +301,10 @@ export class DashboardService {
       // Usar a string YYYY-MM-DD
       const diaStr = v.createdAt.toISOString().slice(0, 10);
 
-      const cartelas = v.quantidade;
+      const cartelas = calcularQuantidadeCartelasDaVenda({
+        quantidade: v.quantidade,
+        tipoCartela: v.tipoCartela ?? null,
+      });
       const t = Number(v.total);
 
       totalAcumuladoR$ += t;

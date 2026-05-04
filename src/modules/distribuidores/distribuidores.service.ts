@@ -14,6 +14,7 @@ import {
   buildPaginatedResponse,
   normalizePagination,
 } from '../../common/utils/pagination.util';
+import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
 
 @Injectable()
 export class DistribuidoresService {
@@ -285,6 +286,7 @@ export class DistribuidoresService {
               where: { ...vendaWhere, status: StatusVenda.APROVADO },
               select: {
                 quantidade: true,
+                tipoCartela: true,
                 total: true,
               },
             },
@@ -308,7 +310,10 @@ export class DistribuidoresService {
 
       for (const vendedor of d.vendedores) {
         for (const venda of vendedor.vendas) {
-          qtdCartelas += venda.quantidade;
+          qtdCartelas += calcularQuantidadeCartelasDaVenda({
+            quantidade: venda.quantidade,
+            tipoCartela: venda.tipoCartela,
+          });
           totalVendas += Number(venda.total);
         }
         for (const c of vendedor.comissoes) {

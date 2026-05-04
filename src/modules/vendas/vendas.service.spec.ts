@@ -498,6 +498,159 @@ describe('VendasService', () => {
       expect(result.data.status).toBe(StatusVenda.APROVADO);
     });
 
+    it('should keep manual admin sales as UMA_CHANCE when quantidadeCartelas matches quantidade', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        ...edicaoAtiva,
+        valorCartela: new Prisma.Decimal('10.00'),
+        combos: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            preco: new Prisma.Decimal('10.00'),
+          },
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            preco: new Prisma.Decimal('20.00'),
+          },
+        ],
+      });
+      mockPrisma.cliente.findUnique.mockResolvedValue(clienteMock);
+      const txMock = {
+        venda: {
+          create: jest.fn().mockResolvedValue({
+            ...vendaCriada,
+            quantidade: 2,
+            status: StatusVenda.APROVADO,
+            tipoPagamento: TipoPagamento.MANUAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            edicaoId: 'edicao-1',
+            vendedorId: null,
+            distribuidorId: null,
+            gatewayPayload: null,
+            vendedor: null,
+            edicao: {
+              id: 'edicao-1',
+            },
+            total: new Prisma.Decimal('20.00'),
+          }),
+          update: jest.fn().mockResolvedValue({
+            ...vendaCriada,
+            quantidade: 2,
+            status: StatusVenda.APROVADO,
+            tipoPagamento: TipoPagamento.MANUAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            total: new Prisma.Decimal('20.00'),
+            bilhetes: [],
+          }),
+        },
+        edicao: {
+          findUnique: jest.fn().mockResolvedValue({
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1999999),
+            detalhes: edicaoAtiva.detalhes,
+            combos: [
+              {
+                origemParticipacao: OrigemParticipacao.DIGITAL,
+                tipoCartela: TipoCartela.UMA_CHANCE,
+                preco: new Prisma.Decimal('10.00'),
+              },
+              {
+                origemParticipacao: OrigemParticipacao.DIGITAL,
+                tipoCartela: TipoCartela.DUAS_CHANCES,
+                preco: new Prisma.Decimal('20.00'),
+              },
+            ],
+          }),
+        },
+        matrizRange: {
+          findMany: jest
+            .fn()
+            .mockResolvedValueOnce([
+              {
+                id: 'matriz-1',
+                numero: BigInt(1000000),
+                sequenciaBolas: [1, 2, 3],
+              },
+              {
+                id: 'matriz-2',
+                numero: BigInt(1000001),
+                sequenciaBolas: [4, 5, 6],
+              },
+            ])
+            .mockResolvedValueOnce([
+              {
+                id: 'matriz-1',
+                numero: BigInt(1000000),
+                sequenciaBolas: [1, 2, 3],
+              },
+              {
+                id: 'matriz-2',
+                numero: BigInt(1000001),
+                sequenciaBolas: [4, 5, 6],
+              },
+            ]),
+        },
+        bilhete: {
+          createMany: jest.fn().mockResolvedValue({ count: 2 }),
+        },
+        distribuidor: {
+          findUnique: jest.fn(),
+          update: jest.fn(),
+        },
+        comissaoDistribuidor: {
+          create: jest.fn(),
+        },
+        comissao: {
+          create: jest.fn(),
+        },
+        vendedor: {
+          update: jest.fn(),
+        },
+      };
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
+
+      await service.create(
+        {
+          edicaoId: 'edicao-1',
+          quantidade: 2,
+          quantidadeCartelas: 2,
+          cpf: '12345678900',
+          nome: 'Romulo Valadares',
+          telefone: '(00) 99999-9999',
+        },
+        {
+          id: 'admin-1',
+          email: 'admin@capitalpremios.com',
+          cpf: null,
+          perfil: 'ADMIN',
+          status: 'ATIVO',
+        },
+      );
+
+      expect(txMock.venda.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            quantidade: 2,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            total: new Prisma.Decimal('20.00'),
+          }),
+        }),
+      );
+      expect(txMock.bilhete.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ numero: BigInt(1000000) }),
+            expect.objectContaining({ numero: BigInt(1000001) }),
+          ]),
+        }),
+      );
+    });
+
     it('should require tipoPagamento for non-admin sales', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue(edicaoAtiva);
       mockPrisma.cliente.findUnique.mockResolvedValue(clienteMock);

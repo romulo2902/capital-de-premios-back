@@ -34,6 +34,7 @@ import { ListarCombosLojaDto } from './dto/listar-combos-loja.dto';
 import { CreateFaleConoscoDto } from './dto/create-fale-conosco.dto';
 import { getRequestContext } from '../../common/request-context/request-context.util';
 import { RedisService } from '../../common/redis/redis.service';
+import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
 
 @Injectable()
 export class LojaPublicaService {
@@ -261,7 +262,7 @@ export class LojaPublicaService {
         data: {
           vendaId: venda.id,
           total: vendaAprovada?.total.toString() ?? venda.total.toString(),
-          quantidadeCartelas: dto.quantidade,
+          quantidadeCartelas: quantidadeBilhetes,
           quantidadeBilhetes,
           status: vendaAprovada?.status ?? StatusVenda.APROVADO,
           pagamento: {
@@ -313,7 +314,7 @@ export class LojaPublicaService {
       data: {
         vendaId: venda.id,
         total: venda.total.toString(),
-        quantidadeCartelas: dto.quantidade,
+        quantidadeCartelas: quantidadeBilhetes,
         quantidadeBilhetes,
         pagamento: dadosPagamento,
       },
@@ -422,74 +423,82 @@ export class LojaPublicaService {
           emailMascarado,
           telefone: cliente.telefone,
         },
-        compras: vendas.map((v) => ({
-          vendaId: v.id,
-          numeroPedido: v.id,
-          status: v.status,
-          statusLabel: this.mapearStatusVenda(v.status),
-          tipoPagamento: v.tipoPagamento,
-          tipoPagamentoLabel: this.mapearTipoPagamento(v.tipoPagamento),
-          quantidade: v.quantidade,
-          quantidadeBilhetes: v.bilhetes.length,
-          tipoCartela: v.tipoCartela,
-          quantidadeChances: v.tipoCartela
-            ? obterQuantidadeChances(v.tipoCartela)
-            : v.quantidade,
-          total: v.total.toString(),
-          totalFormatado: this.formatarMoeda(v.total),
-          dataCompra: v.createdAt,
-          dataCompraFormatada: this.formatarDataHora(v.createdAt),
-          titular: {
-            nome: cliente.nome,
-            cpf: cpfMascarado,
-            email: emailMascarado,
-            telefone: cliente.telefone,
-          },
-          edicao: {
-            id: v.edicao.id,
-            numero: v.edicao.numero,
-            dataSorteio: v.edicao.dataSorteio,
-            dataSorteioFormatada: this.formatarData(v.edicao.dataSorteio),
-            dataEncerramento: v.edicao.dataEncerramento,
-            dataEncerramentoFormatada: this.formatarDataHora(
-              v.edicao.dataEncerramento,
-            ),
-            imagemUrl: v.edicao.imagemUrl,
-            frase: v.edicao.frase,
-            valorCartela: v.edicao.valorCartela.toString(),
-            valorCartelaFormatado: this.formatarMoeda(v.edicao.valorCartela),
-            qtdNumerosCartela: v.edicao.qtdNumerosCartela,
-            opcoesCompra: this.mapearOpcoesCompraDaEdicao(
+        compras: vendas.map((v) => {
+          const quantidadeCartelas = calcularQuantidadeCartelasDaVenda({
+            quantidade: v.quantidade,
+            tipoCartela: v.tipoCartela,
+            quantidadeBilhetes: v.bilhetes.length,
+          });
+
+          return {
+            vendaId: v.id,
+            numeroPedido: v.id,
+            status: v.status,
+            statusLabel: this.mapearStatusVenda(v.status),
+            tipoPagamento: v.tipoPagamento,
+            tipoPagamentoLabel: this.mapearTipoPagamento(v.tipoPagamento),
+            quantidade: quantidadeCartelas,
+            quantidadeBilhetes: v.bilhetes.length,
+            tipoCartela: v.tipoCartela,
+            quantidadeChances: v.tipoCartela
+              ? obterQuantidadeChances(v.tipoCartela)
+              : v.quantidade,
+            total: v.total.toString(),
+            totalFormatado: this.formatarMoeda(v.total),
+            dataCompra: v.createdAt,
+            dataCompraFormatada: this.formatarDataHora(v.createdAt),
+            titular: {
+              nome: cliente.nome,
+              cpf: cpfMascarado,
+              email: emailMascarado,
+              telefone: cliente.telefone,
+            },
+            edicao: {
+              id: v.edicao.id,
+              numero: v.edicao.numero,
+              dataSorteio: v.edicao.dataSorteio,
+              dataSorteioFormatada: this.formatarData(v.edicao.dataSorteio),
+              dataEncerramento: v.edicao.dataEncerramento,
+              dataEncerramentoFormatada: this.formatarDataHora(
+                v.edicao.dataEncerramento,
+              ),
+              imagemUrl: v.edicao.imagemUrl,
+              frase: v.edicao.frase,
+              valorCartela: v.edicao.valorCartela.toString(),
+              valorCartelaFormatado: this.formatarMoeda(v.edicao.valorCartela),
+              qtdNumerosCartela: v.edicao.qtdNumerosCartela,
+              opcoesCompra: this.mapearOpcoesCompraDaEdicao(
+                v.edicao.detalhes,
+                v.edicao.combos,
+                v.edicao.valorCartela,
+              ).map((opcao) => ({
+                tipoCartela: opcao.tipoCartela,
+                quantidadeCartelas: opcao.quantidadeChances,
+                preco: opcao.preco,
+                precoFormatado: this.formatarMoeda(Number(opcao.preco)),
+              })),
+              premios: v.edicao.premios.map((p) => ({
+                ordem: p.ordem,
+                descricao: p.descricao,
+                valor: p.valor.toString(),
+                valorFormatado: this.formatarMoeda(p.valor),
+              })),
+            },
+            resumo: {
+              titulo: `EDIÇÃO ${String(v.edicao.numero).padStart(2, '0')} | ${this.formatarData(v.edicao.dataSorteio)}`,
+              subtitulo: `${quantidadeCartelas} cartela(s) com ${v.edicao.qtdNumerosCartela} número(s) por bilhete`,
+            },
+            combos: this.agruparBilhetesPorCombo(
+              v.bilhetes,
               v.edicao.detalhes,
-              v.edicao.combos,
-              v.edicao.valorCartela,
-            ).map((opcao) => ({
-              tipoCartela: opcao.tipoCartela,
-              quantidadeCartelas: opcao.quantidadeChances,
-              preco: opcao.preco,
-              precoFormatado: this.formatarMoeda(Number(opcao.preco)),
+              v.tipoCartela,
+            ),
+            bilhetes: v.bilhetes.map((b) => ({
+              numero: this.formatarNumeroBilhete(b.numero),
+              sequenciaBolas: b.sequenciaBolas,
             })),
-            premios: v.edicao.premios.map((p) => ({
-              ordem: p.ordem,
-              descricao: p.descricao,
-              valor: p.valor.toString(),
-              valorFormatado: this.formatarMoeda(p.valor),
-            })),
-          },
-          resumo: {
-            titulo: `EDIÇÃO ${String(v.edicao.numero).padStart(2, '0')} | ${this.formatarData(v.edicao.dataSorteio)}`,
-            subtitulo: `${v.quantidade} combo(s) com ${v.edicao.qtdNumerosCartela} número(s) por bilhete`,
-          },
-          combos: this.agruparBilhetesPorCombo(
-            v.bilhetes,
-            v.edicao.detalhes,
-            v.tipoCartela,
-          ),
-          bilhetes: v.bilhetes.map((b) => ({
-            numero: this.formatarNumeroBilhete(b.numero),
-            sequenciaBolas: b.sequenciaBolas,
-          })),
-        })),
+          };
+        }),
       },
     };
   }

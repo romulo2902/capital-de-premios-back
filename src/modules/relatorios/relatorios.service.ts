@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { TipoCartela } from '@prisma/client';
 import type { Response } from 'express';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../../prisma/prisma.service';
+import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
 import {
   aplicarFiltroPeriodoCadastro as aplicarFiltroPeriodoCadastroUtil,
   aplicarFormatoTextoColunas as aplicarFormatoTextoColunasUtil,
@@ -68,7 +70,7 @@ export class RelatoriosService {
       { header: 'Cliente', key: 'cliente', width: 30 },
       { header: 'CPF', key: 'cpf', width: 15 },
       { header: 'Vendedor', key: 'vendedor', width: 25 },
-      { header: 'Qtd Bilhetes', key: 'quantidade', width: 14 },
+      { header: 'Qtd Cartelas', key: 'quantidade', width: 14 },
       { header: 'Total (R$)', key: 'total', width: 14 },
       { header: 'Status', key: 'status', width: 12 },
       { header: 'Pagamento', key: 'pagamento', width: 12 },
@@ -90,7 +92,10 @@ export class RelatoriosService {
         cliente: venda.cliente.nome,
         cpf: venda.cliente.cpf,
         vendedor: venda.vendedor?.nome ?? '-',
-        quantidade: venda.quantidade,
+        quantidade: calcularQuantidadeCartelasDaVenda({
+          quantidade: venda.quantidade,
+          tipoCartela: venda.tipoCartela as TipoCartela | null,
+        }),
         total: Number(venda.total).toFixed(2),
         status: venda.status,
         pagamento: venda.tipoPagamento,

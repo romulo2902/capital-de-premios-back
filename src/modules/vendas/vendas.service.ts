@@ -39,6 +39,7 @@ import {
   obterTipoCartelaPorQuantidadeChances,
 } from '../edicoes/edicoes-range.util';
 import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
+import { calcularQuantidadeCartelasDaVenda } from './vendas-quantidade.util';
 
 type DetalheVenda = Pick<
   EdicaoDetalhe,
@@ -111,9 +112,11 @@ export class VendasService {
 
     const origemParticipacao =
       dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
+    const quantidadeCartelasPorCombo =
+      this.normalizarQuantidadeCartelasDaSolicitacao(dto, user);
     const tipoCartelaSolicitada = this.resolverTipoCartelaDaSolicitacao(
       dto.tipoCartela,
-      dto.quantidadeCartelas,
+      quantidadeCartelasPorCombo,
     );
     const configuracaoVenda = this.resolverConfiguracaoDaVenda(
       edicao.detalhes,
@@ -986,7 +989,61 @@ export class VendasService {
       return venda;
     }
 
-    return this.serializarBigIntRecursivo(venda) as T;
+    const serializado = this.serializarBigIntRecursivo(venda);
+    return this.normalizarQuantidadeCartelasNaResposta(serializado) as T;
+  }
+
+  private normalizarQuantidadeCartelasNaResposta(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.normalizarQuantidadeCartelasNaResposta(item));
+    }
+
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+
+    const registro = value as Record<string, unknown>;
+    const registroNormalizado = Object.fromEntries(
+      Object.entries(registro).map(([key, entryValue]) => [
+        key,
+        this.normalizarQuantidadeCartelasNaResposta(entryValue),
+      ]),
+    ) as Record<string, unknown>;
+    const quantidade =
+      typeof registroNormalizado.quantidade === 'number'
+        ? registroNormalizado.quantidade
+        : null;
+
+    if (quantidade === null) {
+      return registroNormalizado;
+    }
+
+    const tipoCartela =
+      typeof registroNormalizado.tipoCartela === 'string'
+        ? (registroNormalizado.tipoCartela as TipoCartela)
+        : null;
+    const bilhetes = Array.isArray(registroNormalizado.bilhetes)
+      ? registroNormalizado.bilhetes
+      : null;
+    const countBilhetes =
+      registroNormalizado._count &&
+      typeof registroNormalizado._count === 'object' &&
+      typeof (registroNormalizado._count as Record<string, unknown>).bilhetes ===
+        'number'
+        ? ((registroNormalizado._count as Record<string, unknown>)
+            .bilhetes as number)
+        : null;
+    const quantidadeBilhetes = bilhetes?.length ?? countBilhetes ?? null;
+    const quantidadeCartelas = calcularQuantidadeCartelasDaVenda({
+      quantidade,
+      tipoCartela,
+      quantidadeBilhetes,
+    });
+
+    return {
+      ...registroNormalizado,
+      quantidade: quantidadeCartelas,
+    };
   }
 
   private serializarBigIntRecursivo(value: unknown): unknown {
@@ -1067,6 +1124,28 @@ export class VendasService {
   private normalizarTextoOpcional(value: string): string | null {
     const normalizedValue = value.trim();
     return normalizedValue ? normalizedValue : null;
+  }
+
+  private normalizarQuantidadeCartelasDaSolicitacao(
+    dto: CreateVendaDto,
+    user?: RequestUser,
+  ): number | undefined {
+    if (dto.quantidadeCartelas === undefined || dto.quantidadeCartelas === null) {
+      return undefined;
+    }
+
+    if (
+      user?.perfil === 'ADMIN' &&
+      !dto.tipoCartela &&
+      dto.quantidadeCartelas === dto.quantidade
+    ) {
+      this.logger.warn(
+        `Venda manual com quantidadeCartelas=${dto.quantidadeCartelas} igual a quantidade=${dto.quantidade}; tratando como ${TipoCartela.UMA_CHANCE} para evitar cobrança dobrada`,
+      );
+      return undefined;
+    }
+
+    return dto.quantidadeCartelas;
   }
 
   private parseDataNascimento(value: string): Date {
