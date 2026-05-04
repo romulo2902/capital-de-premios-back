@@ -36,18 +36,22 @@ export class ClientesService {
     vendedorId: string | null | undefined,
     distribuidorId: string | null | undefined,
   ): Promise<void> {
-    if (vendedorId && distribuidorId) {
-      throw new ConflictException(
-        'Informe apenas vendedorId ou distribuidorId',
-      );
-    }
-
     if (vendedorId) {
       const vendedor = await this.prisma.vendedor.findUnique({
         where: { id: vendedorId },
+        select: { id: true, distribuidorId: true },
       });
       if (!vendedor) {
         throw new NotFoundException('Vendedor não encontrado');
+      }
+
+      if (
+        distribuidorId &&
+        vendedor.distribuidorId !== distribuidorId
+      ) {
+        throw new ConflictException(
+          'O vendedor informado não pertence ao distribuidor informado',
+        );
       }
     }
 
@@ -286,7 +290,7 @@ export class ClientesService {
   }
 
   async update(id: string, dto: UpdateClienteDto) {
-    await this.findOne(id);
+    const clienteAtual = await this.findOne(id);
 
     if (dto.cpf) {
       const conflict = await this.prisma.cliente.findFirst({
@@ -303,17 +307,41 @@ export class ClientesService {
     const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };
     delete data.codigo;
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
-    if (vendedorId !== undefined) {
-      data.vendedorId = vendedorId;
-      if (vendedorId) {
-        data.distribuidorId = null;
+
+    if (vendedorId !== undefined || distribuidorId !== undefined) {
+      const finalVendedorId =
+        vendedorId !== undefined ? vendedorId : clienteAtual.vendedorId;
+      const finalDistribuidorIdBase =
+        distribuidorId !== undefined
+          ? distribuidorId
+          : clienteAtual.distribuidorId;
+
+      let finalDistribuidorId = finalDistribuidorIdBase;
+
+      if (finalVendedorId) {
+        const vendedor = await this.prisma.vendedor.findUnique({
+          where: { id: finalVendedorId },
+          select: { id: true, distribuidorId: true },
+        });
+
+        if (!vendedor) {
+          throw new NotFoundException('Vendedor não encontrado');
+        }
+
+        if (
+          finalDistribuidorId &&
+          vendedor.distribuidorId !== finalDistribuidorId
+        ) {
+          throw new ConflictException(
+            'O vendedor informado não pertence ao distribuidor informado',
+          );
+        }
+
+        finalDistribuidorId = vendedor.distribuidorId;
       }
-    }
-    if (distribuidorId !== undefined) {
-      data.distribuidorId = distribuidorId;
-      if (distribuidorId) {
-        data.vendedorId = null;
-      }
+
+      data.vendedorId = finalVendedorId ?? null;
+      data.distribuidorId = finalDistribuidorId ?? null;
     }
 
     return this.prisma.cliente.update({

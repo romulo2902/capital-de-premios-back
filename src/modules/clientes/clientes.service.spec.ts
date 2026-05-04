@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClientesService } from './clientes.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 
 describe('ClientesService', () => {
   let service: ClientesService;
@@ -123,15 +123,18 @@ describe('ClientesService', () => {
     mockPrisma.cliente.findUnique.mockResolvedValueOnce({
       id: 'cliente-1',
       nome: 'Cliente Teste',
+      vendedorId: 'vendedor-1',
+      distribuidorId: 'distribuidor-1',
     });
     mockPrisma.vendedor.findUnique.mockResolvedValue({
       id: 'vendedor-1',
       nome: 'Vendedor Teste',
+      distribuidorId: 'distribuidor-1',
     });
     mockPrisma.cliente.update.mockResolvedValue({
       id: 'cliente-1',
       vendedorId: 'vendedor-1',
-      distribuidorId: null,
+      distribuidorId: 'distribuidor-1',
     });
 
     await service.update('cliente-1', {
@@ -144,29 +147,37 @@ describe('ClientesService', () => {
         where: { id: 'cliente-1' },
         data: expect.objectContaining({
           vendedorId: 'vendedor-1',
-          distribuidorId: null,
+          distribuidorId: 'distribuidor-1',
         }),
       }),
     );
   });
 
-  it('update should clear distribuidorId when vendedorId is informado', async () => {
+  it('update should manter vendedor e distribuidor quando ambos sao informados', async () => {
     mockPrisma.cliente.findUnique.mockResolvedValueOnce({
       id: 'cliente-2',
       nome: 'Cliente Teste 2',
+      vendedorId: null,
+      distribuidorId: null,
     });
     mockPrisma.vendedor.findUnique.mockResolvedValue({
       id: 'vendedor-2',
       nome: 'Vendedor Teste 2',
+      distribuidorId: 'distribuidor-2',
+    });
+    mockPrisma.distribuidor.findUnique.mockResolvedValue({
+      id: 'distribuidor-2',
+      nome: 'Distribuidor Teste 2',
     });
     mockPrisma.cliente.update.mockResolvedValue({
       id: 'cliente-2',
       vendedorId: 'vendedor-2',
-      distribuidorId: null,
+      distribuidorId: 'distribuidor-2',
     });
 
     await service.update('cliente-2', {
       vendedorId: 'vendedor-2',
+      distribuidorId: 'distribuidor-2',
     });
 
     expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
@@ -174,9 +185,34 @@ describe('ClientesService', () => {
         where: { id: 'cliente-2' },
         data: expect.objectContaining({
           vendedorId: 'vendedor-2',
-          distribuidorId: null,
+          distribuidorId: 'distribuidor-2',
         }),
       }),
     );
+  });
+
+  it('update should reject vendedor vinculado a outro distribuidor', async () => {
+    mockPrisma.cliente.findUnique.mockResolvedValueOnce({
+      id: 'cliente-3',
+      nome: 'Cliente Teste 3',
+      vendedorId: null,
+      distribuidorId: null,
+    });
+    mockPrisma.vendedor.findUnique.mockResolvedValue({
+      id: 'vendedor-3',
+      nome: 'Vendedor Teste 3',
+      distribuidorId: 'distribuidor-correto',
+    });
+    mockPrisma.distribuidor.findUnique.mockResolvedValue({
+      id: 'distribuidor-incorreto',
+      nome: 'Distribuidor Incorreto',
+    });
+
+    await expect(
+      service.update('cliente-3', {
+        vendedorId: 'vendedor-3',
+        distribuidorId: 'distribuidor-incorreto',
+      }),
+    ).rejects.toThrow(ConflictException);
   });
 });
