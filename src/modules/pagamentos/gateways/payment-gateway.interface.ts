@@ -1,7 +1,7 @@
 /**
  * Interface abstrata para gateways de pagamento.
  *
- * Toda integração com provedor de pagamento (PIX Inter, cartão, etc.)
+ * Toda integração com provedor de pagamento (PagBank PIX, PagBank Cartão, etc.)
  * deve implementar esta interface para ser plugável no sistema.
  */
 
@@ -23,6 +23,18 @@ export interface CriarCobrancaInput {
 
   /** Tempo de expiração em segundos (default: 1800 = 30 min) */
   expiracaoSegundos?: number;
+
+  /**
+   * Token do cartão gerado pelo SDK PagBank no frontend.
+   * Obrigatório para TipoPagamento.CARTAO.
+   */
+  cardToken?: string;
+
+  /**
+   * Número de parcelas (default: 1).
+   * Aplicável apenas a TipoPagamento.CARTAO.
+   */
+  installments?: number;
 }
 
 export interface CriarCobrancaOutput {

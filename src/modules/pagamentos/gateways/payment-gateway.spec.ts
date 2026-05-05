@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TipoPagamento } from '@prisma/client';
-import { NotImplementedException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { PaymentGatewayFactory } from './payment-gateway.factory';
-import { InterPixGateway } from './inter-pix.gateway';
-import { CartaoCreditGateway } from './cartao-credit.gateway';
+import { PagBankPixGateway } from './pagbank-pix.gateway';
+import { PagBankCartaoGateway } from './pagbank-cartao.gateway';
 import { ConfigService } from '@nestjs/config';
 
 describe('PaymentGateway', () => {
@@ -11,15 +11,15 @@ describe('PaymentGateway', () => {
 
   describe('PaymentGatewayFactory', () => {
     let factory: PaymentGatewayFactory;
-    let interPixGateway: InterPixGateway;
-    let cartaoCreditGateway: CartaoCreditGateway;
+    let pagBankPixGateway: PagBankPixGateway;
+    let pagBankCartaoGateway: PagBankCartaoGateway;
 
     beforeEach(async () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           PaymentGatewayFactory,
           {
-            provide: InterPixGateway,
+            provide: PagBankPixGateway,
             useValue: {
               criarCobranca: jest.fn(),
               consultarCobranca: jest.fn(),
@@ -27,7 +27,7 @@ describe('PaymentGateway', () => {
             },
           },
           {
-            provide: CartaoCreditGateway,
+            provide: PagBankCartaoGateway,
             useValue: {
               criarCobranca: jest.fn(),
               consultarCobranca: jest.fn(),
@@ -38,22 +38,23 @@ describe('PaymentGateway', () => {
       }).compile();
 
       factory = module.get<PaymentGatewayFactory>(PaymentGatewayFactory);
-      interPixGateway = module.get<InterPixGateway>(InterPixGateway);
-      cartaoCreditGateway = module.get<CartaoCreditGateway>(CartaoCreditGateway);
+      pagBankPixGateway = module.get<PagBankPixGateway>(PagBankPixGateway);
+      pagBankCartaoGateway =
+        module.get<PagBankCartaoGateway>(PagBankCartaoGateway);
     });
 
     it('should be defined', () => {
       expect(factory).toBeDefined();
     });
 
-    it('should return InterPixGateway for TipoPagamento.PIX', () => {
+    it('should return PagBankPixGateway for TipoPagamento.PIX', () => {
       const gateway = factory.getGateway(TipoPagamento.PIX);
-      expect(gateway).toBe(interPixGateway);
+      expect(gateway).toBe(pagBankPixGateway);
     });
 
-    it('should return CartaoCreditGateway for TipoPagamento.CARTAO', () => {
+    it('should return PagBankCartaoGateway for TipoPagamento.CARTAO', () => {
       const gateway = factory.getGateway(TipoPagamento.CARTAO);
-      expect(gateway).toBe(cartaoCreditGateway);
+      expect(gateway).toBe(pagBankCartaoGateway);
     });
 
     it('should throw for TipoPagamento.MANUAL', () => {
@@ -63,72 +64,89 @@ describe('PaymentGateway', () => {
     });
   });
 
-  // ─── CartaoCreditGateway (stub) ───────────────────────
+  // ─── PagBankCartaoGateway — validação cardToken ───────
 
-  describe('CartaoCreditGateway', () => {
-    let gateway: CartaoCreditGateway;
+  describe('PagBankCartaoGateway', () => {
+    let gateway: PagBankCartaoGateway;
 
-    beforeEach(() => {
-      gateway = new CartaoCreditGateway();
+    beforeEach(async () => {
+      const mockConfigService = {
+        get: jest
+          .fn()
+          .mockImplementation((key: string, defaultValue?: string) => {
+            const config: Record<string, string> = {
+              PAGBANK_API_URL: 'https://sandbox.api.pagseguro.com',
+              PAGBANK_CLIENT_ID: 'test-client-id',
+              PAGBANK_CLIENT_SECRET: 'test-client-secret',
+            };
+            return config[key] ?? defaultValue ?? '';
+          }),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PagBankCartaoGateway,
+          { provide: ConfigService, useValue: mockConfigService },
+        ],
+      }).compile();
+
+      gateway = module.get<PagBankCartaoGateway>(PagBankCartaoGateway);
     });
 
     it('should be defined', () => {
       expect(gateway).toBeDefined();
     });
 
-    it('criarCobranca should throw NotImplementedException', async () => {
+    it('criarCobranca should throw BadRequestException when cardToken is missing', async () => {
       await expect(
         gateway.criarCobranca({
-          vendaId: 'venda-1',
+          vendaId: 'venda-uuid-1',
           valorCentavos: 6000,
-          descricao: 'Teste',
+          descricao: 'Teste cartão',
           cpfPagador: '12345678900',
-          nomePagador: 'Teste',
+          nomePagador: 'João Teste',
+          // cardToken ausente propositalmente
         }),
-      ).rejects.toThrow(NotImplementedException);
+      ).rejects.toThrow(BadRequestException);
     });
 
-    it('consultarCobranca should throw NotImplementedException', async () => {
-      await expect(
-        gateway.consultarCobranca('gateway-id'),
-      ).rejects.toThrow(NotImplementedException);
+    it('should have consultarCobranca method', () => {
+      expect(typeof gateway.consultarCobranca).toBe('function');
     });
 
-    it('cancelarCobranca should throw NotImplementedException', async () => {
-      await expect(
-        gateway.cancelarCobranca('gateway-id'),
-      ).rejects.toThrow(NotImplementedException);
+    it('should have cancelarCobranca method', () => {
+      expect(typeof gateway.cancelarCobranca).toBe('function');
     });
   });
 
-  // ─── InterPixGateway ──────────────────────────────────
+  // ─── PagBankPixGateway ────────────────────────────────
 
-  describe('InterPixGateway', () => {
-    let gateway: InterPixGateway;
+  describe('PagBankPixGateway', () => {
+    let gateway: PagBankPixGateway;
 
     beforeEach(async () => {
       const mockConfigService = {
-        get: jest.fn().mockImplementation((key: string, defaultValue?: string) => {
-          const config: Record<string, string> = {
-            INTER_API_URL: 'https://test.inter.co',
-            INTER_CLIENT_ID: 'test-client-id',
-            INTER_CLIENT_SECRET: 'test-client-secret',
-            INTER_CERT_PATH: '/tmp/test-cert.crt',
-            INTER_KEY_PATH: '/tmp/test-key.key',
-            INTER_PIX_KEY: 'test-pix-key',
-          };
-          return config[key] ?? defaultValue ?? '';
-        }),
+        get: jest
+          .fn()
+          .mockImplementation((key: string, defaultValue?: string) => {
+            const config: Record<string, string> = {
+              PAGBANK_API_URL: 'https://sandbox.api.pagseguro.com',
+              PAGBANK_CLIENT_ID: 'test-client-id',
+              PAGBANK_CLIENT_SECRET: 'test-client-secret',
+              PAGBANK_PIX_KEY: 'test@pix.key',
+            };
+            return config[key] ?? defaultValue ?? '';
+          }),
       };
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
-          InterPixGateway,
+          PagBankPixGateway,
           { provide: ConfigService, useValue: mockConfigService },
         ],
       }).compile();
 
-      gateway = module.get<InterPixGateway>(InterPixGateway);
+      gateway = module.get<PagBankPixGateway>(PagBankPixGateway);
     });
 
     it('should be defined', () => {

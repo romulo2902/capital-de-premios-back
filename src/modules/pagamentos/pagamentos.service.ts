@@ -24,54 +24,84 @@ export class PagamentosService {
     private readonly distributedLock: DistributedLockService,
   ) {}
 
-  // ─── WEBHOOK PIX (Inter) ──────────────────────────────
+  // ─── WEBHOOK PIX (PagBank) ────────────────────────────
 
   async processarWebhookPix(body: Record<string, unknown>) {
-    this.logger.log(`Webhook PIX recebido: ${JSON.stringify(body)}`);
+    this.logger.log(`Webhook PIX PagBank recebido: ${JSON.stringify(body)}`);
+    return this.processarWebhookPagBank(body);
+  }
 
+  // ─── WEBHOOK CARTÃO (PagBank) ─────────────────────────
+
+  async processarWebhookCartao(body: Record<string, unknown>) {
+    this.logger.log(`Webhook Cartão PagBank recebido: ${JSON.stringify(body)}`);
+    return this.processarWebhookPagBank(body);
+  }
+
+  // ─── PROCESSAMENTO INTERNO DE WEBHOOK PAGBANK ─────────
+  //
+  // O PagBank envia eventos no formato:
+  // { "event": "CHARGE.PAID", "charges": [{ "id": "CHAR_...", "status": "PAID", ... }] }
+  //
+  // O gatewayId no banco é o `charge.id` retornado na criação da cobrança.
+
+  private async processarWebhookPagBank(body: Record<string, unknown>) {
     if (!body) {
-      this.logger.warn('Webhook PIX recebido com body vazio ou nulo.');
+      this.logger.warn('Webhook PagBank recebido com body vazio ou nulo.');
       return { message: 'Webhook recebido (sem dados)' };
     }
 
-    // O Inter envia o webhook com a lista de pix pagos
-    const pixArray = body['pix'] as Array<Record<string, unknown>> | undefined;
+    const evento = body['event'] as string | undefined;
+    const charges = body['charges'] as
+      | Array<Record<string, unknown>>
+      | undefined;
 
-    if (!pixArray || !Array.isArray(pixArray) || pixArray.length === 0) {
-      this.logger.warn('Webhook PIX sem dados de pagamento');
+    if (!charges || !Array.isArray(charges) || charges.length === 0) {
+      this.logger.warn(
+        `Webhook PagBank sem charges (event=${evento ?? 'N/A'})`,
+      );
       return { message: 'Webhook recebido (sem dados de pagamento)' };
     }
 
-    const resultados: Array<{ txid: string; status: string }> = [];
+    const resultados: Array<{ chargeId: string; status: string }> = [];
 
-    for (const pix of pixArray) {
-      const txid = pix['txid'] as string | undefined;
+    for (const charge of charges) {
+      const chargeId = charge['id'] as string | undefined;
+      const chargeStatus = charge['status'] as string | undefined;
 
-      if (!txid) {
-        this.logger.warn('Pix sem txid no webhook');
+      if (!chargeId) {
+        this.logger.warn('Charge sem id no webhook PagBank');
         continue;
       }
 
-      const lockKey = `lock:pix:webhook:${txid}`;
+      // Processar apenas cobranças pagas
+      if (chargeStatus !== 'PAID') {
+        this.logger.log(
+          `Charge ${chargeId} ignorada (status=${chargeStatus ?? 'N/A'})`,
+        );
+        resultados.push({ chargeId, status: `IGNORADO_${chargeStatus ?? 'DESCONHECIDO'}` });
+        continue;
+      }
+
+      const lockKey = `lock:pagbank:webhook:${chargeId}`;
       const lock = await this.distributedLock.acquire(lockKey, 30_000);
       if (!lock) {
         this.logger.warn(
-          `Webhook PIX ignorado temporariamente para txid ${txid} (já em processamento em outra instância)`,
+          `Webhook PagBank ignorado temporariamente para chargeId ${chargeId} (já em processamento em outra instância)`,
         );
-        resultados.push({ txid, status: 'EM_PROCESSAMENTO' });
+        resultados.push({ chargeId, status: 'EM_PROCESSAMENTO' });
         continue;
       }
 
       try {
-        // Buscar venda pelo gatewayId (que é o txid)
         const venda = await this.prisma.venda.findFirst({
-          where: { gatewayId: txid },
+          where: { gatewayId: chargeId },
           select: { id: true, status: true },
         });
 
         if (!venda) {
-          this.logger.warn(`Venda não encontrada para txid: ${txid}`);
-          resultados.push({ txid, status: 'VENDA_NAO_ENCONTRADA' });
+          this.logger.warn(`Venda não encontrada para chargeId: ${chargeId}`);
+          resultados.push({ chargeId, status: 'VENDA_NAO_ENCONTRADA' });
           continue;
         }
 
@@ -79,21 +109,25 @@ export class PagamentosService {
           this.logger.log(
             `Venda ${venda.id} já processada (status: ${venda.status})`,
           );
-          resultados.push({ txid, status: 'JA_PROCESSADA' });
+          resultados.push({ chargeId, status: 'JA_PROCESSADA' });
           continue;
         }
 
         await this.vendasService.confirmarPagamento(
           venda.id,
-          pix as Record<string, unknown>,
+          charge as Record<string, unknown>,
         );
-        resultados.push({ txid, status: 'CONFIRMADA' });
-        this.logger.log(`Pagamento confirmado via webhook para venda ${venda.id}`);
+        resultados.push({ chargeId, status: 'CONFIRMADA' });
+        this.logger.log(
+          `Pagamento confirmado via webhook PagBank para venda ${venda.id}`,
+        );
       } catch (error) {
         this.logger.error(
-          `Erro ao confirmar pagamento por txid ${txid}: ${error instanceof Error ? error.message : String(error)}`,
+          `Erro ao confirmar pagamento por chargeId ${chargeId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
-        resultados.push({ txid, status: 'ERRO' });
+        resultados.push({ chargeId, status: 'ERRO' });
       } finally {
         await this.distributedLock.release(lock);
       }

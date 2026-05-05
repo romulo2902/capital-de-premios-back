@@ -1,8 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PagamentosController } from './pagamentos.controller';
 import { PagamentosService } from './pagamentos.service';
-import { InterPixGateway } from './gateways/inter-pix.gateway';
-import { CartaoCreditGateway } from './gateways/cartao-credit.gateway';
+import { PagBankPixGateway } from './gateways/pagbank-pix.gateway';
+import { PagBankCartaoGateway } from './gateways/pagbank-cartao.gateway';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { VendasModule } from '../vendas/vendas.module';
 
@@ -11,8 +11,8 @@ import { VendasModule } from '../vendas/vendas.module';
   controllers: [PagamentosController],
   providers: [
     PagamentosService,
-    InterPixGateway,
-    CartaoCreditGateway,
+    PagBankPixGateway,
+    PagBankCartaoGateway,
     PaymentGatewayFactory,
   ],
   exports: [PagamentosService, PaymentGatewayFactory],

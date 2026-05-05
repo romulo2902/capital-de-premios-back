@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TipoPagamento } from '@prisma/client';
-import { InterPixGateway } from './inter-pix.gateway';
-import { CartaoCreditGateway } from './cartao-credit.gateway';
+import { PagBankPixGateway } from './pagbank-pix.gateway';
+import { PagBankCartaoGateway } from './pagbank-cartao.gateway';
 import type { PaymentGateway } from './payment-gateway.interface';
 
 /**
@@ -11,16 +11,16 @@ import type { PaymentGateway } from './payment-gateway.interface';
 @Injectable()
 export class PaymentGatewayFactory {
   constructor(
-    private readonly interPixGateway: InterPixGateway,
-    private readonly cartaoCreditGateway: CartaoCreditGateway,
+    private readonly pagBankPixGateway: PagBankPixGateway,
+    private readonly pagBankCartaoGateway: PagBankCartaoGateway,
   ) {}
 
   getGateway(tipo: TipoPagamento): PaymentGateway {
     switch (tipo) {
       case TipoPagamento.PIX:
-        return this.interPixGateway;
+        return this.pagBankPixGateway;
       case TipoPagamento.CARTAO:
-        return this.cartaoCreditGateway;
+        return this.pagBankCartaoGateway;
       case TipoPagamento.MANUAL:
         throw new Error(
           'TipoPagamento.MANUAL não utiliza gateway de pagamento',

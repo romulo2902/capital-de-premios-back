@@ -24,7 +24,8 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
  * Pagamentos — Webhook + Consulta
  *
  * Rotas:
- *   - POST /pagamentos/webhook/pix           → Callback do Inter (sem auth)
+ *   - POST /pagamentos/webhook/pix           → Callback PIX PagBank (sem auth)
+ *   - POST /pagamentos/webhook/cartao        → Callback Cartão PagBank (sem auth)
  *   - GET  /admin/pagamentos                  → Listar pagamentos (ADMIN)
  *   - GET  /admin/pagamentos/:id              → Detalhes de pagamento (ADMIN)
  *   - GET  /admin/pagamentos/vendas/:id/status → Consultar status no gateway (ADMIN)
@@ -34,14 +35,23 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 export class PagamentosController {
   constructor(private readonly pagamentosService: PagamentosService) {}
 
-  // ─── WEBHOOK (sem autenticação) ───────────────────────
+  // ─── WEBHOOKS (sem autenticação) ──────────────────────
 
   @Post('pagamentos/webhook/pix')
   @ApiOperation({
-    summary: 'Webhook PIX do Inter — Notificação de pagamento (sem auth)',
+    summary: 'Webhook PIX do PagBank — Notificação de pagamento (sem auth)',
   })
   webhookPix(@Body() body: Record<string, unknown>) {
     return this.pagamentosService.processarWebhookPix(body);
+  }
+
+  @Post('pagamentos/webhook/cartao')
+  @ApiOperation({
+    summary:
+      'Webhook Cartão de Crédito do PagBank — Notificação de pagamento (sem auth)',
+  })
+  webhookCartao(@Body() body: Record<string, unknown>) {
+    return this.pagamentosService.processarWebhookCartao(body);
   }
 
   // ─── ADMIN ROUTES ─────────────────────────────────────
