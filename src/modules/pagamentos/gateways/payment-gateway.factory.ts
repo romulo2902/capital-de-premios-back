@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { TipoPagamento } from '@prisma/client';
 import { PagBankPixGateway } from './pagbank-pix.gateway';
 import { PagBankCartaoGateway } from './pagbank-cartao.gateway';
+import { MockPixGateway } from './mock-pix.gateway';
+import { ConfigService } from '@nestjs/config';
 import type { PaymentGateway } from './payment-gateway.interface';
 
 /**
@@ -11,14 +13,18 @@ import type { PaymentGateway } from './payment-gateway.interface';
 @Injectable()
 export class PaymentGatewayFactory {
   constructor(
+    private readonly config: ConfigService,
     private readonly pagBankPixGateway: PagBankPixGateway,
+    private readonly mockPixGateway: MockPixGateway,
     private readonly pagBankCartaoGateway: PagBankCartaoGateway,
   ) {}
 
   getGateway(tipo: TipoPagamento): PaymentGateway {
+    const useMock = this.config.get<string>('MOCK_PIX_AUTO_APPROVE') === 'true';
+
     switch (tipo) {
       case TipoPagamento.PIX:
-        return this.pagBankPixGateway;
+        return useMock ? this.mockPixGateway : this.pagBankPixGateway;
       case TipoPagamento.CARTAO:
         return this.pagBankCartaoGateway;
       case TipoPagamento.MANUAL:

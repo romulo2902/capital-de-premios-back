@@ -4,6 +4,7 @@ import { PagamentosService } from './pagamentos.service';
 import { PagBankPixGateway } from './gateways/pagbank-pix.gateway';
 import { PagBankCartaoGateway } from './gateways/pagbank-cartao.gateway';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
+import { MockPixGateway } from './gateways/mock-pix.gateway';
 import { VendasModule } from '../vendas/vendas.module';
 
 @Module({
@@ -12,6 +13,7 @@ import { VendasModule } from '../vendas/vendas.module';
   providers: [
     PagamentosService,
     PagBankPixGateway,
+    MockPixGateway,
     PagBankCartaoGateway,
     PaymentGatewayFactory,
   ],
