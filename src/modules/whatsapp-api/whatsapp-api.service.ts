@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,7 +8,6 @@ import {
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { VendasService } from '../vendas/vendas.service';
 import { PagamentosService } from '../pagamentos/pagamentos.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import {
@@ -22,7 +20,6 @@ import {
 } from '@prisma/client';
 import type { AuthWhatsappDto } from './dto/auth-whatsapp.dto';
 import type { CriarPedidoWhatsappDto } from './dto/criar-pedido-whatsapp.dto';
-import type { PreviewCotasWhatsappDto } from './dto/preview-cotas-whatsapp.dto';
 import type { ConsultarPedidosWhatsappDto } from './dto/consultar-pedidos-whatsapp.dto';
 import type { JwtPayload } from '../auth/auth.service';
 import {
@@ -37,7 +34,6 @@ export class WhatsappApiService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
-    private readonly vendasService: VendasService,
     private readonly pagamentosService: PagamentosService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
   ) {}
@@ -136,10 +132,6 @@ export class WhatsappApiService {
           where: { origemParticipacao: OrigemParticipacao.DIGITAL },
           orderBy: { indiceRange: 'asc' },
         },
-        combos: {
-          where: { origemParticipacao: OrigemParticipacao.DIGITAL },
-          orderBy: { tipoCartela: 'asc' },
-        },
       },
     });
 
@@ -149,16 +141,6 @@ export class WhatsappApiService {
         data: null,
       };
     }
-
-    const opcoesCompra = edicao.combos.map((combo) => ({
-      tipoCartela: combo.tipoCartela,
-      quantidadeChances: obterQuantidadeChances(combo.tipoCartela),
-      preco: combo.preco.toString(),
-      precoFormatado: new Intl.NumberFormat('pt-BR', {
-        style: 'currency',
-        currency: 'BRL',
-      }).format(Number(combo.preco)),
-    }));
 
     return {
       message: 'Campanha ativa encontrada',
@@ -172,8 +154,11 @@ export class WhatsappApiService {
         dataSorteio: edicao.dataSorteio,
         dataEncerramento: edicao.dataEncerramento,
         valorCartela: edicao.valorCartela.toString(),
+        valorCartelaFormatado: new Intl.NumberFormat('pt-BR', {
+          style: 'currency',
+          currency: 'BRL',
+        }).format(Number(edicao.valorCartela)),
         qtdNumerosCartela: edicao.qtdNumerosCartela,
-        opcoesCompra,
         premios: edicao.premios.map((p) => ({
           ordem: p.ordem,
           descricao: p.descricao,
@@ -187,31 +172,12 @@ export class WhatsappApiService {
     };
   }
 
-  // ─── PREVIEW DE COTAS ──────────────────────────────────────────────────────
-
-  /**
-   * Gera preview de combos disponíveis para a campanha informada,
-   * SEM reservar nenhum número. Ideal para o bot mostrar opções antes
-   * da confirmação do cliente.
-   */
-  async previewCotas(edicaoId: string, dto: PreviewCotasWhatsappDto) {
-    return this.vendasService.listarCombosDisponiveis({
-      edicaoId,
-      origemParticipacao: OrigemParticipacao.DIGITAL,
-      tipoCartela: dto.tipoCartela,
-      quantidadeCartelas: dto.quantidadeCartelas,
-      cursorNumeroBase: dto.cursorNumeroBase,
-      direcao: dto.direcao ?? 'PROXIMO',
-      limit: dto.quantidade ?? 1,
-    });
-  }
-
   // ─── CRIAR PEDIDO COM PIX ─────────────────────────────────────────────────
 
   /**
-   * Cria o pedido (venda PENDENTE) e já dispara a geração do PIX no PagBank,
-   * tudo em uma única chamada. Retorna o `pixCopiaECola` para o bot
-   * enviar ao cliente via WhatsApp.
+   * Cria o pedido (venda PENDENTE) e já dispara a geração do PIX no PagBank.
+   * O bot informa apenas a quantidade de cartelas — o sistema seleciona
+   * automaticamente o tipo de cartela disponível na campanha.
    */
   async criarPedidoComPix(dto: CriarPedidoWhatsappDto, clienteId: string) {
     // Buscar cliente para obter CPF e nome
@@ -227,7 +193,6 @@ export class WhatsappApiService {
     // Buscar edição ativa
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: dto.edicaoId },
-      include: { detalhes: true, combos: true },
     });
 
     if (!edicao) {
@@ -240,21 +205,9 @@ export class WhatsappApiService {
       );
     }
 
-    // Resolver tipo de cartela
-    const tipoCartela = this.resolverTipoCartela(dto);
-    const combo = edicao.combos.find(
-      (c) =>
-        c.origemParticipacao === OrigemParticipacao.DIGITAL &&
-        c.tipoCartela === tipoCartela,
-    );
-
-    if (!combo && edicao.combos.length > 0) {
-      throw new BadRequestException(
-        `Tipo de cartela "${tipoCartela}" não disponível para esta campanha`,
-      );
-    }
-
-    const valorUnitario = Number(combo?.preco ?? edicao.valorCartela);
+    // Para o WhatsApp, só trabalhamos com venda unitária de cartelas (sem combos)
+    const tipoCartela = TipoCartela.UMA_CHANCE;
+    const valorUnitario = Number(edicao.valorCartela);
     const total = valorUnitario * dto.quantidade;
 
     // Criar venda PENDENTE
@@ -263,19 +216,12 @@ export class WhatsappApiService {
         edicaoId: edicao.id,
         clienteId: cliente.id,
         quantidade: dto.quantidade,
-        tipoCartela: tipoCartela ?? TipoCartela.UMA_CHANCE,
+        tipoCartela,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao: OrigemParticipacao.DIGITAL,
         tipoPagamento: TipoPagamento.PIX,
-        gatewayPayload: dto.combosSelecionados
-          ? ({
-              combosSelecionados: dto.combosSelecionados.map((c) => ({
-                numeroBase: c.numeroBase,
-              })),
-              origem: 'WHATSAPP',
-            } as unknown as Prisma.InputJsonValue)
-          : ({ origem: 'WHATSAPP' } as unknown as Prisma.InputJsonValue),
+        gatewayPayload: { origem: 'WHATSAPP' } as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -295,7 +241,7 @@ export class WhatsappApiService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
-        descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${dto.quantidade}x ${tipoCartela ?? 'cartela'}`,
+        descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${dto.quantidade} cartela(s)`,
         cpfPagador: cliente.cpf,
         nomePagador: cliente.nome,
         expiracaoSegundos: 3600, // 60 minutos
@@ -308,20 +254,13 @@ export class WhatsappApiService {
           gatewayPayload: {
             ...((cobranca.payload as Record<string, unknown>) ?? {}),
             origem: 'WHATSAPP',
-            ...(dto.combosSelecionados
-              ? {
-                  combosSelecionados: dto.combosSelecionados.map((c) => ({
-                    numeroBase: c.numeroBase,
-                  })),
-                }
-              : {}),
           } as Prisma.InputJsonValue,
         },
       });
 
       dadosPix = {
         pixCopiaECola: cobranca.pixCopiaECola,
-        qrCodeUrl: cobranca.qrCodeBase64, // URL da imagem do QR Code
+        qrCodeUrl: cobranca.qrCodeBase64,
         expiracaoMinutos: 60,
       };
 
@@ -345,7 +284,6 @@ export class WhatsappApiService {
           currency: 'BRL',
         }).format(total),
         quantidade: dto.quantidade,
-        tipoCartela: tipoCartela ?? TipoCartela.UMA_CHANCE,
         campanha: {
           id: edicao.id,
           numero: edicao.numero,
@@ -690,23 +628,6 @@ export class WhatsappApiService {
   }
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
-
-  private resolverTipoCartela(
-    dto: Pick<CriarPedidoWhatsappDto, 'tipoCartela' | 'quantidadeCartelas'>,
-  ): TipoCartela | undefined {
-    if (dto.tipoCartela) return dto.tipoCartela;
-    if (!dto.quantidadeCartelas) return undefined;
-
-    const mapa: Record<number, TipoCartela> = {
-      1: TipoCartela.UMA_CHANCE,
-      2: TipoCartela.DUAS_CHANCES,
-      3: TipoCartela.TRES_CHANCES,
-      4: TipoCartela.QUATRO_CHANCES,
-      5: TipoCartela.CINCO_CHANCES,
-      6: TipoCartela.SEIS_CHANCES,
-    };
-    return mapa[dto.quantidadeCartelas];
-  }
 
   private mascararCpf(cpf: string): string {
     return `${cpf.substring(0, 3)}.***.***-${cpf.substring(9, 11)}`;
