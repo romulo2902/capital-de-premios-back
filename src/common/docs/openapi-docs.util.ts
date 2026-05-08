@@ -550,6 +550,13 @@ function buildDocsIndexHtml(port: number): string {
           <code>/api/swagger/geral</code>
         </a>
 
+        <a class="card" href="/api/swagger/whatsapp">
+          <span class="eyebrow">Swagger</span>
+          <h2>Swagger WhatsApp</h2>
+          <p>Interface interativa para testar os fluxos da API de vendas via WhatsApp.</p>
+          <code>/api/swagger/whatsapp</code>
+        </a>
+
         <a class="card" href="/api/admin/filas">
           <span class="eyebrow">Bull Board</span>
           <h2>Filas e Tasks</h2>
@@ -561,6 +568,7 @@ function buildDocsIndexHtml(port: number): string {
       <ul>
         <li>JSON Admin: <code>http://localhost:${port}/api/docs-json/admin</code></li>
         <li>JSON Geral: <code>http://localhost:${port}/api/docs-json/geral</code></li>
+        <li>JSON WhatsApp: <code>http://localhost:${port}/api/docs-json/whatsapp</code></li>
       </ul>
 
       <section class="commands">
