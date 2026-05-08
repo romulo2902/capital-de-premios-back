@@ -12,7 +12,9 @@ const SWAGGER_BASE_PATH = 'api/swagger';
 const DOCS_JSON_BASE_PATH = 'api/docs-json';
 const SWAGGER_ADMIN_FLAT_PATH = 'api/swagger-admin';
 const SWAGGER_GERAL_FLAT_PATH = 'api/swagger-geral';
+const SWAGGER_WHATSAPP_FLAT_PATH = 'api/swagger-whatsapp';
 const ADMIN_TAG_PREFIX = 'Admin /';
+const WHATSAPP_TAG = 'WhatsApp API';
 const REDOC_STANDALONE_JS_URL =
   'https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js';
 const DOCS_FAVICON_DATA_URL =
@@ -28,7 +30,7 @@ const HTTP_METHODS = [
   'trace',
 ] as const;
 
-type SwaggerAudience = 'admin' | 'geral' | 'shared';
+type SwaggerAudience = 'admin' | 'geral' | 'whatsapp' | 'shared';
 type HttpMethod = (typeof HTTP_METHODS)[number];
 
 export function setupOpenApiDocs(
@@ -66,6 +68,34 @@ export function setupOpenApiDocs(
       '- A edição precisa chegar em `ENCERRADA` para permitir `POST /api/admin/sorteio/{edicaoId}/iniciar`',
       '- Após iniciar, usar `POST /api/admin/sorteio/{edicaoId}/premio/{premioId}/marcar` para marcar números',
       '- Finalizar em `POST /api/admin/sorteio/{edicaoId}/finalizar`',
+    ].join('\n'),
+  );
+  const whatsappDocument = buildAudienceDocument(
+    fullDocument,
+    'whatsapp',
+    'Capital de Prêmios API - WhatsApp',
+    [
+      '## WhatsApp API — Guia de Integração',
+      '',
+      'Collection dedicada para bots e CRMs que vendem bilhetes via WhatsApp.',
+      '',
+      '### Fluxo recomendado',
+      '',
+      '```',
+      '1. POST /api/whatsapp/auth                         — Registrar/autenticar cliente por CPF',
+      '2. GET  /api/whatsapp/campanhas/ativa              — Consultar campanha/edição ativa',
+      '3. POST /api/whatsapp/campanhas/:id/cotas/preview  — Preview de cotas (sem reservar)',
+      '4. POST /api/whatsapp/pedidos                      — Criar pedido + gerar PIX (requer Bearer)',
+      '5. GET  /api/whatsapp/pedidos/:id/pagamento        — Consultar status do pagamento (requer Bearer)',
+      '6. GET  /api/whatsapp/pedidos/:id/cartelas         — Retornar cartelas compradas (requer Bearer)',
+      '7. GET  /api/whatsapp/pedidos                      — Listar pedidos do cliente (requer Bearer)',
+      '8. POST /api/whatsapp/webhook/pagamento            — Webhook PagBank (sem auth)',
+      '```',
+      '',
+      '### Autenticação',
+      '',
+      'Use o `accessToken` retornado em `POST /api/whatsapp/auth` no header:',
+      '`Authorization: Bearer {accessToken}`',
     ].join('\n'),
   );
   const generalDocument = buildAudienceDocument(
@@ -163,7 +193,49 @@ export function setupOpenApiDocs(
     },
   });
 
-  logger.log(`📚 Docs index: http://localhost:${port}/api/docs`);
+  expressApp.get(
+    `/${SWAGGER_BASE_PATH}/whatsapp`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_WHATSAPP_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
+    `/${SWAGGER_BASE_PATH}/whatsapp/`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_WHATSAPP_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
+    `/${DOCS_JSON_BASE_PATH}/whatsapp`,
+    (_request: unknown, response: Response) => {
+      response.json(whatsappDocument);
+    },
+  );
+  expressApp.get(
+    `/${DOCS_BASE_PATH}/whatsapp`,
+    (_request: unknown, response: Response) => {
+      response
+        .type('html')
+        .send(
+          buildRedocHtml(
+            'Capital de Prêmios API - WhatsApp',
+            `/${DOCS_JSON_BASE_PATH}/whatsapp`,
+          ),
+        );
+    },
+  );
+  SwaggerModule.setup(SWAGGER_WHATSAPP_FLAT_PATH, app, whatsappDocument, {
+    customSiteTitle: 'Capital de Prêmios API - Swagger WhatsApp',
+    swaggerOptions: {
+      persistAuthorization: true,
+      url: `/${DOCS_JSON_BASE_PATH}/whatsapp`,
+    },
+  });
+  logger.log(`📚 Redoc WhatsApp: http://localhost:${port}/api/docs/whatsapp`);
+  logger.log(`📚 Swagger WhatsApp: http://localhost:${port}/api/swagger/whatsapp`);
+  logger.log(
+    `📚 OpenAPI WhatsApp JSON: http://localhost:${port}/api/docs-json/whatsapp`,
+  );
   logger.log(`📚 Redoc Admin: http://localhost:${port}/api/docs/admin`);
   logger.log(`📚 Redoc Geral: http://localhost:${port}/api/docs/geral`);
   logger.log(`📚 Swagger Admin: http://localhost:${port}/api/swagger/admin`);
@@ -208,6 +280,10 @@ function getSwaggerAudience(
   // Login cliente é do painel geral (CLIENTE loga por /auth/loja)
   if (path.endsWith('/auth/loja')) {
     return 'geral';
+  }
+
+  if (path.includes('/whatsapp/')) {
+    return 'whatsapp';
   }
 
   if (
@@ -451,6 +527,13 @@ function buildDocsIndexHtml(port: number): string {
           <h2>Redoc Geral</h2>
           <p>Rotas da loja, autenticações não administrativas e demais recursos da API.</p>
           <code>/api/docs/geral</code>
+        </a>
+
+        <a class="card" href="/api/docs/whatsapp">
+          <span class="eyebrow">Redoc</span>
+          <h2>Redoc WhatsApp</h2>
+          <p>Collection dedicada para bots e CRMs que vendem bilhetes via WhatsApp.</p>
+          <code>/api/docs/whatsapp</code>
         </a>
 
         <a class="card" href="/api/swagger/admin">
