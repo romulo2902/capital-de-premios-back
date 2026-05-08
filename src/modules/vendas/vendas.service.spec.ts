@@ -137,6 +137,7 @@ describe('VendasService', () => {
         expect.objectContaining({
           id: 'venda-1',
           total: '60.00',
+          totalFormatado: 'R$ 60,00',
         }),
       ]);
     });

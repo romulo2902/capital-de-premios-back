@@ -990,7 +990,12 @@ export class VendasService {
     }
 
     const serializado = this.serializarBigIntRecursivo(venda);
-    return this.normalizarQuantidadeCartelasNaResposta(serializado) as T;
+    const comQuantidadeNormalizada =
+      this.normalizarQuantidadeCartelasNaResposta(serializado);
+
+    return this.adicionarValoresFormatadosNaResposta(
+      comQuantidadeNormalizada,
+    ) as T;
   }
 
   private normalizarQuantidadeCartelasNaResposta(value: unknown): unknown {
@@ -1043,6 +1048,42 @@ export class VendasService {
     return {
       ...registroNormalizado,
       quantidade: quantidadeCartelas,
+    };
+  }
+
+  private adicionarValoresFormatadosNaResposta(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.adicionarValoresFormatadosNaResposta(item));
+    }
+
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+
+    const registro = value as Record<string, unknown>;
+    const registroFormatado = Object.fromEntries(
+      Object.entries(registro).map(([key, entryValue]) => [
+        key,
+        this.adicionarValoresFormatadosNaResposta(entryValue),
+      ]),
+    ) as Record<string, unknown>;
+
+    if (typeof registroFormatado.total !== 'string') {
+      return registroFormatado;
+    }
+
+    const totalNumerico = Number(registroFormatado.total);
+
+    if (Number.isNaN(totalNumerico)) {
+      return registroFormatado;
+    }
+
+    return {
+      ...registroFormatado,
+      totalFormatado: new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+      }).format(totalNumerico),
     };
   }
 
