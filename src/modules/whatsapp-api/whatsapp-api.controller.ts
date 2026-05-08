@@ -20,6 +20,7 @@ import {
 import { WhatsappApiService } from './whatsapp-api.service';
 import { AuthWhatsappDto } from './dto/auth-whatsapp.dto';
 import { CriarPedidoWhatsappDto } from './dto/criar-pedido-whatsapp.dto';
+import { PreviewCotasWhatsappDto } from './dto/preview-cotas-whatsapp.dto';
 import { ConsultarPedidosWhatsappDto } from './dto/consultar-pedidos-whatsapp.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -30,7 +31,7 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
 /**
  * ## WhatsApp API — Guia de Integração
  *
- * Collection dedicada para bots e CRMs que operam via WhatsApp
+ * Esta collection é destinada a **bots e CRMs** que operam via WhatsApp
  * para vender bilhetes da Capital de Prêmios de forma automatizada.
  *
  * ---
@@ -44,23 +45,27 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
  *
  * 2. Consultar a campanha ativa
  *    → GET /api/whatsapp/campanhas/ativa
- *    → Retorna: id da edição e o valor unitário da cartela
+ *    → Retorna: id da edição, preços, prêmios, deadline
  *
- * 3. Criar o pedido informando quantidade de cartelas → gera PIX
+ * 3. (Opcional) Gerar preview das cotas disponíveis
+ *    → POST /api/whatsapp/campanhas/{id}/cotas/preview
+ *    → Retorna: combos com números disponíveis (sem reservar)
+ *
+ * 4. Criar o pedido e receber o QR Code / Copia-e-Cola PIX
  *    → POST /api/whatsapp/pedidos  [Bearer]
  *    → Retorna: pedidoId + pixCopiaECola + qrCodeUrl
  *
- * 4. Enviar o código PIX ao cliente via WhatsApp e aguardar pagamento
+ * 5. Enviar o código PIX ao cliente via WhatsApp e aguardar pagamento
  *
- * 5. Consultar status do pagamento (polling)
+ * 6. Consultar status do pagamento
  *    → GET /api/whatsapp/pedidos/{id}/pagamento  [Bearer]
  *    → Retorna: status (PENDENTE / APROVADO / CANCELADO)
  *
- * 6. Após APROVADO — retornar as cartelas com os números
+ * 7. Após APROVADO — retornar as cartelas com os números sorteados
  *    → GET /api/whatsapp/pedidos/{id}/cartelas  [Bearer]
  *    → Retorna: lista de cartelas com números e sequência de bolas
  *
- * 7. Consultar pedidos anteriores do cliente
+ * 8. Consultar pedidos anteriores do cliente
  *    → GET /api/whatsapp/pedidos  [Bearer]
  * ```
  *
@@ -98,7 +103,7 @@ Registra um novo cliente ou autentica um cliente existente usando o CPF como ide
 - **CPF existente:** atualiza nome e telefone e retorna o JWT.
 
 **Por que telefone é obrigatório?**
-O telefone é o canal de origem (WhatsApp) e é usado para consultar pedidos futuros.
+O telefone é necessário pois é o canal de origem (WhatsApp) e também usado para consultar pedidos futuros.
 
 **Retorno:** \`accessToken\` (JWT válido por 15 min) + \`refreshToken\` (válido por 7 dias).
     `.trim(),
@@ -140,7 +145,7 @@ O telefone é o canal de origem (WhatsApp) e é usado para consultar pedidos fut
 Retorna os dados completos da campanha de sorteio ativa no momento.
 
 **Uso:** O bot deve chamar esta rota para obter o \`id\` da edição (necessário para criar pedidos)
-e o valor unitário da cartela (\`valorCartela\`).
+e as opções de compra disponíveis (tipos de cartela e preços).
 
 Se não houver campanha ativa, retorna \`data: null\`.
     `.trim(),
@@ -162,8 +167,15 @@ Se não houver campanha ativa, retorna \`data: null\`.
           dataSorteio: '2026-06-01T15:00:00.000Z',
           dataEncerramento: '2026-05-31T23:59:00.000Z',
           valorCartela: '10.00',
-          valorCartelaFormatado: 'R$ 10,00',
           qtdNumerosCartela: 15,
+          opcoesCompra: [
+            {
+              tipoCartela: 'SEIS_CHANCES',
+              quantidadeChances: 6,
+              preco: '10.00',
+              precoFormatado: 'R$ 10,00',
+            },
+          ],
           premios: [
             { ordem: 1, descricao: '1º Prêmio — Carro 0km', valor: '50000.00', valorFormatado: 'R$ 50.000,00' },
           ],
@@ -175,23 +187,79 @@ Se não houver campanha ativa, retorna \`data: null\`.
     return this.service.consultarCampanhaAtiva();
   }
 
-  // ─── 3. CRIAR PEDIDO COM PIX ──────────────────────────────────────────────
+  // ─── 3. PREVIEW DE COTAS ──────────────────────────────────────────────────
+
+  @Post('campanhas/:id/cotas/preview')
+  @ApiOperation({
+    summary: '3. Gerar preview de cotas/combos disponíveis (sem reservar)',
+    description: `
+Gera uma prévia dos combos (conjuntos de números) disponíveis para a campanha,
+**sem reservar** nenhum número. Ideal para mostrar ao cliente as opções antes da confirmação.
+
+**Paginação:** Use \`cursorNumeroBase\` + \`direcao\` para navegar entre os combos disponíveis.
+
+**Atenção:** Os números retornados aqui **não estão reservados**. Podem ser adquiridos por outro
+cliente antes do pedido ser finalizado.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID da edição ativa (obtido em GET /whatsapp/campanhas/ativa)',
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  })
+  @ApiBody({ type: PreviewCotasWhatsappDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Preview de cotas retornado.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Combos disponíveis listados com sucesso',
+        data: {
+          edicaoId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          edicaoNumero: '001',
+          tipoCartela: 'SEIS_CHANCES',
+          quantidadeChances: 6,
+          cursorNumeroBaseAtual: '0001234',
+          combos: [
+            {
+              ordemSequencia: 1,
+              numeroBase: '0001234',
+              bilhetes: [
+                { ordem: 1, numero: '0001234', sequenciaBolas: [1, 5, 12, 23, 37, 42] },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Campanha inativa ou tipo de cartela inválido.' })
+  @ApiResponse({ status: 404, description: 'Campanha não encontrada.' })
+  previewCotas(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PreviewCotasWhatsappDto,
+  ) {
+    return this.service.previewCotas(id, dto);
+  }
+
+  // ─── 4. CRIAR PEDIDO COM PIX ──────────────────────────────────────────────
 
   @Post('pedidos')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
   @ApiOperation({
-    summary: '3. 🔒 Criar pedido e gerar PIX',
+    summary: '4. 🔒 Criar pedido e gerar PIX (operação combinada)',
     description: `
-Cria um pedido e gera automaticamente a cobrança PIX no PagBank em uma única chamada.
+Cria um pedido com status **PENDENTE** e gera automaticamente a cobrança PIX no PagBank,
+retornando o código Copia-e-Cola e a URL do QR Code para o bot enviar ao cliente.
 
-**Fluxo:** Informe a quantidade de cartelas — os números são gerados e validados automaticamente após a aprovação do PIX.
-O bot recebe o \`pixCopiaECola\` e a URL do QR Code para enviar ao cliente via WhatsApp.
-
-**Campos:**
-- \`edicaoId\` — ID da campanha ativa (obtido em \`GET /whatsapp/campanhas/ativa\`)
-- \`quantidade\` — quantas cartelas comprar (mínimo 1)
+**Fluxo interno:**
+1. Valida a campanha ativa
+2. Cria a venda com status PENDENTE
+3. Chama o gateway PagBank (PIX)
+4. Retorna os dados do PIX
 
 **⚠️ Se o PIX falhar (gateway indisponível):** O pedido é criado com status PENDENTE mas sem
 dados de PIX. O bot deve informar ao cliente e sugerir tentar novamente.
@@ -210,23 +278,23 @@ dados de PIX. O bot deve informar ao cliente e sugerir tentar novamente.
         data: {
           pedidoId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
           status: 'PENDENTE',
-          total: '20.00',
-          totalFormatado: 'R$ 20,00',
-          quantidade: 2,
-          tipoCartela: 'UMA_CHANCE',
+          total: '10.00',
+          totalFormatado: 'R$ 10,00',
+          quantidade: 1,
+          tipoCartela: 'SEIS_CHANCES',
           campanha: { id: 'a1b2c3d4...', numero: '001' },
           pagamento: {
             tipo: 'PIX',
             pixCopiaECola: '00020126580014br.gov.bcb.pix0136...',
             qrCodeUrl: 'https://assets.pagseguro.com.br/qrcode/...',
             expiracaoMinutos: 60,
-            instrucoes: 'Copie o código PIX e pague no seu banco. O pedido é confirmado automaticamente após o pagamento.',
+            instrucoes: 'Copie o código PIX e pague no seu banco...',
           },
         },
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Campanha inativa ou tipo de cartela inválido.' })
+  @ApiResponse({ status: 400, description: 'Campanha inativa, tipo de cartela inválido ou combinação incorreta de campos.' })
   @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
   @ApiResponse({ status: 404, description: 'Campanha não encontrada.' })
   criarPedido(
@@ -236,14 +304,14 @@ dados de PIX. O bot deve informar ao cliente e sugerir tentar novamente.
     return this.service.criarPedidoComPix(dto, user.id);
   }
 
-  // ─── 4. STATUS DO PAGAMENTO ───────────────────────────────────────────────
+  // ─── 5. STATUS DO PAGAMENTO ───────────────────────────────────────────────
 
   @Get('pedidos/:id/pagamento')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
   @ApiOperation({
-    summary: '4. 🔒 Consultar status do pagamento PIX',
+    summary: '5. 🔒 Consultar status do pagamento PIX',
     description: `
 Consulta o status do pagamento de um pedido específico.
 
@@ -256,7 +324,8 @@ Consulta o status do pagamento de um pedido específico.
 **Polling:** O bot pode chamar esta rota periodicamente (ex: a cada 30s) para verificar
 se o pagamento foi confirmado, até receber \`APROVADO\` ou timeout.
 
-Monitore o \`statusGateway\` para verificar se o PIX expirou no gateway antes de criar um novo pedido.
+**⚠️ Nunca expira automaticamente:** Monitore o \`statusGateway\` retornado para verificar
+se o PIX expirou no gateway antes de criar um novo pedido.
     `.trim(),
   })
   @ApiParam({
@@ -292,19 +361,24 @@ Monitore o \`statusGateway\` para verificar se o PIX expirou no gateway antes de
     return this.service.consultarStatusPagamento(id, user.id);
   }
 
-  // ─── 5. CARTELAS COMPRADAS ────────────────────────────────────────────────
+  // ─── 6. CARTELAS COMPRADAS ────────────────────────────────────────────────
 
   @Get('pedidos/:id/cartelas')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
   @ApiOperation({
-    summary: '5. 🔒 Retornar cartelas/números comprados',
+    summary: '6. 🔒 Retornar cartelas/números comprados',
     description: `
 Retorna os números das cartelas de um pedido **aprovado**, equivalente ao "Meus Números" da loja.
 
 **Pré-requisito:** O pedido deve ter status \`APROVADO\`. Se ainda estiver \`PENDENTE\`,
 retorna a lista vazia com uma mensagem de aviso.
+
+**Estrutura retornada:**
+- \`cartelas\`: array de cartelas, cada uma com seus bilhetes
+- Cada bilhete tem \`numero\` (7 dígitos) e \`sequenciaBolas\` (ordem de sorteio)
+- \`quantidadeChancesPorCartela\`: quantos bilhetes por cartela (ex: 6 para SEIS_CHANCES)
 
 **Uso no bot:** Use este retorno para gerar uma mensagem como:
 > 🎯 Sua(s) cartela(s):
@@ -358,21 +432,24 @@ retorna a lista vazia com uma mensagem de aviso.
     return this.service.consultarCartelas(id, user.id);
   }
 
-  // ─── 6. LISTAR PEDIDOS ────────────────────────────────────────────────────
+  // ─── 7. LISTAR PEDIDOS ────────────────────────────────────────────────────
 
   @Get('pedidos')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
   @ApiOperation({
-    summary: '6. 🔒 Consultar pedidos do cliente',
+    summary: '7. 🔒 Consultar pedidos do cliente (por telefone ou ID)',
     description: `
-Lista os pedidos do cliente autenticado. Filtros opcionais por telefone ou ID de pedido.
+Lista os pedidos do cliente autenticado. Filtros opcionais permitem buscar por telefone ou ID específico.
 
 **Segurança:** Apenas pedidos do cliente autenticado no JWT são retornados.
+Não é possível consultar pedidos de outros clientes.
 
-**Filtro por telefone:** Valida que o telefone informado corresponde ao cadastro do cliente.
-Se não corresponder, retorna erro 400.
+**Filtro por telefone:** Usado para confirmar a identidade antes de mostrar os pedidos.
+Se o telefone informado não corresponder ao cadastro do cliente, retorna erro 400.
+
+**Paginação:** Use \`page\` e \`limit\` para navegar pelo histórico.
     `.trim(),
   })
   @ApiQuery({ name: 'pedidoId', required: false, description: 'Filtrar por ID de pedido específico.' })
@@ -418,15 +495,17 @@ Se não corresponder, retorna erro 400.
     return this.service.consultarPedidos(user.id, filtros);
   }
 
-  // ─── 6b. DETALHE DE PEDIDO ────────────────────────────────────────────────
+  // ─── 7b. DETALHE DE PEDIDO ────────────────────────────────────────────────
 
   @Get('pedidos/:id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
   @ApiOperation({
-    summary: '6b. 🔒 Detalhes de um pedido específico',
-    description: 'Retorna todos os detalhes de um pedido, incluindo os bilhetes se o pedido estiver aprovado.',
+    summary: '7b. 🔒 Detalhes de um pedido específico',
+    description: `
+Retorna todos os detalhes de um pedido, incluindo os bilhetes se o pedido estiver aprovado.
+    `.trim(),
   })
   @ApiParam({
     name: 'id',
@@ -443,11 +522,11 @@ Se não corresponder, retorna erro 400.
     return this.service.detalharPedido(id, user.id);
   }
 
-  // ─── 7. WEBHOOK PAGAMENTO ─────────────────────────────────────────────────
+  // ─── 8. WEBHOOK PAGAMENTO ─────────────────────────────────────────────────
 
   @Post('webhook/pagamento')
   @ApiOperation({
-    summary: '7. Webhook PagBank — Confirmação de pagamento (sem auth)',
+    summary: '8. Webhook PagBank — Confirmação de pagamento (sem auth)',
     description: `
 Endpoint para receber notificações de pagamento confirmado do PagBank.
 
@@ -470,7 +549,7 @@ Endpoint para receber notificações de pagamento confirmado do PagBank.
 \`\`\`
 
 **Comportamento:**
-- Ao receber \`CHARGE.PAID\`, o pedido é confirmado, os bilhetes são gerados e as comissões calculadas.
+- Ao receber \`CHARGE.PAID\`, o pedido é confirmado, os bilhetes são gerados e as comissões são calculadas.
 - Eventos com status diferente de \`PAID\` são ignorados.
 - Idempotente: pedidos já confirmados são ignorados sem erro.
     `.trim(),
