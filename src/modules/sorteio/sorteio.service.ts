@@ -50,6 +50,7 @@ export interface EstadoPremio {
   ordem: number;
   descricao: string;
   valor: string;
+  imagemUrl: string | null;
   numerosMarcados: number[];
   ganhador: {
     bilheteNumero: string;
@@ -129,6 +130,7 @@ export class SorteioService {
       await this.syncPremioFirestore(edicaoId, premio.id, {
         ordem: premio.ordem,
         descricao: premio.descricao,
+        imagemUrl: premio.imagemUrl,
         numerosMarcados: [],
         ultimoNumero: null,
         ganhador: null,
@@ -207,6 +209,7 @@ export class SorteioService {
     await this.syncPremioFirestore(edicaoId, premioId, {
       ordem: premio.ordem,
       descricao: premio.descricao,
+      imagemUrl: premio.imagemUrl,
       numerosMarcados: resultadoAtualizado.numerosMarcados,
       ultimoNumero: numero,
       ganhador: ganhador
@@ -289,6 +292,7 @@ export class SorteioService {
     await this.syncPremioFirestore(edicaoId, premioId, {
       ordem: premio.ordem,
       descricao: premio.descricao,
+      imagemUrl: premio.imagemUrl,
       numerosMarcados: resultadoAtualizado.numerosMarcados,
       ultimoNumero: null,
       ganhador: null,
@@ -384,6 +388,7 @@ export class SorteioService {
           ordem: premio.ordem,
           descricao: premio.descricao,
           valor: premio.valor.toString(),
+          imagemUrl: premio.imagemUrl,
           numerosMarcados: premio.resultadoPremio?.numerosMarcados ?? [],
           ganhador,
         };
@@ -490,6 +495,7 @@ export class SorteioService {
       premios: edicao.premios.map((premio) => ({
         ...premio,
         valor: premio.valor.toString(),
+        imagemUrl: premio.imagemUrl,
       })),
     };
   }
@@ -591,6 +597,7 @@ export class SorteioService {
     data: {
       ordem: number;
       descricao: string;
+      imagemUrl: string | null;
       numerosMarcados: number[];
       ultimoNumero: number | null;
       ganhador: { bilheteNumero: string; clienteNome: string } | null;

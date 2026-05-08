@@ -8,7 +8,7 @@ import {
   Patch,
   Post,
   Query,
-  UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -20,7 +20,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { EdicoesService } from './edicoes.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -31,7 +31,7 @@ import {
   CreateEdicaoUploadDto,
   UpdateEdicaoUploadDto,
 } from './dto/edicao-upload.dto';
-import type { ArquivoImagemUpload } from './edicoes.types';
+import type { ArquivosEdicaoUpload } from './edicoes.types';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @ApiTags('Admin / Edições')
@@ -50,12 +50,17 @@ export class EdicoesController {
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: CreateEdicaoUploadDto })
-  @UseInterceptors(FileInterceptor('imagem'))
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'imagem', maxCount: 1 },
+      { name: 'premioImagens', maxCount: 50 },
+    ]),
+  )
   create(
     @Body() dto: CreateEdicaoDto,
-    @UploadedFile() imagem?: ArquivoImagemUpload,
+    @UploadedFiles() arquivos?: ArquivosEdicaoUpload,
   ) {
-    return this.edicoesService.create(dto, imagem);
+    return this.edicoesService.create(dto, arquivos);
   }
 
   @Get()
@@ -89,13 +94,18 @@ export class EdicoesController {
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: UpdateEdicaoUploadDto })
-  @UseInterceptors(FileInterceptor('imagem'))
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'imagem', maxCount: 1 },
+      { name: 'premioImagens', maxCount: 50 },
+    ]),
+  )
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEdicaoDto,
-    @UploadedFile() imagem?: ArquivoImagemUpload,
+    @UploadedFiles() arquivos?: ArquivosEdicaoUpload,
   ) {
-    return this.edicoesService.update(id, dto, imagem);
+    return this.edicoesService.update(id, dto, arquivos);
   }
 
   @Patch(':id/ativar')

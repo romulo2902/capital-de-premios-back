@@ -34,6 +34,7 @@ describe('EdicoesService', () => {
       deleteMany: jest.fn(),
       findMany: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     resultado: {
       deleteMany: jest.fn(),
@@ -221,6 +222,8 @@ describe('EdicoesService', () => {
           ordem: 1,
           descricao: '1º Prêmio',
           valor: new Prisma.Decimal('0'),
+          imagemUrl:
+            'https://bucket.s3.sa-east-1.amazonaws.com/edicoes/125/premios/1/moto.png',
           ganhadorBilheteId: null,
           createdAt: new Date('2026-03-20T10:00:00.000Z'),
           updatedAt: new Date('2026-03-20T10:00:00.000Z'),
@@ -236,6 +239,7 @@ describe('EdicoesService', () => {
       premio: {
         findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       resultadoPremio: {
@@ -248,7 +252,9 @@ describe('EdicoesService', () => {
     mockPrisma.$transaction.mockImplementation(async (callback) =>
       callback(tx),
     );
-    mockS3UploadService.uploadImage.mockResolvedValue(edicao.imagemUrl);
+    mockS3UploadService.uploadImage
+      .mockResolvedValueOnce(edicao.imagemUrl)
+      .mockResolvedValueOnce(edicao.premios[0].imagemUrl);
 
     const result = await service.create(
       {
@@ -281,10 +287,22 @@ describe('EdicoesService', () => {
       },
 
       {
-        buffer: Buffer.from('imagem'),
-        mimetype: 'image/png',
-        originalname: 'capa.png',
-        size: 6,
+        imagem: [
+          {
+            buffer: Buffer.from('imagem'),
+            mimetype: 'image/png',
+            originalname: 'capa.png',
+            size: 6,
+          },
+        ],
+        premioImagens: [
+          {
+            buffer: Buffer.from('premio'),
+            mimetype: 'image/png',
+            originalname: 'moto.png',
+            size: 6,
+          },
+        ],
       },
     );
 
@@ -294,6 +312,13 @@ describe('EdicoesService', () => {
         originalname: 'capa.png',
       }),
       'edicoes/125',
+    );
+    expect(mockS3UploadService.uploadImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mimetype: 'image/png',
+        originalname: 'moto.png',
+      }),
+      'edicoes/125/premios/1',
     );
     expect(tx.edicao.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -310,9 +335,11 @@ describe('EdicoesService', () => {
         ordem: 1,
         descricao: '1º Prêmio - Moto 0km',
         valor: new Prisma.Decimal('25000.00'),
+        imagemUrl: edicao.premios[0].imagemUrl,
       },
     });
     expect(result.data.imagemUrl).toBe(edicao.imagemUrl);
+    expect(result.data.premios[0].imagemUrl).toBe(edicao.premios[0].imagemUrl);
   });
 
   function criarEdicaoMock(
@@ -375,6 +402,7 @@ describe('EdicoesService', () => {
           ordem: 1,
           descricao: '1º Prêmio',
           valor: new Prisma.Decimal('0'),
+          imagemUrl: null,
           ganhadorBilheteId: null,
           createdAt: new Date('2026-03-20T10:00:00.000Z'),
           updatedAt: new Date('2026-03-20T10:00:00.000Z'),

@@ -178,6 +178,7 @@ export class WhatsappApiService {
           ordem: p.ordem,
           descricao: p.descricao,
           valor: p.valor.toString(),
+          imagemUrl: p.imagemUrl,
           valorFormatado: new Intl.NumberFormat('pt-BR', {
             style: 'currency',
             currency: 'BRL',

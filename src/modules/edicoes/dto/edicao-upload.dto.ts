@@ -31,7 +31,7 @@ export class CreateEdicaoUploadDto extends OmitType(CreateEdicaoDto, [
     example:
       '[{"descricao":"1º Prêmio - Moto 0km","valor":"25000.00"},{"descricao":"2º Prêmio - Smart TV","valor":"3500.00"}]',
     description:
-      'JSON serializado com o array de prêmios da edição, na ordem do sorteio. Use este formato ao enviar `multipart/form-data`.',
+      'JSON serializado com o array de prêmios da edição, na ordem do sorteio. Quando `premioImagens` for enviado, os arquivos são associados a este array pela mesma ordem.',
   })
   premios: string;
 
@@ -42,6 +42,17 @@ export class CreateEdicaoUploadDto extends OmitType(CreateEdicaoDto, [
       'Imagem principal da edição. Quando enviada, a API faz upload para o S3 e salva a URL pública em `imagemUrl` internamente.',
   })
   imagem?: unknown;
+
+  @ApiPropertyOptional({
+    type: 'array',
+    items: {
+      type: 'string',
+      format: 'binary',
+    },
+    description:
+      'Imagens dos prêmios enviadas para a S3 na mesma ordem do array `premios`. A URL pública gerada é salva em `Premio.imagemUrl`.',
+  })
+  premioImagens?: unknown[];
 }
 
 export class UpdateEdicaoUploadDto extends PartialType(CreateEdicaoUploadDto) {}

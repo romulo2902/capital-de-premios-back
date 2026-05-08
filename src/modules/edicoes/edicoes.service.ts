@@ -46,6 +46,7 @@ import {
 import { serializarEdicao as serializarEdicaoUtil } from './edicoes-serialization.util';
 import type {
   ArquivoImagemUpload,
+  ArquivosEdicaoUpload,
   DetalheRangeNormalizado,
   EdicaoComRelacoes,
 } from './edicoes.types';
@@ -54,6 +55,12 @@ interface ComboEdicaoNormalizado {
   origemParticipacao: OrigemParticipacao;
   tipoCartela: TipoCartela;
   preco: Prisma.Decimal;
+}
+
+interface PremioDetalhadoNormalizado {
+  descricao: string;
+  valor: string;
+  imagemUrl: string | null;
 }
 
 @Injectable()
@@ -66,7 +73,7 @@ export class EdicoesService {
     private readonly s3UploadService: S3UploadService,
   ) {}
 
-  async create(dto: CreateEdicaoDto, imagem?: ArquivoImagemUpload) {
+  async create(dto: CreateEdicaoDto, arquivos?: ArquivosEdicaoUpload) {
     const detalhes = this.normalizarDetalhes(dto.detalhes);
     const combos = this.normalizarCombos(dto.combos);
     this.validarDetalhesInternos(detalhes);
@@ -89,8 +96,13 @@ export class EdicoesService {
 
     const { rangeInicio, rangeFinal } = this.calcularResumoDosRanges(detalhes);
     const imagemUrl = await this.resolverImagemUrl(
-      imagem,
+      arquivos?.imagem?.[0],
       `edicoes/${dto.numero}`,
+    );
+    const premiosDetalhados = await this.resolverPremiosDetalhados(
+      dto.premios,
+      arquivos?.premioImagens,
+      `edicoes/${dto.numero}/premios`,
     );
 
     const item = await this.prisma.$transaction(async (tx) => {
@@ -134,7 +146,11 @@ export class EdicoesService {
         include: EDICAO_INCLUDE,
       });
 
-      await this.sincronizarPremiosDetalhados(tx, created.id, dto.premios);
+      await this.sincronizarPremiosDetalhados(
+        tx,
+        created.id,
+        premiosDetalhados,
+      );
 
       return tx.edicao.findUnique({
         where: { id: created.id },
@@ -210,7 +226,7 @@ export class EdicoesService {
     };
   }
 
-  async update(id: string, dto: UpdateEdicaoDto, imagem?: ArquivoImagemUpload) {
+  async update(id: string, dto: UpdateEdicaoDto, arquivos?: ArquivosEdicaoUpload) {
     const atual = await this.obterEdicaoOuFalhar(id);
 
     const detalhesEfetivos = dto.detalhes
@@ -259,9 +275,17 @@ export class EdicoesService {
           ? this.resolverValorCartelaEdicao(undefined, combosEfetivos)
           : undefined;
     const imagemUrl = await this.resolverImagemUrl(
-      imagem,
+      arquivos?.imagem?.[0],
       `edicoes/${dto.numero ?? atual.numero}`,
     );
+    const premiosDetalhados = dto.premios
+      ? await this.resolverPremiosDetalhados(
+          dto.premios,
+          arquivos?.premioImagens,
+          `edicoes/${dto.numero ?? atual.numero}/premios`,
+          atual.premios.map((premio) => premio.imagemUrl ?? null),
+        )
+      : undefined;
 
     const item = await this.prisma.$transaction(async (tx) => {
       const data: Prisma.EdicaoUpdateInput = {
@@ -320,8 +344,8 @@ export class EdicoesService {
         data,
       });
 
-      if (dto.premios) {
-        await this.sincronizarPremiosDetalhados(tx, id, dto.premios);
+      if (premiosDetalhados) {
+        await this.sincronizarPremiosDetalhados(tx, id, premiosDetalhados);
       }
 
       return tx.edicao.findUnique({
@@ -934,10 +958,37 @@ export class EdicoesService {
     return new Prisma.Decimal(valor.replace(',', '.'));
   }
 
+  private async resolverPremiosDetalhados(
+    premiosPayload: CreateEdicaoPremioDto[],
+    premioImagens: ArquivoImagemUpload[] | undefined,
+    folder: string,
+    imagemUrlsExistentes: Array<string | null> = [],
+  ): Promise<PremioDetalhadoNormalizado[]> {
+    if (premioImagens && premioImagens.length > premiosPayload.length) {
+      throw new BadRequestException(
+        'A quantidade de imagens dos prêmios não pode ser maior que a quantidade de prêmios enviados',
+      );
+    }
+
+    const imagemUrls = premioImagens
+      ? await Promise.all(
+          premioImagens.map((imagem, index) =>
+            this.s3UploadService.uploadImage(imagem, `${folder}/${index + 1}`),
+          ),
+        )
+      : [];
+
+    return premiosPayload.map((premio, index) => ({
+      descricao: premio.descricao,
+      valor: premio.valor,
+      imagemUrl: imagemUrls[index] ?? imagemUrlsExistentes[index] ?? null,
+    }));
+  }
+
   private async sincronizarPremiosDetalhados(
     tx: Prisma.TransactionClient,
     edicaoId: string,
-    premiosPayload: CreateEdicaoPremioDto[],
+    premiosPayload: PremioDetalhadoNormalizado[],
   ): Promise<void> {
     const premiosExistentes = await tx.premio.findMany({
       where: { edicaoId },
@@ -976,6 +1027,7 @@ export class EdicoesService {
         ordem,
         descricao: premioPayload.descricao,
         valor: this.normalizarValorPremio(premioPayload.valor),
+        imagemUrl: premioPayload.imagemUrl,
       };
       const premioExistente = premiosExistentes[index];
 

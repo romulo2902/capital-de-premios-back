@@ -83,6 +83,7 @@ export function serializarEdicao(
     premios: edicao.premios.map((premio) => ({
       ...premio,
       valor: premio.valor.toString(),
+      imagemUrl: premio.imagemUrl,
     })),
   };
 }

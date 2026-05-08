@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import type {
   PaymentGateway,
   CriarCobrancaInput,
@@ -15,7 +15,7 @@ export class MockPixGateway implements PaymentGateway {
   constructor(private readonly config: ConfigService) {}
 
   async criarCobranca(input: CriarCobrancaInput): Promise<CriarCobrancaOutput> {
-    const mockId = `mock_pix_${uuidv4()}`;
+    const mockId = `mock_pix_${randomUUID()}`;
 
     this.logger.warn(`Criando cobrança MOCK: vendaId=${input.vendaId} valor=${input.valorCentavos}¢. Ela será aprovada automaticamente em 5 segundos.`);
 

@@ -99,6 +99,7 @@ export class LojaPublicaService {
           ordem: p.ordem,
           descricao: p.descricao,
           valor: p.valor.toString(),
+          imagemUrl: p.imagemUrl,
         })),
         opcoes: opcoesDeCompra,
         countdown: {
@@ -482,6 +483,7 @@ export class LojaPublicaService {
                 descricao: p.descricao,
                 valor: p.valor.toString(),
                 valorFormatado: this.formatarMoeda(p.valor),
+                imagemUrl: p.imagemUrl,
               })),
             },
             resumo: {

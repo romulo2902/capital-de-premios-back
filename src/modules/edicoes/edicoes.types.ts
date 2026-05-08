@@ -20,3 +20,8 @@ export interface DetalheRangeNormalizado {
 }
 
 export interface ArquivoImagemUpload extends UploadFile {}
+
+export interface ArquivosEdicaoUpload {
+  imagem?: ArquivoImagemUpload[];
+  premioImagens?: ArquivoImagemUpload[];
+}
