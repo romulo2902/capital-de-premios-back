@@ -9,11 +9,11 @@ import {
   IsUUID,
   Max,
   Min,
-  Type,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { TipoCartela } from '@prisma/client';
+import { Type } from 'class-transformer';
 
 export class ComboSelecionadoWhatsappDto {
   @ApiProperty({
