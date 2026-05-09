@@ -7,6 +7,16 @@ import {
   Matches,
   MinLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
+
+const emptyStringToUndefined = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue ? trimmedValue : undefined;
+};
 
 /**
  * POST /whatsapp/auth
@@ -59,16 +69,19 @@ export class AuthWhatsappDto {
 
   @ApiPropertyOptional({
     example: 'joao@email.com',
-    description: 'E-mail do cliente (opcional).',
+    description: 'E-mail do cliente (opcional). String vazia é ignorada.',
   })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsEmail({}, { message: 'E-mail inválido' })
   email?: string;
 
   @ApiPropertyOptional({
     example: '1990-01-15',
-    description: 'Data de nascimento no formato YYYY-MM-DD (opcional).',
+    description:
+      'Data de nascimento no formato YYYY-MM-DD (opcional). String vazia é ignorada.',
   })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {

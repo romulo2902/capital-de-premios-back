@@ -35,8 +35,8 @@ import {
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 import {
   expandirSetoresDosDetalhes,
-  obterQuantidadeChances,
-  obterTipoCartelaPorQuantidadeChances,
+  obterQuantidadeCartelas,
+  obterTipoCartelaPorQuantidadeCartelas,
 } from '../edicoes/edicoes-range.util';
 import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
 import { calcularQuantidadeCartelasDaVenda } from './vendas-quantidade.util';
@@ -72,7 +72,7 @@ interface ConfiguracaoVendaResolvida {
   detalhes: DetalheVenda[];
   tipoCartelaSelecionada: TipoCartela;
   precoCombo: Prisma.Decimal | null;
-  quantidadeChances: number;
+  quantidadeCartelas: number;
 }
 
 @Injectable()
@@ -184,6 +184,8 @@ export class VendasService {
     const total = valorCartela * dto.quantidade;
 
     if (tipoPagamentoResolvido === TipoPagamento.MANUAL) {
+      const quantidadeCartelasCompra =
+        configuracaoVenda.quantidadeCartelas * dto.quantidade;
       const resultadoManual = await this.prisma.$transaction(async (tx) => {
         const venda = await tx.venda.create({
           data: {
@@ -219,7 +221,7 @@ export class VendasService {
       });
 
       this.logger.log(
-        `Venda manual ${resultadoManual.vendaAtualizada.id} criada e aprovada — ${dto.quantidade}x cartela — R$ ${total.toFixed(2)}`,
+        `Venda manual ${resultadoManual.vendaAtualizada.id} criada e aprovada — ${quantidadeCartelasCompra} cartela(s) — R$ ${total.toFixed(2)}`,
       );
 
       return {
@@ -252,8 +254,11 @@ export class VendasService {
       include: VENDA_INCLUDE,
     });
 
+    const quantidadeCartelasCompra =
+      configuracaoVenda.quantidadeCartelas * dto.quantidade;
+
     this.logger.log(
-      `Venda ${venda.id} criada — ${dto.quantidade}x cartela — R$ ${total.toFixed(2)} — ${tipoPagamentoResolvido}`,
+      `Venda ${venda.id} criada — ${quantidadeCartelasCompra} cartela(s) — R$ ${total.toFixed(2)} — ${tipoPagamentoResolvido}`,
     );
 
     // 6. Criar cobrança no gateway de pagamento
@@ -267,13 +272,10 @@ export class VendasService {
       const gateway = this.paymentGatewayFactory.getGateway(
         tipoPagamentoResolvido,
       );
-      const descricaoCartela = detalheVenda.tipoCartela;
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
-        descricao: descricaoCartela
-          ? `Capital de Prêmios — Edição ${edicao.numero} — ${dto.quantidade}x ${descricaoCartela}`
-          : `Capital de Prêmios — Edição ${edicao.numero} — ${dto.quantidade}x cartela`,
+        descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
         expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
@@ -316,10 +318,14 @@ export class VendasService {
       include: VENDA_INCLUDE,
     });
 
+    if (!vendaCompleta) {
+      throw new NotFoundException('Venda não encontrada após criação');
+    }
+
     return {
       message: 'Venda criada com sucesso',
       data: {
-        ...vendaCompleta,
+        ...this.serializarVendaParaResposta(vendaCompleta),
         pagamento: dadosPagamento,
       },
     };
@@ -343,6 +349,7 @@ export class VendasService {
         manutencaoAtiva: true,
         manutencaoMensagem: true,
         dataEncerramento: true,
+        valorCartela: true,
         rangeInicio: true,
         rangeFinal: true,
         detalhes: {
@@ -403,10 +410,18 @@ export class VendasService {
             edicaoNumero: edicao.numero,
             status: edicao.status,
             origemParticipacao,
-            tipoCartela: tipoCartelaSolicitada ?? TipoCartela.UMA_CHANCE,
+            tipoCompra:
+              (tipoCartelaSolicitada ?? TipoCartela.UMA_CHANCE) ===
+              TipoCartela.UMA_CHANCE
+                ? 'UNITARIO'
+                : 'COMBO',
             quantidadeCartelas: 0,
-            quantidadeChances: 0,
-            passoEntreChances: '0',
+            valorUnitarioCartela: this.formatarValorMonetario(
+              edicao.valorCartela,
+            ),
+            valorCombo: null,
+            preco: null,
+            passoEntreCartelas: '0',
             rangeTotalInicio: '0',
             rangeTotalFinal: '0',
             setores: [],
@@ -428,7 +443,7 @@ export class VendasService {
       );
     }
 
-    const quantidadeChances = configuracaoVenda.quantidadeChances;
+    const quantidadeCartelas = configuracaoVenda.quantidadeCartelas;
     const setores = expandirSetoresDosDetalhes(
       detalhesEfetivos.map((detalhe, index) => ({
         ...detalhe,
@@ -479,20 +494,26 @@ export class VendasService {
         edicaoNumero: edicao.numero,
         status: edicao.status,
         origemParticipacao,
-        tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
-        quantidadeCartelas: quantidadeChances,
-        quantidadeChances,
-        preco: configuracaoVenda.precoCombo
-          ? configuracaoVenda.precoCombo.toString()
+        tipoCompra:
+          configuracaoVenda.tipoCartelaSelecionada === TipoCartela.UMA_CHANCE
+            ? 'UNITARIO'
+            : 'COMBO',
+        quantidadeCartelas,
+        valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
+        valorCombo: configuracaoVenda.precoCombo
+          ? this.formatarValorMonetario(configuracaoVenda.precoCombo)
           : null,
-        passoEntreChances:
+        preco: this.formatarValorMonetario(
+          configuracaoVenda.precoCombo ?? edicao.valorCartela,
+        ),
+        passoEntreCartelas:
           primeiroSetor && segundoSetor
             ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
             : '0',
         rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
         rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
         setores: setores.map((setor) => ({
-          indiceChance: setor.indiceChance,
+          indiceCartela: setor.indiceCartela,
           rangeInicio: setor.rangeInicio.toString(),
           rangeFinal: setor.rangeFinal.toString(),
         })),
@@ -814,11 +835,13 @@ export class VendasService {
       if (distribuidor) {
         const distPercent = Number(distribuidor.comissaoPercent);
         if (distPercent > 0) {
-          const fatiaBrutaDistribuidor = Number(venda.total) * (distPercent / 100);
+          const fatiaBrutaDistribuidor =
+            Number(venda.total) * (distPercent / 100);
           let comissaoVendedor = 0;
 
           if (venda.vendedorId && venda.vendedor) {
-            const vendPercentDaFatia = Number(venda.vendedor.comissaoPercent) || 0;
+            const vendPercentDaFatia =
+              Number(venda.vendedor.comissaoPercent) || 0;
             comissaoVendedor =
               fatiaBrutaDistribuidor * (vendPercentDaFatia / 100);
 
@@ -938,10 +961,7 @@ export class VendasService {
     }
 
     if (dto.telefone !== undefined) {
-      data.telefone = this.normalizarTextoObrigatorio(
-        dto.telefone,
-        'telefone',
-      );
+      data.telefone = this.normalizarTextoObrigatorio(dto.telefone, 'telefone');
     }
 
     if (dto.dataNascimento !== undefined) {
@@ -1000,7 +1020,9 @@ export class VendasService {
 
   private normalizarQuantidadeCartelasNaResposta(value: unknown): unknown {
     if (Array.isArray(value)) {
-      return value.map((item) => this.normalizarQuantidadeCartelasNaResposta(item));
+      return value.map((item) =>
+        this.normalizarQuantidadeCartelasNaResposta(item),
+      );
     }
 
     if (!value || typeof value !== 'object') {
@@ -1033,27 +1055,36 @@ export class VendasService {
     const countBilhetes =
       registroNormalizado._count &&
       typeof registroNormalizado._count === 'object' &&
-      typeof (registroNormalizado._count as Record<string, unknown>).bilhetes ===
-        'number'
+      typeof (registroNormalizado._count as Record<string, unknown>)
+        .bilhetes === 'number'
         ? ((registroNormalizado._count as Record<string, unknown>)
             .bilhetes as number)
         : null;
     const quantidadeBilhetes = bilhetes?.length ?? countBilhetes ?? null;
+    const quantidadeCartelasPorCombo =
+      this.obterQuantidadeCartelasDaVenda(tipoCartela);
     const quantidadeCartelas = calcularQuantidadeCartelasDaVenda({
       quantidade,
       tipoCartela,
       quantidadeBilhetes,
     });
+    const registroSemTipoCartela = { ...registroNormalizado };
+    delete registroSemTipoCartela.tipoCartela;
 
     return {
-      ...registroNormalizado,
+      ...registroSemTipoCartela,
       quantidade: quantidadeCartelas,
+      quantidadeCombos: quantidade,
+      quantidadeCartelasPorCombo,
+      quantidadeCartelas,
     };
   }
 
   private adicionarValoresFormatadosNaResposta(value: unknown): unknown {
     if (Array.isArray(value)) {
-      return value.map((item) => this.adicionarValoresFormatadosNaResposta(item));
+      return value.map((item) =>
+        this.adicionarValoresFormatadosNaResposta(item),
+      );
     }
 
     if (!value || typeof value !== 'object') {
@@ -1171,7 +1202,10 @@ export class VendasService {
     dto: CreateVendaDto,
     user?: RequestUser,
   ): number | undefined {
-    if (dto.quantidadeCartelas === undefined || dto.quantidadeCartelas === null) {
+    if (
+      dto.quantidadeCartelas === undefined ||
+      dto.quantidadeCartelas === null
+    ) {
       return undefined;
     }
 
@@ -1181,7 +1215,7 @@ export class VendasService {
       dto.quantidadeCartelas === dto.quantidade
     ) {
       this.logger.warn(
-        `Venda manual com quantidadeCartelas=${dto.quantidadeCartelas} igual a quantidade=${dto.quantidade}; tratando como ${TipoCartela.UMA_CHANCE} para evitar cobrança dobrada`,
+        `Venda manual com quantidadeCartelas=${dto.quantidadeCartelas} igual a quantidade=${dto.quantidade}; tratando como cartela unitária para evitar cobrança dobrada`,
       );
       return undefined;
     }
@@ -1213,7 +1247,11 @@ export class VendasService {
     );
   }
 
-  private validarDataCalendario(year: number, month: number, day: number): Date {
+  private validarDataCalendario(
+    year: number,
+    month: number,
+    day: number,
+  ): Date {
     const candidate = new Date(Date.UTC(year, month - 1, day));
 
     if (
@@ -1249,7 +1287,7 @@ export class VendasService {
         cpf,
         nome,
         telefone,
-        email: email ?? null,
+        email: email?.trim() || null,
         vendedorId: vendedorId ?? null,
         distribuidorId: distribuidorId ?? null,
       },
@@ -1325,7 +1363,6 @@ export class VendasService {
       venda.origemParticipacao,
       venda.tipoCartela,
     );
-    const quantidadeChances = configuracaoVenda.quantidadeChances;
     const detalhesEfetivos = configuracaoVenda.detalhes;
     const combosSelecionados = this.extrairCombosSelecionadosDaVenda(
       venda.gatewayPayload,
@@ -1378,7 +1415,7 @@ export class VendasService {
       })),
     );
     const primeiroSetor = setores[0];
-    const quantidadeChances = setores.length;
+    const quantidadeCartelasPorCombo = setores.length;
     const rangeDescricao =
       primeiroSetor && setores[setores.length - 1]
         ? `${primeiroSetor.rangeTotalInicio.toString()}-${setores[setores.length - 1].rangeTotalFinal.toString()}`
@@ -1386,7 +1423,7 @@ export class VendasService {
 
     if (!primeiroSetor) {
       throw new BadRequestException(
-        `O intervalo ${rangeDescricao} não suporta ${quantidadeChances} chances`,
+        `O intervalo ${rangeDescricao} não suporta ${quantidadeCartelasPorCombo} cartelas`,
       );
     }
 
@@ -1457,7 +1494,11 @@ export class VendasService {
       for (const candidato of candidatosBase) {
         for (const setor of setores) {
           adicionarNumero(
-            this.calcularNumeroDoSetorParaBase(candidato.numero, primeiroSetor, setor),
+            this.calcularNumeroDoSetorParaBase(
+              candidato.numero,
+              primeiroSetor,
+              setor,
+            ),
           );
         }
       }
@@ -1529,7 +1570,7 @@ export class VendasService {
       gruposSelecionados.length < quantidadeCartelas
     ) {
       throw new BadRequestException(
-        `Não há cartelas suficientes disponíveis para esta edição. Cartelas disponíveis: ${gruposSelecionados.length}, solicitadas: ${quantidadeCartelas}, chances por cartela: ${quantidadeChances}`,
+        `Não há cartelas suficientes disponíveis para esta edição. Cartelas disponíveis: ${gruposSelecionados.length}, solicitadas: ${quantidadeCartelas}, cartelas por combo: ${quantidadeCartelasPorCombo}`,
       );
     }
 
@@ -1635,6 +1676,13 @@ export class VendasService {
     origemParticipacao: OrigemParticipacao,
     tipoCartela?: TipoCartela | null,
   ): ConfiguracaoVendaResolvida {
+    if (tipoCartela === TipoCartela.UMA_CHANCE) {
+      return this.resolverConfiguracaoUnitariaDaVenda(
+        detalhes,
+        origemParticipacao,
+      );
+    }
+
     const combosDaOrigem = (combos ?? []).filter(
       (combo) => combo.origemParticipacao === origemParticipacao,
     );
@@ -1655,13 +1703,46 @@ export class VendasService {
     );
   }
 
+  private resolverConfiguracaoUnitariaDaVenda(
+    detalhes: DetalheVenda[],
+    origemParticipacao: OrigemParticipacao,
+  ): ConfiguracaoVendaResolvida {
+    const origemRanges =
+      this.resolverOrigemDosRangesParaCombo(origemParticipacao);
+    const detalheUnitario = detalhes
+      .filter((detalhe) => detalhe.origemParticipacao === origemRanges)
+      .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0))[0];
+
+    if (!detalheUnitario) {
+      throw new BadRequestException(
+        `A edição não possui range base para a origem ${origemParticipacao}`,
+      );
+    }
+
+    return {
+      detalhes: [
+        {
+          ...detalheUnitario,
+          origemParticipacao: origemRanges,
+          tipoCartela: TipoCartela.UMA_CHANCE,
+          preco: null,
+          indiceRange: 1,
+        },
+      ],
+      tipoCartelaSelecionada: TipoCartela.UMA_CHANCE,
+      precoCombo: null,
+      quantidadeCartelas: 1,
+    };
+  }
+
   private resolverConfiguracaoDaVendaPorCombos(
     detalhes: DetalheVenda[],
     combosDaOrigem: ComboVenda[],
     origemParticipacao: OrigemParticipacao,
     tipoCartela?: TipoCartela | null,
   ): ConfiguracaoVendaResolvida {
-    const origemRanges = this.resolverOrigemDosRangesParaCombo(origemParticipacao);
+    const origemRanges =
+      this.resolverOrigemDosRangesParaCombo(origemParticipacao);
     const detalhesDaOrigem = detalhes
       .filter((detalhe) => detalhe.origemParticipacao === origemRanges)
       .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
@@ -1677,18 +1758,18 @@ export class VendasService {
       origemParticipacao,
       tipoCartela,
     );
-    const quantidadeChances = this.obterQuantidadeChancesDaVenda(
+    const quantidadeCartelas = this.obterQuantidadeCartelasDaVenda(
       comboSelecionado.tipoCartela,
     );
 
-    if (detalhesDaOrigem.length < quantidadeChances) {
+    if (detalhesDaOrigem.length < quantidadeCartelas) {
       throw new BadRequestException(
-        `A origem ${origemParticipacao} possui ${detalhesDaOrigem.length} range(s), insuficiente para o combo ${comboSelecionado.tipoCartela}`,
+        `A origem ${origemParticipacao} possui ${detalhesDaOrigem.length} range(s), insuficiente para ${quantidadeCartelas} cartela(s)`,
       );
     }
 
     const detalhesSelecionados: DetalheVenda[] = detalhesDaOrigem
-      .slice(0, quantidadeChances)
+      .slice(0, quantidadeCartelas)
       .map((detalhe, index) => ({
         ...detalhe,
         origemParticipacao: origemRanges,
@@ -1701,7 +1782,7 @@ export class VendasService {
       detalhes: detalhesSelecionados,
       tipoCartelaSelecionada: comboSelecionado.tipoCartela,
       precoCombo: comboSelecionado.preco,
-      quantidadeChances,
+      quantidadeCartelas,
     };
   }
 
@@ -1716,8 +1797,10 @@ export class VendasService {
       );
 
       if (!comboDoTipo) {
+        const quantidadeCartelas =
+          this.obterQuantidadeCartelasDaVenda(tipoCartela);
         throw new BadRequestException(
-          `Tipo de cartela ${tipoCartela} não está disponível para a origem ${origemParticipacao}`,
+          `Quantidade de cartelas (${quantidadeCartelas}) não está disponível para a origem ${origemParticipacao}`,
         );
       }
 
@@ -1737,7 +1820,7 @@ export class VendasService {
     }
 
     throw new BadRequestException(
-      `Informe o tipoCartela para a origem ${origemParticipacao} desta edição`,
+      `Informe quantidadeCartelas para a origem ${origemParticipacao} desta edição`,
     );
   }
 
@@ -1752,7 +1835,8 @@ export class VendasService {
       );
     }
 
-    const origemRanges = this.resolverOrigemDosRangesParaCombo(origemParticipacao);
+    const origemRanges =
+      this.resolverOrigemDosRangesParaCombo(origemParticipacao);
     const detalhesDaOrigem = detalhes
       .filter((detalhe) => detalhe.origemParticipacao === origemRanges)
       .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
@@ -1764,18 +1848,18 @@ export class VendasService {
     }
 
     const tipoCartelaSelecionada = tipoCartela ?? TipoCartela.UMA_CHANCE;
-    const quantidadeChances = this.obterQuantidadeChancesDaVenda(
+    const quantidadeCartelas = this.obterQuantidadeCartelasDaVenda(
       tipoCartelaSelecionada,
     );
 
-    if (detalhesDaOrigem.length < quantidadeChances) {
+    if (detalhesDaOrigem.length < quantidadeCartelas) {
       throw new BadRequestException(
-        `A origem ${origemParticipacao} possui ${detalhesDaOrigem.length} range(s), insuficiente para ${tipoCartelaSelecionada}`,
+        `A origem ${origemParticipacao} possui ${detalhesDaOrigem.length} range(s), insuficiente para ${quantidadeCartelas} cartela(s)`,
       );
     }
 
     const detalhesSelecionados = detalhesDaOrigem
-      .slice(0, quantidadeChances)
+      .slice(0, quantidadeCartelas)
       .map((detalhe, index) => ({
         ...detalhe,
         tipoCartela: tipoCartelaSelecionada,
@@ -1789,14 +1873,18 @@ export class VendasService {
       detalhes: detalhesSelecionados,
       tipoCartelaSelecionada,
       precoCombo,
-      quantidadeChances,
+      quantidadeCartelas,
     };
   }
 
-  private obterQuantidadeChancesDaVenda(
+  private obterQuantidadeCartelasDaVenda(
     tipoCartela?: TipoCartela | null,
   ): number {
-    return tipoCartela ? obterQuantidadeChances(tipoCartela) : 1;
+    return tipoCartela ? obterQuantidadeCartelas(tipoCartela) : 1;
+  }
+
+  private formatarValorMonetario(valor: Prisma.Decimal | number): string {
+    return Number(valor).toFixed(2);
   }
 
   private resolverTipoCartelaDaSolicitacao(
@@ -1805,7 +1893,7 @@ export class VendasService {
   ): TipoCartela | undefined {
     const tipoCartelaPelaQuantidade =
       quantidadeCartelas !== undefined && quantidadeCartelas !== null
-        ? obterTipoCartelaPorQuantidadeChances(quantidadeCartelas)
+        ? obterTipoCartelaPorQuantidadeCartelas(quantidadeCartelas)
         : null;
 
     if (
@@ -1824,7 +1912,7 @@ export class VendasService {
       tipoCartela !== tipoCartelaPelaQuantidade
     ) {
       throw new BadRequestException(
-        `Conflito entre tipoCartela (${tipoCartela}) e quantidadeCartelas (${quantidadeCartelas})`,
+        `Conflito entre o campo legado de cartelas e quantidadeCartelas (${quantidadeCartelas})`,
       );
     }
 
@@ -1845,7 +1933,10 @@ export class VendasService {
     const deslocamento = numeroBase - primeiroSetor.rangeInicio;
     const numeroDestino = setorDestino.rangeInicio + deslocamento;
 
-    if (numeroDestino < setorDestino.rangeInicio || numeroDestino > setorDestino.rangeFinal) {
+    if (
+      numeroDestino < setorDestino.rangeInicio ||
+      numeroDestino > setorDestino.rangeFinal
+    ) {
       throw new BadRequestException('Número base fora do setor esperado');
     }
 
@@ -1869,7 +1960,11 @@ export class VendasService {
   private extrairCombosSelecionadosDaVenda(
     gatewayPayload?: Prisma.JsonValue | null,
   ): bigint[] | undefined {
-    if (!gatewayPayload || typeof gatewayPayload !== 'object' || Array.isArray(gatewayPayload)) {
+    if (
+      !gatewayPayload ||
+      typeof gatewayPayload !== 'object' ||
+      Array.isArray(gatewayPayload)
+    ) {
       return undefined;
     }
 

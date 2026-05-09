@@ -37,8 +37,8 @@ import {
   inferirDestinoPorDetalhes as inferirDestinoPorDetalhesUtil,
   normalizarDetalhes as normalizarDetalhesUtil,
   normalizarDetalhesExistentes as normalizarDetalhesExistentesUtil,
-  obterQuantidadeChances as obterQuantidadeChancesUtil,
-  obterTipoCartelaPorQuantidadeChances as obterTipoCartelaPorQuantidadeChancesUtil,
+  obterQuantidadeCartelas as obterQuantidadeCartelasUtil,
+  obterTipoCartelaPorQuantidadeCartelas as obterTipoCartelaPorQuantidadeCartelasUtil,
   possuiSobreposicao as possuiSobreposicaoUtil,
   validarDestinoComDetalhes as validarDestinoComDetalhesUtil,
   validarDetalhesInternos as validarDetalhesInternosUtil,
@@ -111,7 +111,10 @@ export class EdicoesService {
           numero: dto.numero,
           dataSorteio,
           dataEncerramento,
-          valorCartela: this.resolverValorCartelaEdicao(dto.valorCartela, combos),
+          valorCartela: this.resolverValorCartelaEdicao(
+            dto.valorCartela,
+            combos,
+          ),
           qtdNumerosCartela,
           rangeInicio,
           rangeFinal,
@@ -226,7 +229,11 @@ export class EdicoesService {
     };
   }
 
-  async update(id: string, dto: UpdateEdicaoDto, arquivos?: ArquivosEdicaoUpload) {
+  async update(
+    id: string,
+    dto: UpdateEdicaoDto,
+    arquivos?: ArquivosEdicaoUpload,
+  ) {
     const atual = await this.obterEdicaoOuFalhar(id);
 
     const detalhesEfetivos = dto.detalhes
@@ -238,11 +245,16 @@ export class EdicoesService {
     const combosEfetivos = dto.combos
       ? this.normalizarCombos(dto.combos)
       : this.normalizarCombosExistentes(atual);
-    const qtdPremiosEfetivo = dto.premios ? dto.premios.length : atual.qtdPremios;
+    const qtdPremiosEfetivo = dto.premios
+      ? dto.premios.length
+      : atual.qtdPremios;
 
     if (dto.detalhes) {
       this.validarDetalhesInternos(detalhesEfetivos);
-      this.validarCapacidadeCartelas(detalhesEfetivos, qtdNumerosCartelaEfetivo);
+      this.validarCapacidadeCartelas(
+        detalhesEfetivos,
+        qtdNumerosCartelaEfetivo,
+      );
     }
 
     if (dto.combos || dto.detalhes) {
@@ -271,9 +283,7 @@ export class EdicoesService {
     const valorCartelaEfetivo =
       dto.valorCartela !== undefined
         ? this.normalizarValorCartela(dto.valorCartela)
-        : dto.combos
-          ? this.resolverValorCartelaEdicao(undefined, combosEfetivos)
-          : undefined;
+        : undefined;
     const imagemUrl = await this.resolverImagemUrl(
       arquivos?.imagem?.[0],
       `edicoes/${dto.numero ?? atual.numero}`,
@@ -295,7 +305,9 @@ export class EdicoesService {
         ...(valorCartelaEfetivo !== undefined
           ? { valorCartela: valorCartelaEfetivo }
           : {}),
-        ...(dto.detalhes ? { qtdNumerosCartela: qtdNumerosCartelaEfetivo } : {}),
+        ...(dto.detalhes
+          ? { qtdNumerosCartela: qtdNumerosCartelaEfetivo }
+          : {}),
         ...(dto.premios ? { qtdPremios: qtdPremiosEfetivo } : {}),
         ...(dto.destino ? { destino: dto.destino } : {}),
         ...(dto.raspadinha !== undefined ? { raspadinha: dto.raspadinha } : {}),
@@ -775,7 +787,7 @@ export class EdicoesService {
   private resolverTipoCartelaCombo(combo: CreateEdicaoComboDto): TipoCartela {
     const tipoCartelaPelaQuantidade =
       combo.quantidadeCartelas !== undefined
-        ? this.obterTipoCartelaPorQuantidadeChances(combo.quantidadeCartelas)
+        ? this.obterTipoCartelaPorQuantidadeCartelas(combo.quantidadeCartelas)
         : null;
 
     if (combo.quantidadeCartelas !== undefined && !tipoCartelaPelaQuantidade) {
@@ -790,7 +802,7 @@ export class EdicoesService {
       combo.tipoCartela !== tipoCartelaPelaQuantidade
     ) {
       throw new BadRequestException(
-        `Combo da origem ${combo.origemParticipacao} possui conflito entre tipoCartela (${combo.tipoCartela}) e quantidadeCartelas (${combo.quantidadeCartelas})`,
+        `Combo da origem ${combo.origemParticipacao} possui conflito entre o campo legado de cartelas e quantidadeCartelas (${combo.quantidadeCartelas})`,
       );
     }
 
@@ -803,7 +815,7 @@ export class EdicoesService {
     }
 
     throw new BadRequestException(
-      `Informe tipoCartela ou quantidadeCartelas para o combo da origem ${combo.origemParticipacao}`,
+      `Informe quantidadeCartelas para o combo da origem ${combo.origemParticipacao}`,
     );
   }
 
@@ -812,9 +824,7 @@ export class EdicoesService {
     detalhes: DetalheRangeNormalizado[],
   ): void {
     if (combos.length === 0) {
-      throw new BadRequestException(
-        'Informe ao menos um combo para a edição',
-      );
+      throw new BadRequestException('Informe ao menos um combo para a edição');
     }
 
     const chavesCombos = new Set<string>();
@@ -829,11 +839,14 @@ export class EdicoesService {
         );
       }
 
-      const chave = `${combo.origemParticipacao}:${combo.tipoCartela}`;
+      const quantidadeCartelasCombo = this.obterQuantidadeCartelas(
+        combo.tipoCartela,
+      );
+      const chave = `${combo.origemParticipacao}:${quantidadeCartelasCombo}`;
 
       if (chavesCombos.has(chave)) {
         throw new ConflictException(
-          `Combo duplicado para ${combo.origemParticipacao}/${combo.tipoCartela}`,
+          `Combo duplicado para ${combo.origemParticipacao}/${quantidadeCartelasCombo} cartela(s)`,
         );
       }
 
@@ -860,13 +873,9 @@ export class EdicoesService {
       const quantidadeRangesDaOrigem = detalhes.filter(
         (detalhe) => detalhe.origemParticipacao === origemDetalhe,
       ).length;
-      const quantidadeChancesCombo = this.obterQuantidadeChances(
-        combo.tipoCartela,
-      );
-
-      if (quantidadeChancesCombo > quantidadeRangesDaOrigem) {
+      if (quantidadeCartelasCombo > quantidadeRangesDaOrigem) {
         throw new BadRequestException(
-          `O combo ${combo.tipoCartela} da origem ${combo.origemParticipacao} exige ${quantidadeChancesCombo} chances, mas essa origem possui apenas ${quantidadeRangesDaOrigem} ranges configurados`,
+          `O combo da origem ${combo.origemParticipacao} exige ${quantidadeCartelasCombo} cartela(s), mas essa origem possui apenas ${quantidadeRangesDaOrigem} ranges configurados`,
         );
       }
     }
@@ -898,15 +907,15 @@ export class EdicoesService {
       return comboUmaChance.preco;
     }
 
-    const primeiroCombo = combos[0];
-
-    if (!primeiroCombo) {
+    if (combos.length === 0) {
       throw new BadRequestException(
         'Não foi possível definir valorCartela sem combos configurados',
       );
     }
 
-    return primeiroCombo.preco;
+    throw new BadRequestException(
+      'valorCartela é obrigatório quando os combos não incluem cartela única',
+    );
   }
 
   private normalizarValorCartela(valorCartela: string): Prisma.Decimal {
@@ -1059,13 +1068,13 @@ export class EdicoesService {
     return serializarEdicaoUtil(edicao, this.getBusinessTimeZone());
   }
 
-  private obterQuantidadeChances(tipoCartela: TipoCartela): number {
-    return obterQuantidadeChancesUtil(tipoCartela);
+  private obterQuantidadeCartelas(tipoCartela: TipoCartela): number {
+    return obterQuantidadeCartelasUtil(tipoCartela);
   }
 
-  private obterTipoCartelaPorQuantidadeChances(
-    quantidadeChances: number,
+  private obterTipoCartelaPorQuantidadeCartelas(
+    quantidadeCartelas: number,
   ): TipoCartela | null {
-    return obterTipoCartelaPorQuantidadeChancesUtil(quantidadeChances);
+    return obterTipoCartelaPorQuantidadeCartelasUtil(quantidadeCartelas);
   }
 }

@@ -1,4 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiHideProperty,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
 import {
   IsEnum,
   IsInt,
@@ -14,34 +18,34 @@ import {
   ValidateNested,
   ArrayMinSize,
   Max,
-  ValidateIf,
 } from 'class-validator';
 import { TipoCartela } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ComboSelecionadoLojaDto } from './combo-selecionado-loja.dto';
+
+const emptyStringToUndefined = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue ? trimmedValue : undefined;
+};
 
 export class ComprarLojaDto {
   @ApiProperty({ example: 'uuid-da-edicao', description: 'ID da edição' })
   @IsUUID('4')
   edicaoId: string;
 
-  @ApiPropertyOptional({
-    enum: TipoCartela,
-    example: TipoCartela.SEIS_CHANCES,
-    description:
-      'Tipo de cartela escolhido (legado compatível com `quantidadeCartelas`).',
-  })
-  @ValidateIf(
-    (dto: ComprarLojaDto) =>
-      dto.tipoCartela !== undefined || dto.quantidadeCartelas === undefined,
-  )
+  @ApiHideProperty()
+  @IsOptional()
   @IsEnum(TipoCartela)
   tipoCartela?: TipoCartela;
 
   @ApiPropertyOptional({
     example: 6,
     description:
-      'Quantidade de cartelas/chances do combo (1 a 12). Alias para `tipoCartela`.',
+      'Quantidade de cartelas do combo (inteiro de 1 a 12). Se omitida, assume 1.',
   })
   @Type(() => Number)
   @IsOptional()
@@ -79,17 +83,29 @@ export class ComprarLojaDto {
   @MinLength(2)
   nome: string;
 
-  @ApiProperty({ example: '(61) 99999-9999', description: 'Telefone do cliente' })
+  @ApiProperty({
+    example: '(61) 99999-9999',
+    description: 'Telefone do cliente',
+  })
   @IsString()
   @IsNotEmpty()
   telefone: string;
 
-  @ApiPropertyOptional({ example: 'joao@email.com', description: 'Email do cliente' })
+  @ApiPropertyOptional({
+    example: 'joao@email.com',
+    description: 'Email do cliente (opcional). String vazia é ignorada.',
+  })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsEmail()
   email?: string;
 
-  @ApiPropertyOptional({ example: '1990-01-01', description: 'Data de nascimento do cliente' })
+  @ApiPropertyOptional({
+    example: '1990-01-01',
+    description:
+      'Data de nascimento do cliente (opcional). String vazia é ignorada.',
+  })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsString()
   dataNascimento?: string;

@@ -4,9 +4,15 @@ import {
   calcularTotalBilhetesDosDetalhes,
   expandirSetoresDosDetalhes,
   obterDetalhesComFallback,
-  obterQuantidadeChances,
+  obterQuantidadeCartelas,
 } from './edicoes-range.util';
 import { EdicaoComRelacoes } from './edicoes.types';
+
+function formatarValorMonetario(valor: {
+  toFixed: (decimalPlaces: number) => string;
+}): string {
+  return valor.toFixed(2);
+}
 
 export function serializarEdicao(
   edicao: EdicaoComRelacoes,
@@ -33,17 +39,18 @@ export function serializarEdicao(
     return {
       origemParticipacao: detalhe.origemParticipacao,
       indiceRange: detalhe.indiceRange,
-      tipoCartelaBase: detalhe.tipoCartela,
+      quantidadeCartelasBase: obterQuantidadeCartelas(detalhe.tipoCartela),
       quantidadeCombos: quantidadeCombos.toString(),
       quantidadeBilhetes: quantidadeBilhetes.toString(),
-      passoEntreChances: primeiroSetor && segundoSetor
-        ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
-        : '0',
+      passoEntreCartelas:
+        primeiroSetor && segundoSetor
+          ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
+          : '0',
       rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
       rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
       legado: edicao.detalhes.length === 0,
       setores: setores.map((setor) => ({
-        indiceChance: setor.indiceChance,
+        indiceCartela: setor.indiceCartela,
         rangeInicio: setor.rangeInicio.toString(),
         rangeFinal: setor.rangeFinal.toString(),
       })),
@@ -55,18 +62,32 @@ export function serializarEdicao(
     };
   });
 
-  const combos = edicao.combos.map((combo) => ({
-    ...combo,
-    quantidadeCartelas: obterQuantidadeChances(combo.tipoCartela),
-    quantidadeChances: obterQuantidadeChances(combo.tipoCartela),
-    preco: combo.preco.toString(),
-  }));
+  const valorUnitarioCartela = formatarValorMonetario(edicao.valorCartela);
+  const combos = edicao.combos.map((combo) => {
+    const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
+    const valorCombo = formatarValorMonetario(combo.preco);
+
+    return {
+      id: combo.id,
+      edicaoId: combo.edicaoId,
+      origemParticipacao: combo.origemParticipacao,
+      tipoCompra: quantidadeCartelas === 1 ? 'UNITARIO' : 'COMBO',
+      quantidadeCartelas,
+      valorUnitarioCartela,
+      valorCombo,
+      preco: valorCombo,
+      createdAt: combo.createdAt,
+      updatedAt: combo.updatedAt,
+    };
+  });
 
   return {
     ...edicao,
     rangeInicio: edicao.rangeInicio.toString(),
     rangeFinal: edicao.rangeFinal.toString(),
-    valorCartela: edicao.valorCartela.toString(),
+    imagemUrl: edicao.imagemUrl ?? null,
+    valorCartela: valorUnitarioCartela,
+    valorUnitarioCartela,
     ...serializarEstadoManutencao(edicao),
     qtdNumerosCartela: edicao.qtdNumerosCartela,
     dataSorteioLocal: formatDateTimeForInput(

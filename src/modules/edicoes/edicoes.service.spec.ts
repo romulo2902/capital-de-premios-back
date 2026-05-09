@@ -172,6 +172,18 @@ describe('EdicoesService', () => {
     );
   });
 
+  it('findOne should return imagemUrl saved from S3', async () => {
+    const imagemUrl =
+      'https://bucket.s3.sa-east-1.amazonaws.com/edicoes/125/capa.png';
+    mockPrisma.edicao.findUnique.mockResolvedValue(
+      criarEdicaoMock({ imagemUrl }),
+    );
+
+    const result = await service.findOne('edicao-1');
+
+    expect(result.data.imagemUrl).toBe(imagemUrl);
+  });
+
   it('create should upload imagem para o s3 quando arquivo for enviado', async () => {
     const edicao = {
       id: 'edicao-1',
@@ -348,6 +360,7 @@ describe('EdicoesService', () => {
       numero: string;
       status: StatusEdicao;
       dataSorteio: Date;
+      imagemUrl: string | null;
     }> = {},
   ) {
     return {
@@ -364,7 +377,7 @@ describe('EdicoesService', () => {
       destino: DestinoEdicao.SITE,
       raspadinha: false,
       frase: null,
-      imagemUrl: null,
+      imagemUrl: overrides.imagemUrl ?? null,
       manutencaoAtiva: false,
       manutencaoMensagem: null,
       status: overrides.status ?? StatusEdicao.RASCUNHO,
@@ -510,7 +523,9 @@ describe('EdicoesService', () => {
     };
 
     mockPrisma.edicao.findUnique.mockResolvedValue(edicao);
-    mockPrisma.$transaction.mockImplementation(async (callback) => callback(tx));
+    mockPrisma.$transaction.mockImplementation(async (callback) =>
+      callback(tx),
+    );
 
     const result = await service.remove('edicao-1');
 

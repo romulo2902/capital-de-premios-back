@@ -131,7 +131,10 @@ O telefone é necessário pois é o canal de origem (WhatsApp) e também usado p
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Dados inválidos (CPF, telefone, etc.).' })
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos (CPF, telefone, etc.).',
+  })
   auth(@Body() dto: AuthWhatsappDto) {
     return this.service.autenticarOuCriar(dto);
   }
@@ -167,17 +170,37 @@ Se não houver campanha ativa, retorna \`data: null\`.
           dataSorteio: '2026-06-01T15:00:00.000Z',
           dataEncerramento: '2026-05-31T23:59:00.000Z',
           valorCartela: '10.00',
+          valorUnitarioCartela: '10.00',
           qtdNumerosCartela: 15,
           opcoesCompra: [
             {
-              tipoCartela: 'SEIS_CHANCES',
-              quantidadeChances: 6,
+              tipoCompra: 'UNITARIO',
+              isCombo: false,
+              quantidadeCartelas: 1,
+              valorUnitarioCartela: '10.00',
+              valorUnitario: '10.00',
+              valorCombo: null,
               preco: '10.00',
               precoFormatado: 'R$ 10,00',
             },
+            {
+              tipoCompra: 'COMBO',
+              isCombo: true,
+              quantidadeCartelas: 6,
+              valorUnitarioCartela: '10.00',
+              valorUnitario: '10.00',
+              valorCombo: '50.00',
+              preco: '50.00',
+              precoFormatado: 'R$ 50,00',
+            },
           ],
           premios: [
-            { ordem: 1, descricao: '1º Prêmio — Carro 0km', valor: '50000.00', valorFormatado: 'R$ 50.000,00' },
+            {
+              ordem: 1,
+              descricao: '1º Prêmio — Carro 0km',
+              valor: '50000.00',
+              valorFormatado: 'R$ 50.000,00',
+            },
           ],
         },
       },
@@ -218,15 +241,22 @@ cliente antes do pedido ser finalizado.
         data: {
           edicaoId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
           edicaoNumero: '001',
-          tipoCartela: 'SEIS_CHANCES',
-          quantidadeChances: 6,
+          tipoCompra: 'COMBO',
+          valorUnitarioCartela: '10.00',
+          valorCombo: '50.00',
+          preco: '50.00',
+          quantidadeCartelas: 6,
           cursorNumeroBaseAtual: '0001234',
           combos: [
             {
               ordemSequencia: 1,
               numeroBase: '0001234',
               bilhetes: [
-                { ordem: 1, numero: '0001234', sequenciaBolas: [1, 5, 12, 23, 37, 42] },
+                {
+                  ordem: 1,
+                  numero: '0001234',
+                  sequenciaBolas: [1, 5, 12, 23, 37, 42],
+                },
               ],
             },
           ],
@@ -234,7 +264,10 @@ cliente antes do pedido ser finalizado.
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Campanha inativa ou tipo de cartela inválido.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Campanha inativa ou tipo de cartela inválido.',
+  })
   @ApiResponse({ status: 404, description: 'Campanha não encontrada.' })
   previewCotas(
     @Param('id', ParseUUIDPipe) id: string,
@@ -281,7 +314,10 @@ dados de PIX. O bot deve informar ao cliente e sugerir tentar novamente.
           total: '10.00',
           totalFormatado: 'R$ 10,00',
           quantidade: 1,
-          tipoCartela: 'SEIS_CHANCES',
+          quantidadeCartelas: 6,
+          tipoCompra: 'COMBO',
+          valorUnitarioCartela: '10.00',
+          valorCombo: '50.00',
           campanha: { id: 'a1b2c3d4...', numero: '001' },
           pagamento: {
             tipo: 'PIX',
@@ -294,7 +330,11 @@ dados de PIX. O bot deve informar ao cliente e sugerir tentar novamente.
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Campanha inativa, tipo de cartela inválido ou combinação incorreta de campos.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Campanha inativa, tipo de cartela inválido ou combinação incorreta de campos.',
+  })
   @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
   @ApiResponse({ status: 404, description: 'Campanha não encontrada.' })
   criarPedido(
@@ -353,7 +393,10 @@ se o PIX expirou no gateway antes de criar um novo pedido.
     },
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
-  @ApiResponse({ status: 404, description: 'Pedido não encontrado ou não pertence ao cliente.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Pedido não encontrado ou não pertence ao cliente.',
+  })
   consultarStatusPagamento(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
@@ -378,7 +421,7 @@ retorna a lista vazia com uma mensagem de aviso.
 **Estrutura retornada:**
 - \`cartelas\`: array de cartelas, cada uma com seus bilhetes
 - Cada bilhete tem \`numero\` (7 dígitos) e \`sequenciaBolas\` (ordem de sorteio)
-- \`quantidadeChancesPorCartela\`: quantos bilhetes por cartela (ex: 6 para SEIS_CHANCES)
+- \`quantidadeCartelasPorCombo\`: quantidade de cartelas por combo (inteiro de 1 a 12)
 
 **Uso no bot:** Use este retorno para gerar uma mensagem como:
 > 🎯 Sua(s) cartela(s):
@@ -406,10 +449,9 @@ retorna a lista vazia com uma mensagem de aviso.
             dataSorteio: '2026-06-01T15:00:00.000Z',
             qtdNumerosCartela: 15,
           },
-          tipoCartela: 'SEIS_CHANCES',
           totalCartelas: 1,
           totalBilhetes: 6,
-          quantidadeChancesPorCartela: 6,
+          quantidadeCartelasPorCombo: 6,
           cartelas: [
             {
               ordemCartela: 1,
@@ -424,7 +466,10 @@ retorna a lista vazia com uma mensagem de aviso.
     },
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
-  @ApiResponse({ status: 404, description: 'Pedido não encontrado ou não pertence ao cliente.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Pedido não encontrado ou não pertence ao cliente.',
+  })
   consultarCartelas(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
@@ -452,10 +497,28 @@ Se o telefone informado não corresponder ao cadastro do cliente, retorna erro 4
 **Paginação:** Use \`page\` e \`limit\` para navegar pelo histórico.
     `.trim(),
   })
-  @ApiQuery({ name: 'pedidoId', required: false, description: 'Filtrar por ID de pedido específico.' })
-  @ApiQuery({ name: 'telefone', required: false, description: 'Confirmar identidade por telefone.' })
-  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Página (default: 1).' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página (default: 10, máx: 50).' })
+  @ApiQuery({
+    name: 'pedidoId',
+    required: false,
+    description: 'Filtrar por ID de pedido específico.',
+  })
+  @ApiQuery({
+    name: 'telefone',
+    required: false,
+    description: 'Confirmar identidade por telefone.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Página (default: 1).',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Itens por página (default: 10, máx: 50).',
+  })
   @ApiResponse({
     status: 200,
     description: 'Pedidos retornados.',
@@ -472,9 +535,13 @@ Se o telefone informado não corresponder ao cadastro do cliente, retorna erro 4
               pedidoId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
               status: 'APROVADO',
               statusLabel: 'Pagamento confirmado ✅',
-              campanha: { id: '...', numero: '001', dataSorteio: '2026-06-01T15:00:00.000Z' },
-              tipoCartela: 'SEIS_CHANCES',
+              campanha: {
+                id: '...',
+                numero: '001',
+                dataSorteio: '2026-06-01T15:00:00.000Z',
+              },
               quantidade: 1,
+              quantidadeCartelas: 6,
               totalBilhetes: 6,
               total: '10.00',
               totalFormatado: 'R$ 10,00',
@@ -486,7 +553,10 @@ Se o telefone informado não corresponder ao cadastro do cliente, retorna erro 4
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Telefone não corresponde ao cadastro do cliente.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Telefone não corresponde ao cadastro do cliente.',
+  })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
   consultarPedidos(
     @Query() filtros: ConsultarPedidosWhatsappDto,

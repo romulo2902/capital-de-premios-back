@@ -1,12 +1,5 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEnum,
-  IsInt,
-  IsOptional,
-  Max,
-  Min,
-  ValidateIf,
-} from 'class-validator';
+import { ApiHideProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { TipoCartela } from '@prisma/client';
 import { Type } from 'class-transformer';
 
@@ -29,22 +22,15 @@ export class PreviewCotasWhatsappDto {
   @Min(1)
   quantidade?: number;
 
-  @ApiPropertyOptional({
-    enum: TipoCartela,
-    example: TipoCartela.SEIS_CHANCES,
-    description:
-      'Tipo de cartela para o preview. Alternativo a `quantidadeCartelas`.',
-  })
-  @ValidateIf(
-    (dto: PreviewCotasWhatsappDto) =>
-      dto.tipoCartela !== undefined || dto.quantidadeCartelas === undefined,
-  )
+  @ApiHideProperty()
+  @IsOptional()
   @IsEnum(TipoCartela)
   tipoCartela?: TipoCartela;
 
   @ApiPropertyOptional({
     example: 6,
-    description: 'Quantidade de chances do combo (1 a 12). Alias para `tipoCartela`.',
+    description:
+      'Quantidade de cartelas do combo (inteiro de 1 a 12). Se omitida, assume 1.',
     minimum: 1,
     maximum: 12,
   })
@@ -67,7 +53,8 @@ export class PreviewCotasWhatsappDto {
   @ApiPropertyOptional({
     enum: ['PROXIMO', 'ANTERIOR'],
     example: 'PROXIMO',
-    description: 'Direção de navegação: PROXIMO (avançar) ou ANTERIOR (voltar).',
+    description:
+      'Direção de navegação: PROXIMO (avançar) ou ANTERIOR (voltar).',
   })
   @IsOptional()
   @IsEnum(['PROXIMO', 'ANTERIOR'])

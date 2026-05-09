@@ -669,16 +669,25 @@ describe('VendasService', () => {
       );
     });
 
-    it('should use detalhe price and persist tipoCartela when informed', async () => {
+    it('should use detalhe price and persist internal cartela type from quantidadeCartelas', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue({
         ...edicaoAtiva,
         detalhes: [
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
+            indiceRange: 1,
             rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1199999),
+            rangeFinal: BigInt(1099999),
             preco: new Prisma.Decimal('25.00'),
+          },
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            indiceRange: 2,
+            rangeInicio: BigInt(1100000),
+            rangeFinal: BigInt(1199999),
+            preco: null,
           },
         ],
       });
@@ -697,7 +706,7 @@ describe('VendasService', () => {
 
       await service.create({
         ...createDto,
-        tipoCartela: TipoCartela.DUAS_CHANCES,
+        quantidadeCartelas: 2,
       });
 
       expect(mockPrisma.venda.create).toHaveBeenCalledWith(
@@ -755,20 +764,37 @@ describe('VendasService', () => {
       ).rejects.toThrow('Catálogo temporariamente indisponível');
     });
 
-    it('should return grouped deterministic combos for the requested tipoCartela', async () => {
+    it('should return grouped deterministic combos for the requested quantidadeCartelas', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue({
         id: 'edicao-1',
         numero: 10,
         status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
         rangeInicio: BigInt(1000000),
         rangeFinal: BigInt(1199999),
         detalhes: [
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
+            indiceRange: 1,
             rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1099999),
+            preco: null,
+          },
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            indiceRange: 2,
+            rangeInicio: BigInt(1100000),
             rangeFinal: BigInt(1199999),
             preco: null,
+          },
+        ],
+        combos: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            preco: new Prisma.Decimal('50.00'),
           },
         ],
       });
@@ -784,11 +810,11 @@ describe('VendasService', () => {
 
       const result = await service.listarCombosDisponiveis({
         edicaoId: 'edicao-1',
-        tipoCartela: TipoCartela.DUAS_CHANCES,
+        quantidadeCartelas: 2,
         limit: 1,
       });
 
-      expect(result.data.quantidadeChances).toBe(2);
+      expect(result.data.quantidadeCartelas).toBe(2);
       expect(result.data.combos).toEqual([
         {
           ordemSequencia: 1,
@@ -811,17 +837,19 @@ describe('VendasService', () => {
       ]);
     });
 
-    it('should respect manual sectors when tipoCartela has one detail per chance', async () => {
+    it('should respect manual sectors when quantidadeCartelas has one detail per cartela', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue({
         id: 'edicao-2',
         numero: 11,
         status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
         rangeInicio: BigInt(950000),
         rangeFinal: BigInt(2059980),
         detalhes: [
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
+            indiceRange: 1,
             rangeInicio: BigInt(950000),
             rangeFinal: BigInt(959980),
             preco: null,
@@ -829,9 +857,17 @@ describe('VendasService', () => {
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
+            indiceRange: 2,
             rangeInicio: BigInt(1050000),
             rangeFinal: BigInt(1059980),
             preco: null,
+          },
+        ],
+        combos: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            preco: new Prisma.Decimal('50.00'),
           },
         ],
       });
@@ -847,13 +883,13 @@ describe('VendasService', () => {
 
       const result = await service.listarCombosDisponiveis({
         edicaoId: 'edicao-2',
-        tipoCartela: TipoCartela.DUAS_CHANCES,
+        quantidadeCartelas: 2,
         limit: 1,
       });
 
       expect(result.data.rangeTotalInicio).toBe('950000');
       expect(result.data.rangeTotalFinal).toBe('1059980');
-      expect(result.data.passoEntreChances).toBe('100000');
+      expect(result.data.passoEntreCartelas).toBe('100000');
       expect(result.data.combos[0].bilhetes).toHaveLength(2);
       expect(result.data.combos[0].bilhetes[0].numero).toBe('0950000');
       expect(result.data.combos[0].bilhetes[1].numero).toBe('1050000');

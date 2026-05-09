@@ -27,10 +27,10 @@ describe('edicoes-range.util', () => {
     ]);
 
     expect(setores).toHaveLength(2);
-    expect(setores[0].indiceChance).toBe(1);
+    expect(setores[0].indiceCartela).toBe(1);
     expect(setores[0].rangeInicio).toBe(1n);
     expect(setores[0].rangeFinal).toBe(1000n);
-    expect(setores[1].indiceChance).toBe(2);
+    expect(setores[1].indiceCartela).toBe(2);
     expect(setores[1].rangeInicio).toBe(1001n);
     expect(setores[1].rangeFinal).toBe(2000n);
   });

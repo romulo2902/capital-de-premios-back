@@ -1,4 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiHideProperty,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
 import {
   IsEmail,
   IsEnum,
@@ -14,9 +18,17 @@ import {
   ValidateNested,
   IsIn,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { OrigemParticipacao, TipoCartela, TipoPagamento } from '@prisma/client';
 
+const emptyStringToUndefined = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue ? trimmedValue : undefined;
+};
 
 export class CreateVendaDto {
   @ApiProperty({
@@ -35,12 +47,7 @@ export class CreateVendaDto {
   @Min(1)
   quantidade: number;
 
-  @ApiPropertyOptional({
-    enum: TipoCartela,
-    example: TipoCartela.UMA_CHANCE,
-    description:
-      'Tipo de cartela/chances (legado compatível). Quando omitido, a API usa `quantidadeCartelas` ou assume UMA_CHANCE/tier padrão da edição.',
-  })
+  @ApiHideProperty()
   @IsOptional()
   @IsEnum(TipoCartela)
   tipoCartela?: TipoCartela;
@@ -48,7 +55,7 @@ export class CreateVendaDto {
   @ApiPropertyOptional({
     example: 2,
     description:
-      'Quantidade de cartelas/chances por combo (1 a 12). Alias para `tipoCartela`.',
+      'Quantidade de cartelas por combo (inteiro de 1 a 12). Se omitida, assume 1.',
   })
   @Type(() => Number)
   @IsOptional()
@@ -115,8 +122,9 @@ export class CreateVendaDto {
 
   @ApiPropertyOptional({
     example: 'romulo.valadares@email.com',
-    description: 'E-mail do cliente (opcional).',
+    description: 'E-mail do cliente (opcional). String vazia é ignorada.',
   })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsEmail()
   email?: string;

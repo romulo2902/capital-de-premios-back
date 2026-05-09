@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiHideProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
@@ -17,12 +17,7 @@ export enum DirecaoComboAdmin {
 }
 
 export class ListarCombosAdminDto {
-  @ApiPropertyOptional({
-    enum: TipoCartela,
-    example: TipoCartela.SEIS_CHANCES,
-    description:
-      'Tipo de cartela/combinação a navegar (legado compatível com `quantidadeCartelas`).',
-  })
+  @ApiHideProperty()
   @IsOptional()
   @IsEnum(TipoCartela)
   tipoCartela?: TipoCartela;
@@ -30,7 +25,7 @@ export class ListarCombosAdminDto {
   @ApiPropertyOptional({
     example: 6,
     description:
-      'Quantidade de cartelas/chances do combo (1 a 12). Alias para `tipoCartela`.',
+      'Quantidade de cartelas do combo (inteiro de 1 a 12). Se omitida, assume 1.',
   })
   @IsOptional()
   @Type(() => Number)

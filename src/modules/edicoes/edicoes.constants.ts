@@ -2,10 +2,7 @@ import { Prisma, StatusEdicao, TipoCartela } from '@prisma/client';
 
 export const EDICAO_INCLUDE = {
   detalhes: {
-    orderBy: [
-      { origemParticipacao: 'asc' },
-      { indiceRange: 'asc' },
-    ],
+    orderBy: [{ origemParticipacao: 'asc' }, { indiceRange: 'asc' }],
   },
   combos: {
     orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
@@ -21,7 +18,7 @@ export const STATUSS_EDICAO_EM_OPERACAO: StatusEdicao[] = [
   StatusEdicao.SORTEANDO,
 ];
 
-export const QUANTIDADE_CHANCES_POR_TIPO_CARTELA: Record<TipoCartela, number> =
+export const QUANTIDADE_CARTELAS_POR_TIPO_CARTELA: Record<TipoCartela, number> =
   {
     [TipoCartela.UMA_CHANCE]: 1,
     [TipoCartela.DUAS_CHANCES]: 2,

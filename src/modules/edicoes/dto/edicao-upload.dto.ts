@@ -23,7 +23,7 @@ export class CreateEdicaoUploadDto extends OmitType(CreateEdicaoDto, [
     example:
       '[{"origemParticipacao":"DIGITAL","quantidadeCartelas":1,"preco":"10.00"},{"origemParticipacao":"DIGITAL","quantidadeCartelas":2,"preco":"20.00"},{"origemParticipacao":"POS","quantidadeCartelas":2,"preco":"22.00"}]',
     description:
-      'JSON serializado com os combos da edição e seus preços por origem e quantidade de cartelas/chances (compatível com `tipoCartela` legado).',
+      'JSON serializado com os combos da edição e seus preços por origem e quantidade de cartelas.',
   })
   combos: string;
 

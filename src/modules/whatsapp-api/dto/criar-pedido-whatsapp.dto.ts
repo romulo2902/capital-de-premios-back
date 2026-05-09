@@ -1,4 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiHideProperty,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
 import {
   ArrayMinSize,
   IsArray,
@@ -9,7 +13,6 @@ import {
   IsUUID,
   Max,
   Min,
-  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { TipoCartela } from '@prisma/client';
@@ -18,7 +21,8 @@ import { Type } from 'class-transformer';
 export class ComboSelecionadoWhatsappDto {
   @ApiProperty({
     example: '0001234',
-    description: 'Número base do combo selecionado (7 dígitos com zeros à esquerda).',
+    description:
+      'Número base do combo selecionado (7 dígitos com zeros à esquerda).',
   })
   @IsString()
   numeroBase: string;
@@ -33,7 +37,8 @@ export class ComboSelecionadoWhatsappDto {
 export class CriarPedidoWhatsappDto {
   @ApiProperty({
     example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    description: 'ID da edição/campanha ativa (obter em GET /whatsapp/campanhas/ativa).',
+    description:
+      'ID da edição/campanha ativa (obter em GET /whatsapp/campanhas/ativa).',
   })
   @IsUUID('4')
   edicaoId: string;
@@ -48,25 +53,15 @@ export class CriarPedidoWhatsappDto {
   @Min(1)
   quantidade: number;
 
-  @ApiPropertyOptional({
-    enum: TipoCartela,
-    example: TipoCartela.SEIS_CHANCES,
-    description:
-      'Tipo de cartela escolhida. Alternativo a `quantidadeCartelas`. ' +
-      'Se omitido, usa o tipo padrão da campanha.',
-  })
-  @ValidateIf(
-    (dto: CriarPedidoWhatsappDto) =>
-      dto.tipoCartela !== undefined || dto.quantidadeCartelas === undefined,
-  )
+  @ApiHideProperty()
+  @IsOptional()
   @IsEnum(TipoCartela)
   tipoCartela?: TipoCartela;
 
   @ApiPropertyOptional({
     example: 6,
     description:
-      'Quantidade de chances/cartelas do combo (1 a 12). Alias para `tipoCartela`. ' +
-      'Use um ou outro, não ambos.',
+      'Quantidade de cartelas do combo (inteiro de 1 a 12). Se omitida, assume 1.',
     minimum: 1,
     maximum: 12,
   })

@@ -1,5 +1,5 @@
 import { TipoCartela } from '@prisma/client';
-import { obterQuantidadeChances } from '../edicoes/edicoes-range.util';
+import { obterQuantidadeCartelas } from '../edicoes/edicoes-range.util';
 
 export function calcularQuantidadeCartelasDaVenda(params: {
   quantidade: number;
@@ -14,7 +14,7 @@ export function calcularQuantidadeCartelasDaVenda(params: {
   }
 
   const multiplicador = params.tipoCartela
-    ? obterQuantidadeChances(params.tipoCartela)
+    ? obterQuantidadeCartelas(params.tipoCartela)
     : 1;
 
   return params.quantidade * multiplicador;

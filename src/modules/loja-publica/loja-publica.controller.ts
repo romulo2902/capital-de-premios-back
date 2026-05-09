@@ -13,7 +13,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { LojaPublicaService } from './loja-publica.service';
 import { ComprarLojaDto } from './dto/comprar-loja.dto';
 import { ListarCombosLojaDto } from './dto/listar-combos-loja.dto';
-import { OrigemParticipacao, TipoCartela } from '@prisma/client';
+import { OrigemParticipacao } from '@prisma/client';
 import { CreateFaleConoscoDto } from './dto/create-fale-conosco.dto';
 
 @ApiTags('Loja Pública')
@@ -38,7 +38,6 @@ export class LojaPublicaController {
     summary:
       'Navegar pelos combos pré-definidos (1 por vez) de uma edição/combinação (Público)',
   })
-  @ApiQuery({ name: 'tipoCartela', required: false, enum: TipoCartela })
   @ApiQuery({ name: 'quantidadeCartelas', required: false, type: Number })
   @ApiQuery({
     name: 'origemParticipacao',

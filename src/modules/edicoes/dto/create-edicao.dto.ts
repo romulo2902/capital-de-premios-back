@@ -1,9 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  Transform,
-  TransformFnParams,
-  Type,
-} from 'class-transformer';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -77,7 +73,7 @@ export class CreateEdicaoDto {
   @ApiPropertyOptional({
     example: '10.00',
     description:
-      'Valor base de fallback da cartela. Quando omitido, a API deriva a partir dos combos cadastrados.',
+      'Valor unitário da cartela única. Quando omitido, a API só deriva a partir de um combo de 1 cartela.',
   })
   @IsOptional()
   @IsString()
@@ -190,7 +186,7 @@ export class CreateEdicaoDto {
       },
     ],
     description:
-      'Combos da edição com preço por origem e quantidade de cartelas/chances. Compatível com `tipoCartela` (legado).',
+      'Combos da edição com preço total por origem e quantidade de cartelas. Use sempre `quantidadeCartelas` como inteiro de 1 a 12. A cartela única usa `valorCartela` como valor unitário.',
   })
   @Transform(parseCombosInput)
   @Type(() => CreateEdicaoComboDto)

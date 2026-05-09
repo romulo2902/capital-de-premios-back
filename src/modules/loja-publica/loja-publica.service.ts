@@ -22,8 +22,8 @@ import {
 import { ConteudoService } from '../conteudo/conteudo.service';
 import {
   expandirSetoresDosDetalhes,
-  obterQuantidadeChances,
-  obterTipoCartelaPorQuantidadeChances,
+  obterQuantidadeCartelas,
+  obterTipoCartelaPorQuantidadeCartelas,
 } from '../edicoes/edicoes-range.util';
 import {
   criarExcecaoEdicaoEmManutencao,
@@ -35,6 +35,26 @@ import { CreateFaleConoscoDto } from './dto/create-fale-conosco.dto';
 import { getRequestContext } from '../../common/request-context/request-context.util';
 import { RedisService } from '../../common/redis/redis.service';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
+
+export type TipoCompraEdicao = 'UNITARIO' | 'COMBO';
+
+export interface OpcaoCompraEdicao {
+  tipoCompra: TipoCompraEdicao;
+  isCombo: boolean;
+  quantidadeCartelas: number;
+  valorUnitarioCartela: string;
+  valorUnitario: string;
+  valorCombo: string | null;
+  preco: string;
+  rangeTotalInicio: string;
+  rangeTotalFinal: string;
+  passoEntreCartelas: string;
+  setores: Array<{
+    indiceCartela: number;
+    rangeInicio: string;
+    rangeFinal: string;
+  }>;
+}
 
 @Injectable()
 export class LojaPublicaService {
@@ -79,6 +99,9 @@ export class LojaPublicaService {
       edicaoAtiva.combos,
       edicaoAtiva.valorCartela,
     );
+    const valorUnitarioCartela = this.formatarValorMonetario(
+      edicaoAtiva.valorCartela,
+    );
 
     return {
       message: 'Dados da home carregados com sucesso',
@@ -91,7 +114,8 @@ export class LojaPublicaService {
           frase: edicaoAtiva.frase,
           imagemUrl: edicaoAtiva.imagemUrl,
           status: edicaoAtiva.status,
-          valorCartela: edicaoAtiva.valorCartela.toString(),
+          valorCartela: valorUnitarioCartela,
+          valorUnitarioCartela,
           qtdNumerosCartela: edicaoAtiva.qtdNumerosCartela,
           ...serializarEstadoManutencao(edicaoAtiva),
         },
@@ -123,7 +147,8 @@ export class LojaPublicaService {
       origemParticipacao:
         filtros.origemParticipacao ?? OrigemParticipacao.DIGITAL,
       tipoCartela: filtros.tipoCartela,
-      quantidadeCartelas: filtros.quantidadeCartelas,
+      quantidadeCartelas:
+        filtros.quantidadeCartelas ?? (filtros.tipoCartela ? undefined : 1),
       cursorNumeroBase: filtros.cursorNumeroBase,
       direcao: filtros.direcao,
       limit: filtros.limit,
@@ -148,8 +173,8 @@ export class LojaPublicaService {
         combos: {
           where: {
             origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: tipoCartelaSelecionada,
           },
+          orderBy: { tipoCartela: 'asc' },
         },
       },
     });
@@ -161,15 +186,22 @@ export class LojaPublicaService {
     this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
     const detalheSelecionado = edicao.detalhes[0];
-    const comboSelecionado = edicao.combos[0];
-    if (!detalheSelecionado || !comboSelecionado) {
+    const comboSelecionado = this.encontrarComboDaCompra(
+      edicao.combos,
+      tipoCartelaSelecionada,
+    );
+    const compraUnitaria = this.isCartelaUnitaria(tipoCartelaSelecionada);
+    const quantidadeCartelasPorCombo = obterQuantidadeCartelas(
+      tipoCartelaSelecionada,
+    );
+
+    if (!detalheSelecionado || (!compraUnitaria && !comboSelecionado)) {
       throw new BadRequestException(
-        'Tipo de cartela não está disponível para esta edição',
+        'Quantidade de cartelas não está disponível para esta edição',
       );
     }
 
-    const quantidadeBilhetes =
-      obterQuantidadeChances(tipoCartelaSelecionada) * dto.quantidade;
+    const quantidadeBilhetes = quantidadeCartelasPorCombo * dto.quantidade;
 
     if (
       dto.combosSelecionados &&
@@ -181,10 +213,13 @@ export class LojaPublicaService {
     }
 
     // Calcula total
-    const precoUnitario = Number(comboSelecionado.preco ?? edicao.valorCartela);
-    const total = precoUnitario * dto.quantidade;
+    const valorSelecionado = compraUnitaria
+      ? Number(edicao.valorCartela)
+      : Number(comboSelecionado!.preco);
+    const total = valorSelecionado * dto.quantidade;
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
+    const emailNormalizado = dto.email?.trim() || null;
     let cliente = await this.prisma.cliente.findUnique({
       where: { cpf: cpfLimpo },
     });
@@ -195,7 +230,7 @@ export class LojaPublicaService {
           cpf: cpfLimpo,
           nome: dto.nome,
           telefone: dto.telefone,
-          email: dto.email,
+          email: emailNormalizado,
           dataNascimento: dbDate && !isNaN(dbDate.getTime()) ? dbDate : null,
         },
       });
@@ -263,6 +298,15 @@ export class LojaPublicaService {
         data: {
           vendaId: venda.id,
           total: vendaAprovada?.total.toString() ?? venda.total.toString(),
+          tipoCompra: compraUnitaria ? 'UNITARIO' : 'COMBO',
+          valorUnitarioCartela: this.formatarValorMonetario(
+            edicao.valorCartela,
+          ),
+          valorCombo: compraUnitaria
+            ? null
+            : this.formatarValorMonetario(comboSelecionado!.preco),
+          quantidadeCombos: dto.quantidade,
+          quantidadeCartelasPorCombo,
           quantidadeCartelas: quantidadeBilhetes,
           quantidadeBilhetes,
           status: vendaAprovada?.status ?? StatusVenda.APROVADO,
@@ -283,7 +327,7 @@ export class LojaPublicaService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
-        descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidade}x ${tipoCartelaSelecionada}`,
+        descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${quantidadeBilhetes} cartela(s)`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
         expiracaoSegundos: 3600,
@@ -315,6 +359,13 @@ export class LojaPublicaService {
       data: {
         vendaId: venda.id,
         total: venda.total.toString(),
+        tipoCompra: compraUnitaria ? 'UNITARIO' : 'COMBO',
+        valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
+        valorCombo: compraUnitaria
+          ? null
+          : this.formatarValorMonetario(comboSelecionado!.preco),
+        quantidadeCombos: dto.quantidade,
+        quantidadeCartelasPorCombo,
         quantidadeCartelas: quantidadeBilhetes,
         quantidadeBilhetes,
         pagamento: dadosPagamento,
@@ -425,6 +476,9 @@ export class LojaPublicaService {
           telefone: cliente.telefone,
         },
         compras: vendas.map((v) => {
+          const quantidadeCartelasPorCombo = v.tipoCartela
+            ? obterQuantidadeCartelas(v.tipoCartela)
+            : 1;
           const quantidadeCartelas = calcularQuantidadeCartelasDaVenda({
             quantidade: v.quantidade,
             tipoCartela: v.tipoCartela,
@@ -439,11 +493,10 @@ export class LojaPublicaService {
             tipoPagamento: v.tipoPagamento,
             tipoPagamentoLabel: this.mapearTipoPagamento(v.tipoPagamento),
             quantidade: quantidadeCartelas,
+            quantidadeCombos: v.quantidade,
+            quantidadeCartelasPorCombo,
+            quantidadeCartelas,
             quantidadeBilhetes: v.bilhetes.length,
-            tipoCartela: v.tipoCartela,
-            quantidadeChances: v.tipoCartela
-              ? obterQuantidadeChances(v.tipoCartela)
-              : v.quantidade,
             total: v.total.toString(),
             totalFormatado: this.formatarMoeda(v.total),
             dataCompra: v.createdAt,
@@ -465,7 +518,10 @@ export class LojaPublicaService {
               ),
               imagemUrl: v.edicao.imagemUrl,
               frase: v.edicao.frase,
-              valorCartela: v.edicao.valorCartela.toString(),
+              valorCartela: this.formatarValorMonetario(v.edicao.valorCartela),
+              valorUnitarioCartela: this.formatarValorMonetario(
+                v.edicao.valorCartela,
+              ),
               valorCartelaFormatado: this.formatarMoeda(v.edicao.valorCartela),
               qtdNumerosCartela: v.edicao.qtdNumerosCartela,
               opcoesCompra: this.mapearOpcoesCompraDaEdicao(
@@ -473,8 +529,11 @@ export class LojaPublicaService {
                 v.edicao.combos,
                 v.edicao.valorCartela,
               ).map((opcao) => ({
-                tipoCartela: opcao.tipoCartela,
-                quantidadeCartelas: opcao.quantidadeChances,
+                tipoCompra: opcao.tipoCompra,
+                isCombo: opcao.isCombo,
+                quantidadeCartelas: opcao.quantidadeCartelas,
+                valorUnitarioCartela: opcao.valorUnitarioCartela,
+                valorCombo: opcao.valorCombo,
                 preco: opcao.preco,
                 precoFormatado: this.formatarMoeda(Number(opcao.preco)),
               })),
@@ -583,6 +642,10 @@ export class LojaPublicaService {
     }).format(Number(valor));
   }
 
+  private formatarValorMonetario(valor: Prisma.Decimal | number): string {
+    return Number(valor).toFixed(2);
+  }
+
   private formatarData(data: Date): string {
     return new Intl.DateTimeFormat('pt-BR', {
       timeZone: 'America/Sao_Paulo',
@@ -641,7 +704,8 @@ export class LojaPublicaService {
       );
       const numeroBase = setorCorrespondente
         ? bilhete.numero -
-          (setorCorrespondente.rangeInicio - setorCorrespondente.rangeTotalInicio)
+          (setorCorrespondente.rangeInicio -
+            setorCorrespondente.rangeTotalInicio)
         : bilhete.numero;
       const chave = `${tipoCartela ?? setorCorrespondente?.tipoCartela ?? 'SEM_TIPO'}:${numeroBase.toString()}`;
       const grupoExistente = grupos.get(chave);
@@ -663,7 +727,7 @@ export class LojaPublicaService {
       .map((grupo, index) => ({
         ordemSequencia: index + 1,
         numeroBase: this.formatarNumeroBilhete(grupo.numeroBase),
-        tipoCartela: grupo.tipoCartela,
+        quantidadeCartelas: grupo.bilhetes.length,
         quantidadeBilhetes: grupo.bilhetes.length,
         bilhetes: grupo.bilhetes
           .sort((a, b) => (a.numero < b.numero ? -1 : 1))
@@ -693,10 +757,11 @@ export class LojaPublicaService {
       preco: Prisma.Decimal;
     }>,
     valorCartelaPadrao: Prisma.Decimal,
-  ) {
-    const detalhesDigitais = detalhes.filter(
-      (detalhe) => detalhe.origemParticipacao === OrigemParticipacao.DIGITAL,
-    )
+  ): OpcaoCompraEdicao[] {
+    const detalhesDigitais = detalhes
+      .filter(
+        (detalhe) => detalhe.origemParticipacao === OrigemParticipacao.DIGITAL,
+      )
       .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
 
     if (detalhesDigitais.length === 0) {
@@ -715,64 +780,86 @@ export class LojaPublicaService {
       return [];
     }
 
+    const valorUnitarioCartela =
+      this.formatarValorMonetario(valorCartelaPadrao);
+    const primeiroSetorBase = setoresBase[0];
+    const segundoSetorBase = setoresBase[1];
+    const opcoes: OpcaoCompraEdicao[] = [
+      {
+        tipoCompra: 'UNITARIO',
+        isCombo: false,
+        quantidadeCartelas: 1,
+        valorUnitarioCartela,
+        valorUnitario: valorUnitarioCartela,
+        valorCombo: null,
+        preco: valorUnitarioCartela,
+        rangeTotalInicio: primeiroSetorBase.rangeTotalInicio.toString(),
+        rangeTotalFinal: primeiroSetorBase.rangeTotalFinal.toString(),
+        passoEntreCartelas:
+          primeiroSetorBase && segundoSetorBase
+            ? (
+                segundoSetorBase.rangeInicio - primeiroSetorBase.rangeInicio
+              ).toString()
+            : '0',
+        setores: [
+          {
+            indiceCartela: primeiroSetorBase.indiceCartela,
+            rangeInicio: primeiroSetorBase.rangeInicio.toString(),
+            rangeFinal: primeiroSetorBase.rangeFinal.toString(),
+          },
+        ],
+      },
+    ];
+
     const combosDigitais = combos.filter(
-      (combo) => combo.origemParticipacao === OrigemParticipacao.DIGITAL,
+      (combo) =>
+        combo.origemParticipacao === OrigemParticipacao.DIGITAL &&
+        combo.tipoCartela !== TipoCartela.UMA_CHANCE,
     );
 
     if (combosDigitais.length === 0) {
-      return [
-        {
-          tipoCartela: TipoCartela.UMA_CHANCE,
-          quantidadeCartelas: 1,
-          quantidadeChances: 1,
-          rangeTotalInicio: setoresBase[0].rangeTotalInicio.toString(),
-          rangeTotalFinal: setoresBase[0].rangeTotalFinal.toString(),
-          passoEntreChances:
-            setoresBase.length > 1
-              ? (
-                  setoresBase[1].rangeInicio - setoresBase[0].rangeInicio
-                ).toString()
-              : '0',
-          setores: [
-            {
-              indiceChance: 1,
-              rangeInicio: setoresBase[0].rangeInicio.toString(),
-              rangeFinal: setoresBase[0].rangeFinal.toString(),
-            },
-          ],
-          preco: valorCartelaPadrao.toString(),
-        },
-      ];
+      return opcoes;
     }
 
-    return combosDigitais.map((combo) => {
-      const quantidadeChances = obterQuantidadeChances(combo.tipoCartela);
-      const setores = setoresBase.slice(0, quantidadeChances);
-      const primeiroSetor = setores[0];
-      const segundoSetor = setores[1];
+    const opcoesDeCombo = combosDigitais
+      .map((combo) => {
+        const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
+        const setores = setoresBase.slice(0, quantidadeCartelas);
+        const primeiroSetor = setores[0];
+        const segundoSetor = setores[1];
 
-      if (setores.length < quantidadeChances) {
-        return null;
-      }
+        if (setores.length < quantidadeCartelas) {
+          return null;
+        }
 
-      return {
-        tipoCartela: combo.tipoCartela,
-        quantidadeCartelas: quantidadeChances,
-        quantidadeChances,
-        rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
-        rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
-        passoEntreChances:
-          primeiroSetor && segundoSetor
-            ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
-            : '0',
-        setores: setores.map((setor) => ({
-          indiceChance: setor.indiceChance,
-          rangeInicio: setor.rangeInicio.toString(),
-          rangeFinal: setor.rangeFinal.toString(),
-        })),
-        preco: combo.preco.toString(),
-      };
-    }).filter((item): item is NonNullable<typeof item> => item !== null);
+        const valorCombo = this.formatarValorMonetario(combo.preco);
+
+        return {
+          tipoCompra: 'COMBO' as const,
+          isCombo: true,
+          quantidadeCartelas,
+          valorUnitarioCartela,
+          valorUnitario: valorUnitarioCartela,
+          valorCombo,
+          rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
+          rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
+          passoEntreCartelas:
+            primeiroSetor && segundoSetor
+              ? (
+                  segundoSetor.rangeInicio - primeiroSetor.rangeInicio
+                ).toString()
+              : '0',
+          setores: setores.map((setor) => ({
+            indiceCartela: setor.indiceCartela,
+            rangeInicio: setor.rangeInicio.toString(),
+            rangeFinal: setor.rangeFinal.toString(),
+          })),
+          preco: valorCombo,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    return [...opcoes, ...opcoesDeCombo];
   }
 
   private normalizarTexto(valor: string): string {
@@ -812,13 +899,7 @@ export class LojaPublicaService {
     const redis = this.redisService.client;
 
     if (redis) {
-      const wasStored = await redis.set(
-        key,
-        '1',
-        'EX',
-        cooldownSeconds,
-        'NX',
-      );
+      const wasStored = await redis.set(key, '1', 'EX', cooldownSeconds, 'NX');
 
       if (wasStored !== 'OK') {
         throw new HttpException(
@@ -925,13 +1006,32 @@ export class LojaPublicaService {
     }
   }
 
+  private isCartelaUnitaria(tipoCartela: TipoCartela): boolean {
+    return tipoCartela === TipoCartela.UMA_CHANCE;
+  }
+
+  private encontrarComboDaCompra(
+    combos: Array<{
+      origemParticipacao: OrigemParticipacao;
+      tipoCartela: TipoCartela;
+      preco: Prisma.Decimal;
+    }>,
+    tipoCartela: TipoCartela,
+  ) {
+    return combos.find(
+      (combo) =>
+        combo.origemParticipacao === OrigemParticipacao.DIGITAL &&
+        combo.tipoCartela === tipoCartela,
+    );
+  }
+
   private resolverTipoCartelaDaCompra(
     tipoCartela?: TipoCartela,
     quantidadeCartelas?: number,
   ): TipoCartela {
     const tipoCartelaPelaQuantidade =
       quantidadeCartelas !== undefined
-        ? obterTipoCartelaPorQuantidadeChances(quantidadeCartelas)
+        ? obterTipoCartelaPorQuantidadeCartelas(quantidadeCartelas)
         : null;
 
     if (quantidadeCartelas !== undefined && !tipoCartelaPelaQuantidade) {
@@ -946,7 +1046,7 @@ export class LojaPublicaService {
       tipoCartela !== tipoCartelaPelaQuantidade
     ) {
       throw new BadRequestException(
-        `Conflito entre tipoCartela (${tipoCartela}) e quantidadeCartelas (${quantidadeCartelas})`,
+        `Conflito entre o campo legado de cartelas e quantidadeCartelas (${quantidadeCartelas})`,
       );
     }
 

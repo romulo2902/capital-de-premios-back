@@ -6,13 +6,13 @@ import {
   TipoCartela,
 } from '@prisma/client';
 import { CreateEdicaoDetalheDto } from './dto/create-edicao-detalhe.dto';
-import { QUANTIDADE_CHANCES_POR_TIPO_CARTELA } from './edicoes.constants';
+import { QUANTIDADE_CARTELAS_POR_TIPO_CARTELA } from './edicoes.constants';
 import { DetalheRangeNormalizado, EdicaoComRelacoes } from './edicoes.types';
 
 export interface SetorDetalheRange {
   origemParticipacao: OrigemParticipacao;
   tipoCartela: TipoCartela;
-  indiceChance: number;
+  indiceCartela: number;
   rangeInicio: bigint;
   rangeFinal: bigint;
   rangeTotalInicio: bigint;
@@ -36,7 +36,7 @@ interface GrupoDetalhesPorTipo {
   detalhes: DetalheRangeExpandivel[];
 }
 
-const TIPO_CARTELA_POR_QUANTIDADE_CHANCES = new Map<number, TipoCartela>([
+const TIPO_CARTELA_POR_QUANTIDADE = new Map<number, TipoCartela>([
   [1, TipoCartela.UMA_CHANCE],
   [2, TipoCartela.DUAS_CHANCES],
   [3, TipoCartela.TRES_CHANCES],
@@ -64,7 +64,8 @@ export function normalizarDetalhes(
   const proximoIndicePorOrigem = new Map<OrigemParticipacao, number>();
 
   return detalhes.map((detalhe, index) => {
-    const proximoIndice = (proximoIndicePorOrigem.get(detalhe.origemParticipacao) ?? 0) + 1;
+    const proximoIndice =
+      (proximoIndicePorOrigem.get(detalhe.origemParticipacao) ?? 0) + 1;
     const indiceRange = detalhe.indiceRange ?? proximoIndice;
     const quantidadeDaOrigem =
       quantidadePorOrigem.get(detalhe.origemParticipacao) ?? 1;
@@ -145,9 +146,7 @@ export function validarDetalhesInternos(
 
     const detalhesOrigem = porOrigem.get(detalhe.origemParticipacao) ?? [];
     if (
-      detalhesOrigem.some(
-        (item) => item.indiceRange === detalhe.indiceRange,
-      )
+      detalhesOrigem.some((item) => item.indiceRange === detalhe.indiceRange)
     ) {
       throw new ConflictException(
         `indiceRange duplicado para origem ${detalhe.origemParticipacao}: ${detalhe.indiceRange}`,
@@ -180,7 +179,7 @@ export function validarDetalhesInternos(
 
     if (possuiTamanhoDiferente) {
       throw new BadRequestException(
-        `Todos os ranges da origem ${origem} devem ter o mesmo tamanho para manter o pareamento de chances`,
+        `Todos os ranges da origem ${origem} devem ter o mesmo tamanho para manter o pareamento das cartelas`,
       );
     }
   }
@@ -325,7 +324,7 @@ export function expandirSetoresDosDetalhes(
       setores.push({
         origemParticipacao: detalhe.origemParticipacao,
         tipoCartela: detalhe.tipoCartela,
-        indiceChance: detalhe.indiceRange ?? index + 1,
+        indiceCartela: detalhe.indiceRange ?? index + 1,
         rangeInicio: detalhe.rangeInicio,
         rangeFinal: detalhe.rangeFinal,
         rangeTotalInicio,
@@ -339,10 +338,7 @@ export function expandirSetoresDosDetalhes(
 }
 
 export function calcularTotalBilhetesDoDetalhe(
-  detalhe: Pick<
-    DetalheRangeNormalizado,
-    'rangeInicio' | 'rangeFinal'
-  >,
+  detalhe: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
 ): bigint {
   return detalhe.rangeFinal - detalhe.rangeInicio + 1n;
 }
@@ -351,8 +347,7 @@ export function calcularTotalBilhetesDosDetalhes(
   detalhes: DetalheRangeExpandivel[],
 ): bigint {
   return detalhes.reduce(
-    (total, detalhe) =>
-      total + (detalhe.rangeFinal - detalhe.rangeInicio + 1n),
+    (total, detalhe) => total + (detalhe.rangeFinal - detalhe.rangeInicio + 1n),
     0n,
   );
 }
@@ -393,14 +388,14 @@ export function obterDetalhesComFallback(edicao: EdicaoComRelacoes): Array<
   ];
 }
 
-export function obterQuantidadeChances(tipoCartela: TipoCartela): number {
-  return QUANTIDADE_CHANCES_POR_TIPO_CARTELA[tipoCartela];
+export function obterQuantidadeCartelas(tipoCartela: TipoCartela): number {
+  return QUANTIDADE_CARTELAS_POR_TIPO_CARTELA[tipoCartela];
 }
 
-export function obterTipoCartelaPorQuantidadeChances(
-  quantidadeChances: number,
+export function obterTipoCartelaPorQuantidadeCartelas(
+  quantidadeCartelas: number,
 ): TipoCartela | null {
-  return TIPO_CARTELA_POR_QUANTIDADE_CHANCES.get(quantidadeChances) ?? null;
+  return TIPO_CARTELA_POR_QUANTIDADE.get(quantidadeCartelas) ?? null;
 }
 
 export function calcularQuantidadeCombosDoDetalhe(
@@ -409,7 +404,7 @@ export function calcularQuantidadeCombosDoDetalhe(
   return detalhe.rangeFinal - detalhe.rangeInicio + 1n;
 }
 
-export function calcularPassoEntreChancesDoDetalhe(
+export function calcularPassoEntreCartelasDoDetalhe(
   detalhe: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
 ): bigint {
   return calcularQuantidadeCombosDoDetalhe(detalhe);
@@ -444,7 +439,7 @@ function resolverTipoCartelaBasePorQuantidade(
   quantidadeRanges: number,
 ): TipoCartela {
   return (
-    obterTipoCartelaPorQuantidadeChances(quantidadeRanges) ??
+    obterTipoCartelaPorQuantidadeCartelas(quantidadeRanges) ??
     TipoCartela.DOZE_CHANCES
   );
 }
@@ -494,6 +489,10 @@ function ordenarDetalhesDoGrupo<T extends DetalheRangeExpandivel>(
       return ordemA - ordemB;
     }
 
-    return a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0;
+    return a.rangeInicio < b.rangeInicio
+      ? -1
+      : a.rangeInicio > b.rangeInicio
+        ? 1
+        : 0;
   });
 }

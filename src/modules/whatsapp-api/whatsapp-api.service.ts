@@ -26,8 +26,22 @@ import type { PreviewCotasWhatsappDto } from './dto/preview-cotas-whatsapp.dto';
 import type { ConsultarPedidosWhatsappDto } from './dto/consultar-pedidos-whatsapp.dto';
 import type { JwtPayload } from '../auth/auth.service';
 import {
-  obterQuantidadeChances,
+  obterQuantidadeCartelas,
+  obterTipoCartelaPorQuantidadeCartelas,
 } from '../edicoes/edicoes-range.util';
+
+export type TipoCompraWhatsapp = 'UNITARIO' | 'COMBO';
+
+export interface OpcaoCompraWhatsapp {
+  tipoCompra: TipoCompraWhatsapp;
+  isCombo: boolean;
+  quantidadeCartelas: number;
+  valorUnitarioCartela: string;
+  valorUnitario: string;
+  valorCombo: string | null;
+  preco: string;
+  precoFormatado: string;
+}
 
 @Injectable()
 export class WhatsappApiService {
@@ -52,6 +66,7 @@ export class WhatsappApiService {
   async autenticarOuCriar(dto: AuthWhatsappDto) {
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
     const telefoneLimpo = dto.telefone.replace(/\D/g, '');
+    const emailNormalizado = dto.email?.trim() || null;
 
     let cliente = await this.prisma.cliente.findUnique({
       where: { cpf: cpfLimpo },
@@ -65,14 +80,11 @@ export class WhatsappApiService {
           cpf: cpfLimpo,
           nome: dto.nome,
           telefone: telefoneLimpo,
-          email: dto.email ?? null,
-          dataNascimento:
-            dbDate && !isNaN(dbDate.getTime()) ? dbDate : null,
+          email: emailNormalizado,
+          dataNascimento: dbDate && !isNaN(dbDate.getTime()) ? dbDate : null,
         },
       });
-      this.logger.log(
-        `Novo cliente criado via WhatsApp API: CPF ${cpfLimpo}`,
-      );
+      this.logger.log(`Novo cliente criado via WhatsApp API: CPF ${cpfLimpo}`);
     } else {
       // Cliente existente — atualizar dados se necessário
       await this.prisma.cliente.update({
@@ -80,13 +92,11 @@ export class WhatsappApiService {
         data: {
           nome: dto.nome,
           telefone: telefoneLimpo,
-          ...(dto.email ? { email: dto.email } : {}),
+          ...(emailNormalizado ? { email: emailNormalizado } : {}),
         },
       });
       cliente = { ...cliente, nome: dto.nome, telefone: telefoneLimpo };
-      this.logger.log(
-        `Autenticação WhatsApp API: CPF ${cpfLimpo}`,
-      );
+      this.logger.log(`Autenticação WhatsApp API: CPF ${cpfLimpo}`);
     }
 
     const payload: JwtPayload = {
@@ -105,7 +115,9 @@ export class WhatsappApiService {
     );
 
     return {
-      message: cliente ? 'Autenticação realizada com sucesso' : 'Cliente cadastrado com sucesso',
+      message: cliente
+        ? 'Autenticação realizada com sucesso'
+        : 'Cliente cadastrado com sucesso',
       data: {
         accessToken,
         refreshToken,
@@ -150,15 +162,13 @@ export class WhatsappApiService {
       };
     }
 
-    const opcoesCompra = edicao.combos.map((combo) => ({
-      tipoCartela: combo.tipoCartela,
-      quantidadeChances: obterQuantidadeChances(combo.tipoCartela),
-      preco: combo.preco.toString(),
-      precoFormatado: new Intl.NumberFormat('pt-BR', {
-        style: 'currency',
-        currency: 'BRL',
-      }).format(Number(combo.preco)),
-    }));
+    const valorUnitarioCartela = this.formatarValorMonetario(
+      edicao.valorCartela,
+    );
+    const opcoesCompra = this.mapearOpcoesCompraDaCampanha(
+      edicao.combos,
+      edicao.valorCartela,
+    );
 
     return {
       message: 'Campanha ativa encontrada',
@@ -171,7 +181,8 @@ export class WhatsappApiService {
         status: edicao.status,
         dataSorteio: edicao.dataSorteio,
         dataEncerramento: edicao.dataEncerramento,
-        valorCartela: edicao.valorCartela.toString(),
+        valorCartela: valorUnitarioCartela,
+        valorUnitarioCartela,
         qtdNumerosCartela: edicao.qtdNumerosCartela,
         opcoesCompra,
         premios: edicao.premios.map((p) => ({
@@ -200,7 +211,8 @@ export class WhatsappApiService {
       edicaoId,
       origemParticipacao: OrigemParticipacao.DIGITAL,
       tipoCartela: dto.tipoCartela,
-      quantidadeCartelas: dto.quantidadeCartelas,
+      quantidadeCartelas:
+        dto.quantidadeCartelas ?? (dto.tipoCartela ? undefined : 1),
       cursorNumeroBase: dto.cursorNumeroBase,
       direcao: dto.direcao ?? 'PROXIMO',
       limit: dto.quantidade ?? 1,
@@ -243,20 +255,26 @@ export class WhatsappApiService {
 
     // Resolver tipo de cartela
     const tipoCartela = this.resolverTipoCartela(dto);
+    const quantidadeCartelasPorCombo = obterQuantidadeCartelas(tipoCartela);
+    const compraUnitaria = this.isCartelaUnitaria(tipoCartela);
     const combo = edicao.combos.find(
       (c) =>
         c.origemParticipacao === OrigemParticipacao.DIGITAL &&
         c.tipoCartela === tipoCartela,
     );
 
-    if (!combo && edicao.combos.length > 0) {
+    if (!compraUnitaria && !combo) {
       throw new BadRequestException(
-        `Tipo de cartela "${tipoCartela}" não disponível para esta campanha`,
+        `Quantidade de cartelas (${quantidadeCartelasPorCombo}) não disponível para esta campanha`,
       );
     }
 
-    const valorUnitario = Number(combo?.preco ?? edicao.valorCartela);
-    const total = valorUnitario * dto.quantidade;
+    const valorSelecionado = compraUnitaria
+      ? Number(edicao.valorCartela)
+      : Number(combo!.preco);
+    const total = valorSelecionado * dto.quantidade;
+    const quantidadeCartelasCompra =
+      quantidadeCartelasPorCombo * dto.quantidade;
 
     // Criar venda PENDENTE
     const venda = await this.prisma.venda.create({
@@ -264,7 +282,7 @@ export class WhatsappApiService {
         edicaoId: edicao.id,
         clienteId: cliente.id,
         quantidade: dto.quantidade,
-        tipoCartela: tipoCartela ?? TipoCartela.UMA_CHANCE,
+        tipoCartela,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao: OrigemParticipacao.DIGITAL,
@@ -296,7 +314,7 @@ export class WhatsappApiService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
-        descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${dto.quantidade}x ${tipoCartela ?? 'cartela'}`,
+        descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
         cpfPagador: cliente.cpf,
         nomePagador: cliente.nome,
         expiracaoSegundos: 3600, // 60 minutos
@@ -345,8 +363,15 @@ export class WhatsappApiService {
           style: 'currency',
           currency: 'BRL',
         }).format(total),
-        quantidade: dto.quantidade,
-        tipoCartela: tipoCartela ?? TipoCartela.UMA_CHANCE,
+        quantidade: quantidadeCartelasCompra,
+        quantidadeCombos: dto.quantidade,
+        quantidadeCartelasPorCombo,
+        quantidadeCartelas: quantidadeCartelasCompra,
+        tipoCompra: compraUnitaria ? 'UNITARIO' : 'COMBO',
+        valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
+        valorCombo: compraUnitaria
+          ? null
+          : this.formatarValorMonetario(combo!.preco),
         campanha: {
           id: edicao.id,
           numero: edicao.numero,
@@ -432,7 +457,9 @@ export class WhatsappApiService {
    * Delega ao PagamentosService — mesma lógica de confirmação.
    */
   async processarWebhookPagamento(body: Record<string, unknown>) {
-    this.logger.log('Webhook WhatsApp API recebido — delegando ao PagamentosService');
+    this.logger.log(
+      'Webhook WhatsApp API recebido — delegando ao PagamentosService',
+    );
     return this.pagamentosService.processarWebhookPix(body);
   }
 
@@ -479,11 +506,11 @@ export class WhatsappApiService {
       };
     }
 
-    const quantidadeChances = venda.tipoCartela
-      ? obterQuantidadeChances(venda.tipoCartela)
+    const quantidadeCartelasPorCombo = venda.tipoCartela
+      ? obterQuantidadeCartelas(venda.tipoCartela)
       : 1;
     const totalBilhetes = venda.bilhetes.length;
-    const totalCartelas = totalBilhetes / quantidadeChances;
+    const totalCartelas = totalBilhetes / quantidadeCartelasPorCombo;
 
     // Agrupar bilhetes em cartelas/combos
     const cartelas: Array<{
@@ -491,10 +518,10 @@ export class WhatsappApiService {
       bilhetes: Array<{ numero: string; sequenciaBolas: number[] }>;
     }> = [];
 
-    for (let i = 0; i < totalBilhetes; i += quantidadeChances) {
-      const grupo = venda.bilhetes.slice(i, i + quantidadeChances);
+    for (let i = 0; i < totalBilhetes; i += quantidadeCartelasPorCombo) {
+      const grupo = venda.bilhetes.slice(i, i + quantidadeCartelasPorCombo);
       cartelas.push({
-        ordemCartela: Math.floor(i / quantidadeChances) + 1,
+        ordemCartela: Math.floor(i / quantidadeCartelasPorCombo) + 1,
         bilhetes: grupo.map((b) => ({
           numero: b.numero.toString().padStart(7, '0'),
           sequenciaBolas: b.sequenciaBolas,
@@ -513,10 +540,9 @@ export class WhatsappApiService {
           dataSorteio: venda.edicao.dataSorteio,
           qtdNumerosCartela: venda.edicao.qtdNumerosCartela,
         },
-        tipoCartela: venda.tipoCartela,
         totalCartelas,
         totalBilhetes,
-        quantidadeChancesPorCartela: quantidadeChances,
+        quantidadeCartelasPorCombo,
         cartelas,
       },
     };
@@ -528,7 +554,10 @@ export class WhatsappApiService {
    * Lista pedidos do cliente autenticado, com filtros opcionais.
    * Segurança: sempre restrito ao clienteId do JWT.
    */
-  async consultarPedidos(clienteId: string, filtros: ConsultarPedidosWhatsappDto) {
+  async consultarPedidos(
+    clienteId: string,
+    filtros: ConsultarPedidosWhatsappDto,
+  ) {
     // Validar cliente
     const cliente = await this.prisma.cliente.findUnique({
       where: { id: clienteId },
@@ -596,26 +625,39 @@ export class WhatsappApiService {
         total,
         page,
         totalPages: Math.ceil(total / limit),
-        pedidos: vendas.map((v) => ({
-          pedidoId: v.id,
-          status: v.status,
-          statusLabel: statusLabel[v.status],
-          campanha: {
-            id: v.edicao.id,
-            numero: v.edicao.numero,
-            dataSorteio: v.edicao.dataSorteio,
-          },
-          tipoCartela: v.tipoCartela,
-          quantidade: v.quantidade,
-          totalBilhetes: v.bilhetes.length,
-          total: v.total.toString(),
-          totalFormatado: new Intl.NumberFormat('pt-BR', {
-            style: 'currency',
-            currency: 'BRL',
-          }).format(Number(v.total)),
-          criadoEm: v.createdAt,
-          temCartelas: v.bilhetes.length > 0,
-        })),
+        pedidos: vendas.map((v) => {
+          const quantidadeCartelasPorCombo = v.tipoCartela
+            ? obterQuantidadeCartelas(v.tipoCartela)
+            : 1;
+          const quantidadeCartelas = this.obterQuantidadeCartelasDaCompra(
+            v.quantidade,
+            v.tipoCartela,
+            v.bilhetes.length,
+          );
+
+          return {
+            pedidoId: v.id,
+            status: v.status,
+            statusLabel: statusLabel[v.status],
+            campanha: {
+              id: v.edicao.id,
+              numero: v.edicao.numero,
+              dataSorteio: v.edicao.dataSorteio,
+            },
+            quantidade: quantidadeCartelas,
+            quantidadeCombos: v.quantidade,
+            quantidadeCartelasPorCombo,
+            quantidadeCartelas,
+            totalBilhetes: v.bilhetes.length,
+            total: v.total.toString(),
+            totalFormatado: new Intl.NumberFormat('pt-BR', {
+              style: 'currency',
+              currency: 'BRL',
+            }).format(Number(v.total)),
+            criadoEm: v.createdAt,
+            temCartelas: v.bilhetes.length > 0,
+          };
+        }),
       },
     };
   }
@@ -643,7 +685,10 @@ export class WhatsappApiService {
             qtdNumerosCartela: true,
           },
         },
-        bilhetes: { select: { numero: true, sequenciaBolas: true }, orderBy: { numero: 'asc' } },
+        bilhetes: {
+          select: { numero: true, sequenciaBolas: true },
+          orderBy: { numero: 'asc' },
+        },
       },
     });
 
@@ -659,6 +704,14 @@ export class WhatsappApiService {
       [StatusVenda.CANCELADO]: 'Cancelado',
       [StatusVenda.RECUSADO]: 'Recusado',
     };
+    const quantidadeCartelas = this.obterQuantidadeCartelasDaCompra(
+      venda.quantidade,
+      venda.tipoCartela,
+      venda.bilhetes.length,
+    );
+    const quantidadeCartelasPorCombo = venda.tipoCartela
+      ? obterQuantidadeCartelas(venda.tipoCartela)
+      : 1;
 
     return {
       message: 'Pedido encontrado',
@@ -673,8 +726,10 @@ export class WhatsappApiService {
           dataEncerramento: venda.edicao.dataEncerramento,
           qtdNumerosCartela: venda.edicao.qtdNumerosCartela,
         },
-        tipoCartela: venda.tipoCartela,
-        quantidade: venda.quantidade,
+        quantidade: quantidadeCartelas,
+        quantidadeCombos: venda.quantidade,
+        quantidadeCartelasPorCombo,
+        quantidadeCartelas,
         total: venda.total.toString(),
         totalFormatado: new Intl.NumberFormat('pt-BR', {
           style: 'currency',
@@ -692,21 +747,109 @@ export class WhatsappApiService {
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
 
+  private mapearOpcoesCompraDaCampanha(
+    combos: Array<{
+      origemParticipacao: OrigemParticipacao;
+      tipoCartela: TipoCartela;
+      preco: Prisma.Decimal;
+    }>,
+    valorCartela: Prisma.Decimal,
+  ): OpcaoCompraWhatsapp[] {
+    const valorUnitarioCartela = this.formatarValorMonetario(valorCartela);
+    const opcoes: OpcaoCompraWhatsapp[] = [
+      {
+        tipoCompra: 'UNITARIO',
+        isCombo: false,
+        quantidadeCartelas: 1,
+        valorUnitarioCartela,
+        valorUnitario: valorUnitarioCartela,
+        valorCombo: null,
+        preco: valorUnitarioCartela,
+        precoFormatado: this.formatarMoeda(Number(valorUnitarioCartela)),
+      },
+    ];
+
+    const combosDigitais = combos
+      .filter(
+        (combo) =>
+          combo.origemParticipacao === OrigemParticipacao.DIGITAL &&
+          combo.tipoCartela !== TipoCartela.UMA_CHANCE,
+      )
+      .map((combo) => {
+        const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
+        const valorCombo = this.formatarValorMonetario(combo.preco);
+
+        return {
+          tipoCompra: 'COMBO' as const,
+          isCombo: true,
+          quantidadeCartelas,
+          valorUnitarioCartela,
+          valorUnitario: valorUnitarioCartela,
+          valorCombo,
+          preco: valorCombo,
+          precoFormatado: this.formatarMoeda(Number(valorCombo)),
+        };
+      });
+
+    return [...opcoes, ...combosDigitais];
+  }
+
+  private isCartelaUnitaria(tipoCartela: TipoCartela): boolean {
+    return tipoCartela === TipoCartela.UMA_CHANCE;
+  }
+
+  private obterQuantidadeCartelasDaCompra(
+    quantidade: number,
+    tipoCartela?: TipoCartela | null,
+    quantidadeBilhetes?: number,
+  ): number {
+    if (quantidadeBilhetes !== undefined && quantidadeBilhetes > 0) {
+      return quantidadeBilhetes;
+    }
+
+    return (
+      quantidade * (tipoCartela ? obterQuantidadeCartelas(tipoCartela) : 1)
+    );
+  }
+
+  private formatarValorMonetario(valor: Prisma.Decimal | number): string {
+    return Number(valor).toFixed(2);
+  }
+
+  private formatarMoeda(valor: Prisma.Decimal | number): string {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    }).format(Number(valor));
+  }
+
   private resolverTipoCartela(
     dto: Pick<CriarPedidoWhatsappDto, 'tipoCartela' | 'quantidadeCartelas'>,
-  ): TipoCartela | undefined {
-    if (dto.tipoCartela) return dto.tipoCartela;
-    if (!dto.quantidadeCartelas) return undefined;
+  ): TipoCartela {
+    const tipoCartelaPelaQuantidade =
+      dto.quantidadeCartelas !== undefined
+        ? obterTipoCartelaPorQuantidadeCartelas(dto.quantidadeCartelas)
+        : null;
 
-    const mapa: Record<number, TipoCartela> = {
-      1: TipoCartela.UMA_CHANCE,
-      2: TipoCartela.DUAS_CHANCES,
-      3: TipoCartela.TRES_CHANCES,
-      4: TipoCartela.QUATRO_CHANCES,
-      5: TipoCartela.CINCO_CHANCES,
-      6: TipoCartela.SEIS_CHANCES,
-    };
-    return mapa[dto.quantidadeCartelas];
+    if (dto.quantidadeCartelas !== undefined && !tipoCartelaPelaQuantidade) {
+      throw new BadRequestException(
+        `quantidadeCartelas inválida: ${dto.quantidadeCartelas}. Informe um valor entre 1 e 12`,
+      );
+    }
+
+    if (
+      dto.tipoCartela &&
+      tipoCartelaPelaQuantidade &&
+      dto.tipoCartela !== tipoCartelaPelaQuantidade
+    ) {
+      throw new BadRequestException(
+        `Conflito entre o campo legado de cartelas e quantidadeCartelas (${dto.quantidadeCartelas})`,
+      );
+    }
+
+    return (
+      dto.tipoCartela ?? tipoCartelaPelaQuantidade ?? TipoCartela.UMA_CHANCE
+    );
   }
 
   private mascararCpf(cpf: string): string {
