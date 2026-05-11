@@ -33,7 +33,7 @@ export class CreateEdicaoComboDto {
 
   @ApiPropertyOptional({
     example: 2,
-    description: 'Quantidade de cartelas deste combo (inteiro de 1 a 12).',
+    description: 'Quantidade de cartelas deste combo (inteiro).',
   })
   @ValidateIf(
     (combo: CreateEdicaoComboDto) =>
@@ -42,7 +42,6 @@ export class CreateEdicaoComboDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(12)
   quantidadeCartelas?: number;
 
   @ApiHideProperty()

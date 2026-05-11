@@ -442,7 +442,7 @@ describe('EdicoesService', () => {
             quantidadeSetores: 1,
           },
           {
-            origemParticipacao: OrigemParticipacao.POS,
+            origemParticipacao: OrigemParticipacao.FISICO,
             rangeInicio: '1000150',
             rangeFinal: '1000250',
             quantidadeSetores: 1,

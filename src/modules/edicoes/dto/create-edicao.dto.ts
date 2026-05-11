@@ -186,7 +186,7 @@ export class CreateEdicaoDto {
       },
     ],
     description:
-      'Combos da edição com preço total por origem e quantidade de cartelas. Use sempre `quantidadeCartelas` como inteiro de 1 a 12. A cartela única usa `valorCartela` como valor unitário.',
+      'Combos da edição com preço total por origem e quantidade de cartelas. Use sempre `quantidadeCartelas` como inteiro positivo. A cartela única usa `valorCartela` como valor unitário.',
   })
   @Transform(parseCombosInput)
   @Type(() => CreateEdicaoComboDto)
