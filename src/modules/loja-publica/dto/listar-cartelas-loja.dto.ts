@@ -12,12 +12,12 @@ import {
 } from 'class-validator';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
 
-export enum DirecaoComboLoja {
+export enum DirecaoCartelaLoja {
   PROXIMO = 'PROXIMO',
   ANTERIOR = 'ANTERIOR',
 }
 
-export class ListarCombosLojaDto {
+export class ListarCartelasLojaDto {
   @ApiHideProperty()
   @IsOptional()
   @IsEnum(TipoCartela)
@@ -60,13 +60,13 @@ export class ListarCombosLojaDto {
   cursorNumeroBase?: string;
 
   @ApiPropertyOptional({
-    enum: DirecaoComboLoja,
-    example: DirecaoComboLoja.PROXIMO,
-    description: 'Direção da navegação na sequência determinística dos combos.',
+    enum: DirecaoCartelaLoja,
+    example: DirecaoCartelaLoja.PROXIMO,
+    description: 'Direção da navegação na sequência determinística.',
   })
   @IsOptional()
-  @IsEnum(DirecaoComboLoja)
-  direcao?: DirecaoComboLoja;
+  @IsEnum(DirecaoCartelaLoja)
+  direcao?: DirecaoCartelaLoja;
 
   @ApiPropertyOptional({
     example: 12,
@@ -79,4 +79,14 @@ export class ListarCombosLojaDto {
   @Min(1)
   @Max(24)
   limit?: number;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Índice do range para listar cartelas unitárias específicas (ex: 1 para Range 1, 2 para Range 2).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  indiceRange?: number;
 }

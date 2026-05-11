@@ -112,12 +112,18 @@ export class VendasService {
 
     const origemParticipacao =
       dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
-    const quantidadeCartelasPorCombo =
-      this.normalizarQuantidadeCartelasDaSolicitacao(dto, user);
-    const tipoCartelaSolicitada = this.resolverTipoCartelaDaSolicitacao(
-      dto.tipoCartela,
-      quantidadeCartelasPorCombo,
-    );
+
+    let comboSelecionado: EdicaoCombo | null = null;
+    let tipoCartelaSolicitada: TipoCartela = TipoCartela.UMA_CHANCE;
+
+    if (dto.comboId) {
+      comboSelecionado = edicao.combos.find((c) => c.id === dto.comboId) ?? null;
+      if (!comboSelecionado) {
+        throw new BadRequestException('Combo selecionado não foi encontrado na edição');
+      }
+      tipoCartelaSolicitada = comboSelecionado.tipoCartela;
+    }
+
     const configuracaoVenda = this.resolverConfiguracaoDaVenda(
       edicao.detalhes,
       edicao.combos,
@@ -167,10 +173,15 @@ export class VendasService {
       }
     }
 
-    if (dto.combosSelecionados && dto.combosSelecionados.length > 0) {
-      if (dto.quantidade !== dto.combosSelecionados.length) {
+    if (dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0) {
+      if (dto.comboId) {
         throw new BadRequestException(
-          'A quantidade de cartelas deve ser igual ao número de combos selecionados',
+          'Não é permitido selecionar cartelas explicitamente em compras de combos',
+        );
+      }
+      if (dto.quantidadeCartelas !== dto.cartelasSelecionadas.length) {
+        throw new BadRequestException(
+          'A quantidadeCartelas deve ser igual ao número de cartelasSelecionadas',
         );
       }
     }
@@ -181,11 +192,11 @@ export class VendasService {
     const valorCartela = Number(
       configuracaoVenda.precoCombo ?? edicao.valorCartela,
     );
-    const total = valorCartela * dto.quantidade;
+    const total = valorCartela * dto.quantidadeCartelas;
 
     if (tipoPagamentoResolvido === TipoPagamento.MANUAL) {
       const quantidadeCartelasCompra =
-        configuracaoVenda.quantidadeCartelas * dto.quantidade;
+        configuracaoVenda.quantidadeCartelas * dto.quantidadeCartelas;
       const resultadoManual = await this.prisma.$transaction(async (tx) => {
         const venda = await tx.venda.create({
           data: {
@@ -193,16 +204,16 @@ export class VendasService {
             clienteId: cliente.id,
             vendedorId: dto.vendedorId ?? null,
             distribuidorId: dto.distribuidorId ?? null,
-            quantidade: dto.quantidade,
+            quantidade: dto.quantidadeCartelas,
             tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
             total: new Prisma.Decimal(total.toFixed(2)),
             status: StatusVenda.APROVADO,
             origemParticipacao,
             tipoPagamento: tipoPagamentoResolvido,
-            ...(dto.combosSelecionados && dto.combosSelecionados.length > 0
+            ...(dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0
               ? {
                   gatewayPayload: {
-                    combosSelecionados: dto.combosSelecionados,
+                    combosSelecionados: dto.cartelasSelecionadas.map(numero => ({ numeroBase: numero })),
                   } as unknown as Prisma.InputJsonValue,
                 }
               : {}),
@@ -237,16 +248,16 @@ export class VendasService {
         clienteId: cliente.id,
         vendedorId: dto.vendedorId ?? null,
         distribuidorId: dto.distribuidorId ?? null,
-        quantidade: dto.quantidade,
+        quantidade: dto.quantidadeCartelas,
         tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao,
         tipoPagamento: tipoPagamentoResolvido,
-        ...(dto.combosSelecionados && dto.combosSelecionados.length > 0
+        ...(dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0
           ? {
               gatewayPayload: {
-                combosSelecionados: dto.combosSelecionados,
+                combosSelecionados: dto.cartelasSelecionadas.map(numero => ({ numeroBase: numero })),
               } as unknown as Prisma.InputJsonValue,
             }
           : {}),
@@ -255,7 +266,7 @@ export class VendasService {
     });
 
     const quantidadeCartelasCompra =
-      configuracaoVenda.quantidadeCartelas * dto.quantidade;
+      configuracaoVenda.quantidadeCartelas * dto.quantidadeCartelas;
 
     this.logger.log(
       `Venda ${venda.id} criada — ${quantidadeCartelasCompra} cartela(s) — R$ ${total.toFixed(2)} — ${tipoPagamentoResolvido}`,
@@ -288,8 +299,8 @@ export class VendasService {
           gatewayId: cobranca.gatewayId,
           gatewayPayload: {
             ...((cobranca.payload as Record<string, unknown>) ?? {}),
-            ...(dto.combosSelecionados && dto.combosSelecionados.length > 0
-              ? { combosSelecionados: dto.combosSelecionados }
+            ...(dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0
+              ? { combosSelecionados: dto.cartelasSelecionadas.map(numero => ({ numeroBase: numero })) }
               : {}),
           } as Prisma.InputJsonValue,
         },
@@ -339,6 +350,8 @@ export class VendasService {
     cursorNumeroBase?: string;
     direcao?: DirecaoCombo;
     limit?: number;
+    indiceRange?: number;
+    numerosReservados?: string[];
   }) {
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: params.edicaoId },
@@ -434,7 +447,25 @@ export class VendasService {
       throw e;
     }
 
-    const detalhesEfetivos = configuracaoVenda.detalhes;
+    let detalhesEfetivos = configuracaoVenda.detalhes;
+    if (params.indiceRange) {
+      const detalheRange = detalhesEfetivos.find((d) => d.indiceRange === params.indiceRange);
+      if (detalheRange) {
+        detalhesEfetivos = [detalheRange];
+      } else {
+        // Se o indiceRange não existe para este combo/tipoCartela, podemos tentar pegar da edicao.detalhes direto (fallback para listagem isolada)
+        const detalheEdicao = edicao.detalhes.find((d) => d.indiceRange === params.indiceRange && d.origemParticipacao === origemParticipacao);
+        if (detalheEdicao) {
+          detalhesEfetivos = [{
+            ...detalheEdicao,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            preco: null,
+          }];
+        } else {
+          throw new BadRequestException('O range especificado não está disponível nesta edição');
+        }
+      }
+    }
     const detalheBase = detalhesEfetivos[0];
 
     if (!detalheBase) {
@@ -466,6 +497,7 @@ export class VendasService {
           : undefined,
         direcao: params.direcao ?? 'PROXIMO',
         strict: false,
+        numerosReservadosAEvitar: params.numerosReservados,
       },
     );
 
@@ -1200,30 +1232,7 @@ export class VendasService {
     return normalizedValue ? normalizedValue : null;
   }
 
-  private normalizarQuantidadeCartelasDaSolicitacao(
-    dto: CreateVendaDto,
-    user?: RequestUser,
-  ): number | undefined {
-    if (
-      dto.quantidadeCartelas === undefined ||
-      dto.quantidadeCartelas === null
-    ) {
-      return undefined;
-    }
 
-    if (
-      user?.perfil === 'ADMIN' &&
-      !dto.tipoCartela &&
-      dto.quantidadeCartelas === dto.quantidade
-    ) {
-      this.logger.warn(
-        `Venda manual com quantidadeCartelas=${dto.quantidadeCartelas} igual a quantidade=${dto.quantidade}; tratando como cartela unitária para evitar cobrança dobrada`,
-      );
-      return undefined;
-    }
-
-    return dto.quantidadeCartelas;
-  }
 
   private parseDataNascimento(value: string): Date {
     const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -1368,18 +1377,60 @@ export class VendasService {
     const detalhesEfetivos = configuracaoVenda.detalhes;
     const combosSelecionados = this.extrairCombosSelecionadosDaVenda(
       venda.gatewayPayload,
-    );
-    const gruposDisponiveis = await this.selecionarGruposDisponiveisParaVenda(
-      tx,
-      venda.edicaoId,
-      detalhesEfetivos,
-      venda.quantidade,
-      {
-        strict: true,
-        numerosBaseSelecionados: combosSelecionados,
-      },
-    );
-    const matrizDisponiveis = gruposDisponiveis.flat();
+    ) ?? [];
+
+    let matrizDisponiveis: MatrizDisponivel[] = [];
+
+    if (venda.tipoCartela === TipoCartela.UMA_CHANCE && combosSelecionados.length > 0) {
+      // Quando é unitário e enviou números explícitos, os números já são ABSOLUTOS (podem ser de qualquer range)
+      const linhas = await tx.matrizRange.findMany({
+        where: {
+          numero: { in: combosSelecionados },
+          bilhetes: { none: { edicaoId: venda.edicaoId } },
+        },
+      });
+      if (linhas.length < combosSelecionados.length) {
+        throw new BadRequestException('Alguns bilhetes selecionados não estão mais disponíveis.');
+      }
+      matrizDisponiveis = linhas;
+    } else if (venda.tipoCartela === TipoCartela.UMA_CHANCE) {
+      const detalhesOrigem = edicao.detalhes
+        .filter((d) => d.origemParticipacao === venda.origemParticipacao)
+        .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
+        
+      if (detalhesOrigem.length === 0) {
+        throw new BadRequestException('Edição sem ranges configurados');
+      }
+
+      const gruposDisponiveis: MatrizDisponivel[][] = [];
+      let indiceDetalheAtual = 0;
+
+      for (let i = 0; i < venda.quantidade; i++) {
+        const detalheAtual = detalhesOrigem[indiceDetalheAtual];
+        const res = await this.selecionarGruposDisponiveisParaVenda(
+          tx,
+          venda.edicaoId,
+          [detalheAtual],
+          1,
+          { strict: true },
+        );
+        gruposDisponiveis.push(...res);
+        indiceDetalheAtual = (indiceDetalheAtual + 1) % detalhesOrigem.length;
+      }
+      matrizDisponiveis = gruposDisponiveis.flat();
+    } else {
+      const gruposDisponiveis = await this.selecionarGruposDisponiveisParaVenda(
+        tx,
+        venda.edicaoId,
+        detalhesEfetivos,
+        venda.quantidade,
+        {
+          strict: true,
+          numerosBaseSelecionados: combosSelecionados.length > 0 ? combosSelecionados : undefined,
+        },
+      );
+      matrizDisponiveis = gruposDisponiveis.flat();
+    }
 
     // Criar bilhetes associando à MatrizRange e à edição
     const bilhetesData: Prisma.BilheteCreateManyInput[] = matrizDisponiveis.map(
@@ -1407,6 +1458,7 @@ export class VendasService {
       direcao?: DirecaoCombo;
       strict?: boolean;
       numerosBaseSelecionados?: bigint[];
+      numerosReservadosAEvitar?: string[];
     } = {},
   ): Promise<MatrizDisponivel[][]> {
     const setores = expandirSetoresDosDetalhes(
@@ -1481,6 +1533,23 @@ export class VendasService {
         break;
       }
 
+      const candidatosBaseFiltrados = candidatosBase.filter(c => {
+        if (!options.numerosReservadosAEvitar || options.numerosReservadosAEvitar.length === 0) return true;
+        // Se qualquer número do grupo que será formado estiver reservado, pula este candidato base
+        for (const setor of setores) {
+          const numeroFuturo = this.calcularNumeroDoSetorParaBase(c.numero, primeiroSetor, setor);
+          if (options.numerosReservadosAEvitar.includes(numeroFuturo.toString())) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      if (candidatosBaseFiltrados.length === 0) {
+        cursor = candidatosBase[candidatosBase.length - 1].numero;
+        continue;
+      }
+
       const numerosNecessarios: bigint[] = [];
       const numerosNecessariosSet = new Set<string>();
       const adicionarNumero = (numero: bigint) => {
@@ -1493,7 +1562,7 @@ export class VendasService {
         numerosNecessarios.push(numero);
       };
 
-      for (const candidato of candidatosBase) {
+      for (const candidato of candidatosBaseFiltrados) {
         for (const setor of setores) {
           adicionarNumero(
             this.calcularNumeroDoSetorParaBase(

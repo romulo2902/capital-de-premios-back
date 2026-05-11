@@ -37,40 +37,38 @@ export class ComprarLojaDto {
   @IsUUID('4')
   edicaoId: string;
 
-  @ApiHideProperty()
-  @IsOptional()
-  @IsEnum(TipoCartela)
-  tipoCartela?: TipoCartela;
+  @ApiProperty({ example: 30.00, description: 'Valor total da compra' })
+  @Type(() => Number)
+  @Min(0)
+  valor: number;
 
-  @ApiPropertyOptional({
-    example: 6,
+  @ApiProperty({
+    example: 1,
     description:
-      'Quantidade de cartelas do combo (inteiro de 1 a 12). Se omitida, assume 1.',
+      'Quantidade de itens sendo comprados (ex: quantidade de combos ou quantidade de cartelas avulsas)',
   })
   @Type(() => Number)
-  @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(12)
-  quantidadeCartelas?: number;
-
-  @ApiProperty({ example: 1, description: 'Quantidade de opções deste tipo' })
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  quantidade: number;
+  quantidadeCartelas: number;
 
   @ApiPropertyOptional({
-    type: [ComboSelecionadoLojaDto],
+    example: 'uuid-do-combo',
+    description: 'ID do combo (se for uma compra de combo)',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  comboId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
     description:
-      'Combos escolhidos explicitamente pelo cliente. Quando informado, a compra aprova exatamente esses combos e não uma nova alocação automática.',
+      'Números base selecionados explicitamente pelo cliente (apenas para compras unitárias)',
   })
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
-  @ValidateNested({ each: true })
-  @Type(() => ComboSelecionadoLojaDto)
-  combosSelecionados?: ComboSelecionadoLojaDto[];
+  @IsString({ each: true })
+  cartelasSelecionadas?: string[];
 
   @ApiProperty({ example: '12345678900', description: 'CPF do cliente' })
   @IsString()

@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
 import { ComprarLojaDto } from './dto/comprar-loja.dto';
+import { ReservarCartelasDto } from './dto/reservar-cartelas.dto';
 import {
   StatusEdicao,
   StatusVenda,
@@ -18,6 +19,7 @@ import {
   OrigemParticipacao,
   Prisma,
   TipoCartela,
+  EdicaoCombo,
 } from '@prisma/client';
 import { ConteudoService } from '../conteudo/conteudo.service';
 import {
@@ -30,7 +32,7 @@ import {
   serializarEstadoManutencao,
 } from '../edicoes/edicao-manutencao.util';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
-import { ListarCombosLojaDto } from './dto/listar-combos-loja.dto';
+import { ListarCartelasLojaDto } from './dto/listar-cartelas-loja.dto';
 import { CreateFaleConoscoDto } from './dto/create-fale-conosco.dto';
 import { getRequestContext } from '../../common/request-context/request-context.util';
 import { RedisService } from '../../common/redis/redis.service';
@@ -138,10 +140,16 @@ export class LojaPublicaService {
     return this.getHome(); // Serve the same data since home essentially focuses on the active edition
   }
 
-  async listarCombosDisponiveis(
+  async listarCartelasDisponiveis(
     edicaoId: string,
-    filtros: ListarCombosLojaDto,
+    filtros: ListarCartelasLojaDto,
   ) {
+    let numerosReservados: string[] = [];
+    if (this.redisService.isConfigured() && this.redisService.client) {
+      const keys = await this.redisService.client.keys(`reserva:${edicaoId}:*`);
+      numerosReservados = keys.map(k => k.split(':').pop()!).filter(Boolean);
+    }
+
     return this.vendasService.listarCombosDisponiveis({
       edicaoId,
       origemParticipacao:
@@ -152,14 +160,14 @@ export class LojaPublicaService {
       cursorNumeroBase: filtros.cursorNumeroBase,
       direcao: filtros.direcao,
       limit: filtros.limit,
+      indiceRange: filtros.indiceRange,
+      numerosReservados,
     });
   }
 
   async comprar(dto: ComprarLojaDto) {
-    const tipoCartelaSelecionada = this.resolverTipoCartelaDaCompra(
-      dto.tipoCartela,
-      dto.quantidadeCartelas,
-    );
+    let comboSelecionado: EdicaoCombo | null = null;
+    let tipoCartelaSelecionada: TipoCartela = TipoCartela.UMA_CHANCE;
 
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: dto.edicaoId },
@@ -185,38 +193,42 @@ export class LojaPublicaService {
     this.validarEdicaoForaDeManutencao(edicao);
     this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
-    const detalheSelecionado = edicao.detalhes[0];
-    const comboSelecionado = this.encontrarComboDaCompra(
-      edicao.combos,
-      tipoCartelaSelecionada,
-    );
-    const compraUnitaria = this.isCartelaUnitaria(tipoCartelaSelecionada);
-    const quantidadeCartelasPorCombo = obterQuantidadeCartelas(
-      tipoCartelaSelecionada,
-    );
-
-    if (!detalheSelecionado || (!compraUnitaria && !comboSelecionado)) {
-      throw new BadRequestException(
-        'Quantidade de cartelas não está disponível para esta edição',
-      );
+    if (dto.comboId) {
+      comboSelecionado = edicao.combos.find((c) => c.id === dto.comboId) ?? null;
+      if (!comboSelecionado) {
+        throw new BadRequestException('Combo selecionado não foi encontrado na edição');
+      }
+      tipoCartelaSelecionada = comboSelecionado.tipoCartela;
     }
 
-    const quantidadeBilhetes = quantidadeCartelasPorCombo * dto.quantidade;
+    const detalheSelecionado = edicao.detalhes[0];
 
-    if (
-      dto.combosSelecionados &&
-      dto.combosSelecionados.length !== dto.quantidade
-    ) {
-      throw new BadRequestException(
-        'A quantidade de combos selecionados deve ser igual à quantidade da compra',
-      );
+    if (!detalheSelecionado) {
+      throw new BadRequestException('A edição não possui configuração digital');
+    }
+
+    if (dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0) {
+      if (dto.comboId) {
+        throw new BadRequestException(
+          'Não é permitido selecionar cartelas explicitamente em compras de combos',
+        );
+      }
+      if (dto.cartelasSelecionadas.length !== dto.quantidadeCartelas) {
+        throw new BadRequestException(
+          'A quantidade de cartelas selecionadas deve ser igual à quantidade da compra',
+        );
+      }
     }
 
     // Calcula total
-    const valorSelecionado = compraUnitaria
-      ? Number(edicao.valorCartela)
-      : Number(comboSelecionado!.preco);
-    const total = valorSelecionado * dto.quantidade;
+    const valorSelecionado = dto.comboId
+      ? Number(comboSelecionado!.preco)
+      : Number(edicao.valorCartela);
+    const total = valorSelecionado * dto.quantidadeCartelas;
+
+    if (Math.abs(total - dto.valor) > 0.01) {
+      throw new BadRequestException(`O valor total calculado (R$ ${total.toFixed(2)}) difere do valor enviado (R$ ${dto.valor.toFixed(2)})`);
+    }
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
     const emailNormalizado = dto.email?.trim() || null;
@@ -240,18 +252,16 @@ export class LojaPublicaService {
       data: {
         edicaoId: edicao.id,
         clienteId: cliente.id,
-        quantidade: dto.quantidade,
+        quantidade: dto.quantidadeCartelas,
         tipoCartela: tipoCartelaSelecionada,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
         origemParticipacao: OrigemParticipacao.DIGITAL,
         tipoPagamento: TipoPagamento.PIX,
-        gatewayPayload: dto.combosSelecionados
+        gatewayPayload: dto.cartelasSelecionadas
           ? ({
-              combosSelecionados: dto.combosSelecionados.map((combo) => ({
-                numeroBase: combo.numeroBase,
-              })),
-            } as Prisma.InputJsonValue)
+              combosSelecionados: dto.cartelasSelecionadas.map(numero => ({ numeroBase: numero })),
+            } as unknown as Prisma.InputJsonValue)
           : Prisma.JsonNull,
       },
     });
@@ -298,17 +308,14 @@ export class LojaPublicaService {
         data: {
           vendaId: venda.id,
           total: vendaAprovada?.total.toString() ?? venda.total.toString(),
-          tipoCompra: compraUnitaria ? 'UNITARIO' : 'COMBO',
+          tipoCompra: dto.comboId ? 'COMBO' : 'UNITARIO',
           valorUnitarioCartela: this.formatarValorMonetario(
             edicao.valorCartela,
           ),
-          valorCombo: compraUnitaria
-            ? null
-            : this.formatarValorMonetario(comboSelecionado!.preco),
-          quantidadeCombos: dto.quantidade,
-          quantidadeCartelasPorCombo,
-          quantidadeCartelas: quantidadeBilhetes,
-          quantidadeBilhetes,
+          valorCombo: dto.comboId
+            ? this.formatarValorMonetario(comboSelecionado!.preco)
+            : null,
+          quantidadeCartelas: dto.quantidadeCartelas,
           status: vendaAprovada?.status ?? StatusVenda.APROVADO,
           pagamento: {
             mock: true,
@@ -327,7 +334,7 @@ export class LojaPublicaService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
-        descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${quantidadeBilhetes} cartela(s)`,
+        descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidadeCartelas} iten(s)`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
         expiracaoSegundos: 3600,
@@ -359,16 +366,58 @@ export class LojaPublicaService {
       data: {
         vendaId: venda.id,
         total: venda.total.toString(),
-        tipoCompra: compraUnitaria ? 'UNITARIO' : 'COMBO',
+        tipoCompra: dto.comboId ? 'COMBO' : 'UNITARIO',
         valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
-        valorCombo: compraUnitaria
-          ? null
-          : this.formatarValorMonetario(comboSelecionado!.preco),
-        quantidadeCombos: dto.quantidade,
-        quantidadeCartelasPorCombo,
-        quantidadeCartelas: quantidadeBilhetes,
-        quantidadeBilhetes,
+        valorCombo: dto.comboId
+          ? this.formatarValorMonetario(comboSelecionado!.preco)
+          : null,
+        quantidadeCartelas: dto.quantidadeCartelas,
         pagamento: dadosPagamento,
+      },
+    };
+  }
+
+  async reservarCartelas(dto: ReservarCartelasDto) {
+    const edicao = await this.prisma.edicao.findUnique({
+      where: { id: dto.edicaoId },
+      select: { id: true, status: true },
+    });
+
+    if (!edicao) {
+      throw new NotFoundException('Edição não encontrada');
+    }
+    if (edicao.status !== StatusEdicao.ATIVA) {
+      throw new BadRequestException('A edição não está ativa');
+    }
+
+    // Verificar se os números já estão comprados
+    const bilhetesComprados = await this.prisma.bilhete.findMany({
+      where: {
+        edicaoId: edicao.id,
+        numero: { in: dto.cartelas.map(n => BigInt(n)) },
+      },
+      select: { numero: true },
+    });
+
+    if (bilhetesComprados.length > 0) {
+      throw new BadRequestException(
+        'Algumas cartelas selecionadas já foram vendidas',
+      );
+    }
+
+    // Registrar no Redis (TTL de 5 minutos = 300 segundos)
+    if (this.redisService.isConfigured() && this.redisService.client) {
+      for (const numero of dto.cartelas) {
+        const key = `reserva:${edicao.id}:${numero}`;
+        await this.redisService.client.setex(key, 300, Date.now().toString());
+      }
+    }
+
+    return {
+      message: 'Cartelas reservadas com sucesso',
+      data: {
+        reservadas: dto.cartelas.length,
+        expiresIn: 300,
       },
     };
   }

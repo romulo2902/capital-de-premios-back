@@ -12,7 +12,8 @@ import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { LojaPublicaService } from './loja-publica.service';
 import { ComprarLojaDto } from './dto/comprar-loja.dto';
-import { ListarCombosLojaDto } from './dto/listar-combos-loja.dto';
+import { ReservarCartelasDto } from './dto/reservar-cartelas.dto';
+import { ListarCartelasLojaDto } from './dto/listar-cartelas-loja.dto';
 import { OrigemParticipacao } from '@prisma/client';
 import { CreateFaleConoscoDto } from './dto/create-fale-conosco.dto';
 
@@ -33,10 +34,10 @@ export class LojaPublicaController {
     return this.lojaService.getEdicaoAtiva();
   }
 
-  @Get('edicoes/:edicaoId/combos')
+  @Get('edicoes/:edicaoId/cartelas')
   @ApiOperation({
     summary:
-      'Navegar pelos combos pré-definidos (1 por vez) de uma edição/combinação (Público)',
+      'Navegar pelas cartelas unitárias disponíveis de uma edição (Público)',
   })
   @ApiQuery({ name: 'quantidadeCartelas', required: false, type: Number })
   @ApiQuery({
@@ -51,17 +52,23 @@ export class LojaPublicaController {
     enum: ['PROXIMO', 'ANTERIOR'],
   })
   @ApiQuery({ name: 'limit', required: false, type: Number, deprecated: true })
-  listarCombosDisponiveis(
+  listarCartelasDisponiveis(
     @Param('edicaoId', ParseUUIDPipe) edicaoId: string,
-    @Query() filtros: ListarCombosLojaDto,
+    @Query() filtros: ListarCartelasLojaDto,
   ) {
-    return this.lojaService.listarCombosDisponiveis(edicaoId, filtros);
+    return this.lojaService.listarCartelasDisponiveis(edicaoId, filtros);
   }
 
   @Post('comprar')
   @ApiOperation({ summary: 'Realizar pedido de compra / Checkout (Público)' })
   comprar(@Body() dto: ComprarLojaDto) {
     return this.lojaService.comprar(dto);
+  }
+
+  @Post('reservar')
+  @ApiOperation({ summary: 'Reservar cartelas por 5 minutos (Público)' })
+  reservar(@Body() dto: ReservarCartelasDto) {
+    return this.lojaService.reservarCartelas(dto);
   }
 
   @Post('fale-conosco')

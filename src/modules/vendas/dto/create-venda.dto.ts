@@ -38,31 +38,39 @@ export class CreateVendaDto {
   @IsUUID('4', { message: 'edicaoId deve ser um UUID válido' })
   edicaoId: string;
 
+
+  @ApiProperty({ example: 30.00, description: 'Valor total da compra' })
+  @Type(() => Number)
+  @Min(0)
+  valor: number;
+
   @ApiProperty({
-    example: 2,
-    description: 'Quantidade de cartelas a comprar.',
+    example: 1,
+    description:
+      'Quantidade de itens sendo comprados (ex: quantidade de combos ou quantidade de cartelas avulsas)',
   })
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  quantidade: number;
-
-  @ApiHideProperty()
-  @IsOptional()
-  @IsEnum(TipoCartela)
-  tipoCartela?: TipoCartela;
+  quantidadeCartelas: number;
 
   @ApiPropertyOptional({
-    example: 2,
-    description:
-      'Quantidade de cartelas por combo (inteiro de 1 a 12). Se omitida, assume 1.',
+    example: 'uuid-do-combo',
+    description: 'ID do combo (se for uma compra de combo)',
   })
-  @Type(() => Number)
   @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(12)
-  quantidadeCartelas?: number;
+  @IsUUID('4')
+  comboId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Números base selecionados explicitamente pelo vendedor/cliente (apenas para compras unitárias)',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  cartelasSelecionadas?: string[];
 
   @ApiPropertyOptional({
     enum: TipoPagamento,
