@@ -453,11 +453,13 @@ export class VendasService {
     );
     const primeiroSetor = setores[0];
     const segundoSetor = setores[1];
+    const quantidadeCombosParaListar = params.limit && params.limit > 0 ? params.limit : 1;
+
     const grupos = await this.selecionarGruposDisponiveisParaVenda(
       this.prisma,
       edicao.id,
       detalhesEfetivos,
-      1,
+      quantidadeCombosParaListar,
       {
         cursorNumeroBase: params.cursorNumeroBase
           ? BigInt(params.cursorNumeroBase)
