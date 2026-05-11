@@ -158,3 +158,46 @@ O cliente quer comprar "2 pacotes de 3 chances", aleatórios.
 - **Como renderizar agora:** A visualização de números baseia-se nos **Ranges (matriz) da Edição**. O Frontend consome os detalhes da edição (`GET /admin/edicoes/:id`), encontra o `rangeInicio` e o `rangeFinal`, e **renderiza virtualmente** a grade (os quadrados dos bilhetes) do menor ao maior número.
 - **Validação de Disponibilidade:** A conferência final se o número selecionado na tela de fato está livre ou se alguém comprou nos últimos 2 segundos acontece no momento de chamar a API de venda (`POST /admin/vendas` via `combosSelecionados`). Se o número escolhido não estiver disponível, a API recusará a compra com clareza.
 - **Alternativa (Preview de WhatsApp):** Para fluxos estritos (como o do Bot do WhatsApp), a API oferece uma rota específica `POST /whatsapp/campanhas/:id/cotas/preview` que retorna combos abertos (sem reservar) que o cliente pode observar antes de fechar o negócio.
+
+---
+
+## 5. Integração Específica: Loja Pública (Frontend do Cliente)
+
+Para a **Loja Pública** onde o cliente final entra sozinho e compra com o próprio CPF, a rota não é a `/admin/vendas` e sim as rotas públicas `/loja`.
+
+### Navegação de Combos (Opcional - Como exibir combos na tela do cliente)
+**Rota:** `GET /loja/edicoes/:edicaoId/combos`
+Essa rota permite a navegação na sequência de combos disponíveis se o cliente for ficar "passando pro lado" para ver as opções. Ela retorna 1 combo (e suas cartelas filhas) por vez, baseado no `cursorNumeroBase` e na `direcao` (PROXIMO ou ANTERIOR).
+
+### Checkout da Loja Pública (Compra pelo Cliente)
+**Rota:** `POST /loja/comprar`
+**Atenção Redobrada:** Diferente do admin que manda um array de *strings*, a loja pública espera que o campo `combosSelecionados` seja um **array de objetos** (por motivos de herança e validação estrita da loja pública).
+
+**Exemplo de Payload de Compra na Loja (Cliente escolheu na tela):**
+```json
+{
+  "edicaoId": "uuid-da-edicao",
+  "quantidade": 2, // Ele quer comprar 2 combos ou cartelas
+  "quantidadeCartelas": 1, // Se for cartela única é 1. Se for combo "3 Chances", é 3.
+  "combosSelecionados": [
+    { "numeroBase": "1234567" }, // 👈 Na LOJA, é um array de objetos!
+    { "numeroBase": "7654321" }
+  ],
+  "cpf": "12345678900",
+  "nome": "João Silva",
+  "telefone": "61999999999"
+}
+```
+
+**Exemplo de Payload de Venda Rápida na Loja (Surpresinha):**
+A surpresinha na loja pública funciona da exata mesma forma do admin: você envia só a `quantidade` e o tipo `quantidadeCartelas`, e **não envia** a propriedade `combosSelecionados`.
+```json
+{
+  "edicaoId": "uuid-da-edicao",
+  "quantidade": 1, 
+  "quantidadeCartelas": 3, // Significa "Me dá 1 pacote surpresinha de Três chances"
+  "cpf": "12345678900",
+  "nome": "João Silva",
+  "telefone": "61999999999"
+}
+```
