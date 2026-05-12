@@ -875,15 +875,12 @@ export class LojaPublicaService {
     const opcoesDeCombo = combosDigitais
       .map((combo) => {
         const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
-        const setores = setoresBase.slice(0, quantidadeCartelas);
-        const primeiroSetor = setores[0];
-        const segundoSetor = setores[1];
-
-        if (setores.length < quantidadeCartelas) {
-          return null;
-        }
-
         const valorCombo = this.formatarValorMonetario(combo.preco);
+
+        // Pegamos os setores disponíveis. Se não houver nenhum (erro de config), usamos o primeiro setor da edição como fallback.
+        const setoresParaUso = setoresBase.length > 0 
+          ? setoresBase.slice(0, quantidadeCartelas) 
+          : [primeiroSetorBase];
 
         return {
           id: combo.id,
@@ -893,15 +890,15 @@ export class LojaPublicaService {
           valorUnitarioCartela,
           valorUnitario: valorUnitarioCartela,
           valorCombo,
-          rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
-          rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
+          rangeTotalInicio: setoresParaUso[0]?.rangeTotalInicio.toString() ?? '0',
+          rangeTotalFinal: setoresParaUso[0]?.rangeTotalFinal.toString() ?? '0',
           passoEntreCartelas:
-            primeiroSetor && segundoSetor
+            setoresParaUso[0] && setoresParaUso[1]
               ? (
-                  segundoSetor.rangeInicio - primeiroSetor.rangeInicio
+                  setoresParaUso[1].rangeInicio - setoresParaUso[0].rangeInicio
                 ).toString()
               : '0',
-          setores: setores.map((setor) => ({
+          setores: setoresParaUso.map((setor) => ({
             indiceCartela: setor.indiceCartela,
             rangeInicio: setor.rangeInicio.toString(),
             rangeFinal: setor.rangeFinal.toString(),
