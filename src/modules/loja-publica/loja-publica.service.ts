@@ -151,7 +151,7 @@ export class LojaPublicaService {
       numerosReservados = keys.map(k => k.split(':').pop()!).filter(Boolean);
     }
 
-    return this.vendasService.listarCombosDisponiveis({
+    const result = await this.vendasService.listarCombosDisponiveis({
       edicaoId,
       origemParticipacao:
         filtros.origemParticipacao ?? OrigemParticipacao.DIGITAL,
@@ -159,11 +159,19 @@ export class LojaPublicaService {
       quantidadeCartelas:
         filtros.quantidadeCartelas ?? (filtros.tipoCartela ? undefined : 1),
       cursorNumeroBase: filtros.cursorNumeroBase,
-      direcao: filtros.direcao,
-      limit: filtros.limit,
+      direcao: filtros.direcao as any,
+      limit: filtros.limit ?? 5,
       indiceRange: filtros.indiceRange,
       numerosReservados,
     });
+
+    // Mapeia para o formato simplificado solicitado pelo frontend
+    return {
+      data: result.data.combos.map((combo) => ({
+        numero: combo.numeroBase,
+        numeros: combo.bilhetes[0]?.sequenciaBolas ?? [],
+      })),
+    };
   }
 
   async comprar(dto: ComprarLojaDto) {
