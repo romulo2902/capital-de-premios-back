@@ -1,20 +1,17 @@
-import {
-  ApiProperty,
-  ApiPropertyOptional,
-} from '@nestjs/swagger';
+import { ApiPropertyOptional, OmitType } from '@nestjs/swagger';
+import { InserirResultadoSenaDto } from './inserir-resultado-sena.dto';
 
-export class InserirResultadoSenaUploadDto {
-  @ApiProperty({
-    type: [Number],
-    example: [4, 17, 23, 38, 51, 60],
-    description: '6 números sorteados pela Mega-Sena (1–60, sem repetição)',
-  })
-  numerosSorteados: number[];
-
+/**
+ * DTO de upload para o Swagger — estende InserirResultadoSenaDto e adiciona o campo de arquivo.
+ * Garante que o campo numerosSorteados apareça junto com o upload da imagem.
+ */
+export class InserirResultadoSenaUploadDto extends InserirResultadoSenaDto {
   @ApiPropertyOptional({
     type: 'string',
     format: 'binary',
-    description: 'Imagem do resultado oficial da Mega-Sena (PNG, JPG, WEBP, max 10MB)',
+    description:
+      'Foto do resultado oficial da Mega-Sena (PNG, JPG, WEBP, max 10MB). ' +
+      'Quando enviada, a API faz upload para o S3 e salva a URL pública.',
   })
-  imagem?: Express.Multer.File;
+  imagem?: unknown;
 }
