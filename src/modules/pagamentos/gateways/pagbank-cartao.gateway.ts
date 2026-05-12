@@ -83,6 +83,10 @@ export class PagBankCartaoGateway implements PaymentGateway {
     this.clientSecret = this.config.get<string>('PAGBANK_CLIENT_SECRET', '');
   }
 
+  private get directToken(): string | undefined {
+    return this.config.get<string>('PAGBANK_TOKEN');
+  }
+
   async criarCobranca(input: CriarCobrancaInput): Promise<CriarCobrancaOutput> {
     if (!input.cardToken) {
       throw new BadRequestException(
@@ -213,6 +217,10 @@ export class PagBankCartaoGateway implements PaymentGateway {
   private async obterToken(): Promise<string> {
     const now = Date.now();
 
+    if (this.directToken) {
+      return this.directToken;
+    }
+
     if (this.cachedToken && this.tokenExpiresAt > now) {
       return this.cachedToken;
     }
@@ -247,7 +255,8 @@ export class PagBankCartaoGateway implements PaymentGateway {
     token: string,
     body?: unknown,
   ): Promise<T> {
-    return this.requestRaw<T>(method, path, `Bearer ${token}`, body);
+    const authHeader = this.directToken === token ? token : `Bearer ${token}`;
+    return this.requestRaw<T>(method, path, authHeader, body);
   }
 
   private async requestRaw<T>(

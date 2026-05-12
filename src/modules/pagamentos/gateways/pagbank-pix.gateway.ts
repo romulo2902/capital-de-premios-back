@@ -77,6 +77,10 @@ export class PagBankPixGateway implements PaymentGateway {
     this.pixKey = this.config.get<string>('PAGBANK_PIX_KEY', '');
   }
 
+  private get directToken(): string | undefined {
+    return this.config.get<string>('PAGBANK_TOKEN');
+  }
+
   async criarCobranca(input: CriarCobrancaInput): Promise<CriarCobrancaOutput> {
     const token = await this.obterToken();
     const expiracaoMinutos = Math.ceil(
@@ -185,6 +189,11 @@ export class PagBankPixGateway implements PaymentGateway {
   private async obterToken(): Promise<string> {
     const now = Date.now();
 
+    // Se houver um token direto no .env, usa ele sem prefixo Bearer (ou conforme a necessidade da API)
+    if (this.directToken) {
+      return this.directToken;
+    }
+
     if (this.cachedToken && this.tokenExpiresAt > now) {
       return this.cachedToken;
     }
@@ -219,7 +228,12 @@ export class PagBankPixGateway implements PaymentGateway {
     token: string,
     body?: unknown,
   ): Promise<T> {
-    return this.requestRaw<T>(method, path, `Bearer ${token}`, body);
+    // Se for o token direto, geralmente o PagBank espera sem o prefixo "Bearer" ou com ele.
+    // Para a API de Orders/Charges com Token de API, o padrão é o token puro ou Bearer.
+    // Vamos usar Bearer se for o token cacheado (OAuth) e o token puro se for o do .env,
+    // ou simplesmente testar o que o PagBank Sandbox aceita melhor.
+    const authHeader = this.directToken === token ? token : `Bearer ${token}`;
+    return this.requestRaw<T>(method, path, authHeader, body);
   }
 
   private async requestRaw<T>(

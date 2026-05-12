@@ -41,6 +41,7 @@ import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.u
 export type TipoCompraEdicao = 'UNITARIO' | 'COMBO';
 
 export interface OpcaoCompraEdicao {
+  id?: string;
   tipoCompra: TipoCompraEdicao;
   isCombo: boolean;
   quantidadeCartelas: number;
@@ -801,6 +802,7 @@ export class LojaPublicaService {
       indiceRange: number;
     }>,
     combos: Array<{
+      id: string;
       origemParticipacao: OrigemParticipacao;
       tipoCartela: TipoCartela;
       preco: Prisma.Decimal;
@@ -884,6 +886,7 @@ export class LojaPublicaService {
         const valorCombo = this.formatarValorMonetario(combo.preco);
 
         return {
+          id: combo.id,
           tipoCompra: 'COMBO' as const,
           isCombo: true,
           quantidadeCartelas,
@@ -1061,6 +1064,7 @@ export class LojaPublicaService {
 
   private encontrarComboDaCompra(
     combos: Array<{
+      id: string;
       origemParticipacao: OrigemParticipacao;
       tipoCartela: TipoCartela;
       preco: Prisma.Decimal;
