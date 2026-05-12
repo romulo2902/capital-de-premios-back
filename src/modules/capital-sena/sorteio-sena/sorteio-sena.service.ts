@@ -5,19 +5,28 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, StatusEdicaoSena } from '@prisma/client';
+import { StatusEdicaoSena } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { S3UploadService } from '../../../common/s3/s3-upload.service';
+import type { UploadFile } from '../../../common/types/upload-file.type';
 import { InserirResultadoSenaDto } from './dto/inserir-resultado-sena.dto';
 
 @Injectable()
 export class SorteioSenaService {
   private readonly logger = new Logger(SorteioSenaService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly s3UploadService: S3UploadService,
+  ) {}
 
-  // ─── INSERIR RESULTADO ────────────────────────────────
+  // ─── INSERIR / ATUALIZAR RESULTADO ───────────────────
 
-  async inserirResultado(edicaoSenaId: string, dto: InserirResultadoSenaDto) {
+  async inserirResultado(
+    edicaoSenaId: string,
+    dto: InserirResultadoSenaDto,
+    imagemFile?: UploadFile,
+  ) {
     const edicao = await this.prisma.edicaoSena.findUnique({
       where: { id: edicaoSenaId },
     });
@@ -32,29 +41,42 @@ export class SorteioSenaService {
       );
     }
 
-    // Validar 6 números únicos entre 1 e 60
     this.validarNumerosSorteados(dto.numerosSorteados);
 
-    // Upsert do resultado
+    // Upload da imagem do resultado para S3
+    let imagemResultadoUrl: string | null = null;
+    if (imagemFile?.buffer && imagemFile.buffer.length > 0) {
+      try {
+        imagemResultadoUrl = await this.s3UploadService.uploadImage(
+          imagemFile,
+          `capital-sena/resultados/${edicaoSenaId}`,
+        );
+        this.logger.log(`Imagem do resultado enviada ao S3: ${imagemResultadoUrl}`);
+      } catch (err) {
+        this.logger.warn(
+          `Falha ao enviar imagem do resultado ao S3: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const resultado = await this.prisma.resultadoSena.upsert({
       where: { edicaoSenaId },
       create: {
         edicaoSenaId,
         numerosSorteados: dto.numerosSorteados,
-        imagemResultadoUrl: dto.imagemResultadoUrl ?? null,
+        imagemResultadoUrl,
       },
       update: {
         numerosSorteados: dto.numerosSorteados,
-        ...(dto.imagemResultadoUrl !== undefined
-          ? { imagemResultadoUrl: dto.imagemResultadoUrl }
-          : {}),
-        // Se editando resultado já apurado, resetar apuração
+        // Só sobrescreve a imagem se uma nova foi enviada
+        ...(imagemResultadoUrl !== null ? { imagemResultadoUrl } : {}),
+        // Resetar apuração caso resultado seja corrigido
         apurado: false,
         apuradoEm: null,
       },
     });
 
-    // Avançar status para APURANDO se ainda ENCERRADA
+    // Avançar status da edição para APURANDO
     if (edicao.status === StatusEdicaoSena.ENCERRADA) {
       await this.prisma.edicaoSena.update({
         where: { id: edicaoSenaId },
@@ -72,7 +94,7 @@ export class SorteioSenaService {
     };
   }
 
-  // ─── CONSULTAR RESULTADO ──────────────────────────────
+  // ─── CONSULTAR RESULTADO (admin) ──────────────────────
 
   async consultarResultado(edicaoSenaId: string) {
     const edicao = await this.prisma.edicaoSena.findUnique({
@@ -123,6 +145,7 @@ export class SorteioSenaService {
           faixa: p.faixa,
           descricao: p.descricao,
           valor: p.valor.toString(),
+          imagemUrl: p.imagemUrl,
         })),
       },
     };

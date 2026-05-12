@@ -15,6 +15,8 @@ import {
   buildPaginatedResponse,
   normalizePagination,
 } from '../../../common/utils/pagination.util';
+import { S3UploadService } from '../../../common/s3/s3-upload.service';
+import type { UploadFile } from '../../../common/types/upload-file.type';
 import { CreateEdicaoSenaDto } from './dto/create-edicao-sena.dto';
 import { UpdateEdicaoSenaDto } from './dto/update-edicao-sena.dto';
 
@@ -25,15 +27,23 @@ const FAIXAS_VALIDAS: FaixaPremiacao[] = [
   FaixaPremiacao.SENA_BONUS,
 ];
 
+export interface ArquivosEdicaoSena {
+  imagem?: UploadFile[];
+  premioImagens?: UploadFile[];
+}
+
 @Injectable()
 export class EdicoesSenaService {
   private readonly logger = new Logger(EdicoesSenaService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly s3UploadService: S3UploadService,
+  ) {}
 
   // ─── CREATE ────────────────────────────────────────────
 
-  async create(dto: CreateEdicaoSenaDto) {
+  async create(dto: CreateEdicaoSenaDto, arquivos?: ArquivosEdicaoSena) {
     this.validarDatas(dto.dataEncerramento, dto.dataSorteioMegaSena);
     this.validarPremios(dto.premios);
 
@@ -44,6 +54,19 @@ export class EdicoesSenaService {
       throw new ConflictException(`Edição Sena "${dto.numero}" já existe`);
     }
 
+    // Upload imagem de capa
+    const imagemUrl = await this.resolverImagemUrl(
+      arquivos?.imagem?.[0],
+      `capital-sena/edicoes/${dto.numero}`,
+    );
+
+    // Upload imagens dos prêmios (na mesma ordem do array dto.premios)
+    const premiosComImagem = await this.resolverPremiosComImagens(
+      dto.premios,
+      arquivos?.premioImagens,
+      `capital-sena/edicoes/${dto.numero}/premios`,
+    );
+
     const edicao = await this.prisma.$transaction(async (tx) => {
       const created = await tx.edicaoSena.create({
         data: {
@@ -52,9 +75,9 @@ export class EdicoesSenaService {
           dataSorteioMegaSena: new Date(dto.dataSorteioMegaSena),
           dataEncerramento: new Date(dto.dataEncerramento),
           valorCartela: new Prisma.Decimal(dto.valorCartela),
-          imagemUrl: dto.imagemUrl ?? null,
+          imagemUrl: imagemUrl ?? null,
           premios: {
-            create: dto.premios.map((p) => ({
+            create: premiosComImagem.map((p) => ({
               faixa: p.faixa,
               descricao: p.descricao,
               valor: new Prisma.Decimal(p.valor),
@@ -124,7 +147,7 @@ export class EdicoesSenaService {
 
   // ─── UPDATE ────────────────────────────────────────────
 
-  async update(id: string, dto: UpdateEdicaoSenaDto) {
+  async update(id: string, dto: UpdateEdicaoSenaDto, arquivos?: ArquivosEdicaoSena) {
     const atual = await this.obterOuFalhar(id);
 
     if (
@@ -146,6 +169,23 @@ export class EdicoesSenaService {
 
     if (dto.premios) this.validarPremios(dto.premios);
 
+    // Upload imagem de capa (se enviada)
+    const novaImagemUrl = arquivos?.imagem?.[0]
+      ? await this.resolverImagemUrl(
+          arquivos.imagem[0],
+          `capital-sena/edicoes/${atual.numero}`,
+        )
+      : undefined;
+
+    // Upload imagens dos prêmios (se enviadas)
+    const premiosComImagem = dto.premios
+      ? await this.resolverPremiosComImagens(
+          dto.premios,
+          arquivos?.premioImagens,
+          `capital-sena/edicoes/${atual.numero}/premios`,
+        )
+      : undefined;
+
     const atualizada = await this.prisma.$transaction(async (tx) => {
       await tx.edicaoSena.update({
         where: { id },
@@ -161,12 +201,12 @@ export class EdicoesSenaService {
           ...(dto.valorCartela !== undefined
             ? { valorCartela: new Prisma.Decimal(dto.valorCartela) }
             : {}),
-          ...(dto.imagemUrl !== undefined ? { imagemUrl: dto.imagemUrl } : {}),
-          ...(dto.premios
+          ...(novaImagemUrl !== undefined ? { imagemUrl: novaImagemUrl } : {}),
+          ...(premiosComImagem
             ? {
                 premios: {
                   deleteMany: {},
-                  create: dto.premios.map((p) => ({
+                  create: premiosComImagem.map((p) => ({
                     faixa: p.faixa,
                     descricao: p.descricao,
                     valor: new Prisma.Decimal(p.valor),
@@ -214,7 +254,6 @@ export class EdicoesSenaService {
       throw new BadRequestException(`Não é possível ativar uma edição com status ${edicao.status}`);
     }
 
-    // Garantir unicidade — uma edição ATIVA por vez
     const conflito = await this.prisma.edicaoSena.findFirst({
       where: { status: StatusEdicaoSena.ATIVA, NOT: { id } },
     });
@@ -271,6 +310,35 @@ export class EdicoesSenaService {
     return edicao;
   }
 
+  private async resolverImagemUrl(
+    arquivo: UploadFile | undefined,
+    folder: string,
+  ): Promise<string | null> {
+    if (!arquivo?.buffer || arquivo.buffer.length === 0) return null;
+    try {
+      return await this.s3UploadService.uploadImage(arquivo, folder);
+    } catch (err) {
+      this.logger.warn(
+        `Falha ao enviar imagem para S3 (pasta=${folder}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  private async resolverPremiosComImagens(
+    premios: { faixa: FaixaPremiacao; descricao: string; valor: number; imagemUrl?: string }[],
+    premioImagens: UploadFile[] | undefined,
+    folder: string,
+  ) {
+    return Promise.all(
+      premios.map(async (p, i) => {
+        const arquivo = premioImagens?.[i];
+        const imagemUrl = await this.resolverImagemUrl(arquivo, `${folder}/${p.faixa}`);
+        return { ...p, imagemUrl: imagemUrl ?? p.imagemUrl ?? null };
+      }),
+    );
+  }
+
   private validarDatas(dataEncerramento: string, dataSorteio: string): void {
     const enc = new Date(dataEncerramento);
     const sort = new Date(dataSorteio);
@@ -288,7 +356,7 @@ export class EdicoesSenaService {
     if (invalidas.length > 0) {
       throw new BadRequestException(`Faixas inválidas: ${invalidas.join(', ')}`);
     }
-    const duplicatas = faixas.filter((f, i) => faixas.indexOf(f) !== i);
+    const duplicatas = faixas.filter((f, idx) => faixas.indexOf(f) !== idx);
     if (duplicatas.length > 0) {
       throw new ConflictException(`Faixas duplicadas: ${duplicatas.join(', ')}`);
     }

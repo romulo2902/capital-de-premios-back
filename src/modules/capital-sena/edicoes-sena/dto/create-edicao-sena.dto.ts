@@ -27,11 +27,6 @@ export class CreatePremioSenaDto {
   @IsNumber()
   @Min(0)
   valor: number;
-
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/quadra.png' })
-  @IsOptional()
-  @IsString()
-  imagemUrl?: string;
 }
 
 export class CreateComboSenaDto {
@@ -81,7 +76,7 @@ export class CreateEdicaoSenaDto {
   @Min(0.01)
   valorCartela: number;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/banner.png' })
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/banner.png', description: 'Preenchido automaticamente após upload S3 — não enviar manualmente' })
   @IsOptional()
   @IsString()
   imagemUrl?: string;
