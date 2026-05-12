@@ -13,7 +13,11 @@ const DOCS_JSON_BASE_PATH = 'api/docs-json';
 const SWAGGER_ADMIN_FLAT_PATH = 'api/swagger-admin';
 const SWAGGER_GERAL_FLAT_PATH = 'api/swagger-geral';
 const SWAGGER_WHATSAPP_FLAT_PATH = 'api/swagger-whatsapp';
+const SWAGGER_SENA_ADMIN_FLAT_PATH = 'api/swagger-sena-admin';
+const SWAGGER_SENA_LOJA_FLAT_PATH = 'api/swagger-sena-loja';
 const ADMIN_TAG_PREFIX = 'Admin /';
+const SENA_ADMIN_TAG_PREFIX = 'Sena Admin /';
+const SENA_LOJA_TAG_PREFIX = 'Sena /';
 const WHATSAPP_TAG = 'WhatsApp API';
 const REDOC_STANDALONE_JS_URL =
   'https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js';
@@ -30,7 +34,7 @@ const HTTP_METHODS = [
   'trace',
 ] as const;
 
-type SwaggerAudience = 'admin' | 'geral' | 'whatsapp' | 'shared';
+type SwaggerAudience = 'admin' | 'geral' | 'whatsapp' | 'sena-admin' | 'sena-loja' | 'shared';
 type HttpMethod = (typeof HTTP_METHODS)[number];
 
 export function setupOpenApiDocs(
@@ -98,6 +102,59 @@ export function setupOpenApiDocs(
       '`Authorization: Bearer {accessToken}`',
     ].join('\n'),
   );
+  const senaAdminDocument = buildAudienceDocument(
+    fullDocument,
+    'sena-admin',
+    'Capital Sena API - Admin',
+    [
+      '## Capital Sena — Painel Administrativo',
+      '',
+      'Gerenciamento completo do sistema de cartelas baseado na Mega-Sena.',
+      '',
+      '**Usuários**: ADMIN, DISTRIBUIDOR, VENDEDOR',
+      '',
+      '### Fluxo operacional',
+      '```',
+      '1. POST /api/admin/capital-sena/edicoes           — Criar edição Sena',
+      '2. PATCH /api/admin/capital-sena/edicoes/:id/ativar — Ativar edição',
+      '3. POST /api/capital-sena/comprar                 — Vender cartelas (via loja)',
+      '4. POST /api/admin/capital-sena/vendas            — Vender cartelas (admin/manual)',
+      '5. PATCH /api/admin/capital-sena/edicoes/:id/encerrar — Encerrar edição',
+      '6. POST /api/admin/capital-sena/sorteio/:id/resultado — Inserir resultado Mega-Sena',
+      '7. POST /api/admin/capital-sena/apuracao/:id      — Executar apuração automática',
+      '8. GET  /api/admin/capital-sena/apuracao/:id/ganhadores — Listar premiados',
+      '```',
+      '',
+      '### Faixas de premiação',
+      '- **QUADRA** — 4 acertos',
+      '- **QUINA** — 5 acertos',
+      '- **SENA** — 6 acertos',
+      '- **SENA_BONUS** — 6 acertos + 7º número',
+    ].join('\n'),
+  );
+  const senaLojaDocument = buildAudienceDocument(
+    fullDocument,
+    'sena-loja',
+    'Capital Sena API - Loja',
+    [
+      '## Capital Sena — Loja (Cliente)',
+      '',
+      'Endpoints públicos e de área do cliente para o Capital Sena.',
+      '',
+      '### Fluxo de compra',
+      '```',
+      '1. GET  /api/capital-sena/edicao-ativa         — Edição ativa com prêmios/combos',
+      '2. POST /api/capital-sena/comprar              — Comprar cartela(s) (PIX ou Cartão)',
+      '3. GET  /api/capital-sena/vendas/:id/status    — Consultar status de pagamento',
+      '4. GET  /api/capital-sena/minhas-cartelas      — Área do cliente (Bearer)',
+      '5. GET  /api/capital-sena/resultado/:edicaoId  — Resultado público',
+      '```',
+      '',
+      '### 7º Número',
+      'Gerado automaticamente após confirmação do pagamento. Visível em **minhas-cartelas**.',
+    ].join('\n'),
+  );
+
   const generalDocument = buildAudienceDocument(
     fullDocument,
     'geral',
@@ -194,6 +251,55 @@ export function setupOpenApiDocs(
   });
 
   expressApp.get(
+    `/${SWAGGER_BASE_PATH}/sena-admin`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_SENA_ADMIN_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
+    `/${SWAGGER_BASE_PATH}/sena-loja`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_SENA_LOJA_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
+    `/${DOCS_JSON_BASE_PATH}/sena-admin`,
+    (_request: unknown, response: Response) => {
+      response.json(senaAdminDocument);
+    },
+  );
+  expressApp.get(
+    `/${DOCS_JSON_BASE_PATH}/sena-loja`,
+    (_request: unknown, response: Response) => {
+      response.json(senaLojaDocument);
+    },
+  );
+  expressApp.get(
+    `/${DOCS_BASE_PATH}/sena-admin`,
+    (_request: unknown, response: Response) => {
+      response
+        .type('html')
+        .send(buildRedocHtml('Capital Sena API - Admin', `/${DOCS_JSON_BASE_PATH}/sena-admin`));
+    },
+  );
+  expressApp.get(
+    `/${DOCS_BASE_PATH}/sena-loja`,
+    (_request: unknown, response: Response) => {
+      response
+        .type('html')
+        .send(buildRedocHtml('Capital Sena API - Loja', `/${DOCS_JSON_BASE_PATH}/sena-loja`));
+    },
+  );
+  SwaggerModule.setup(SWAGGER_SENA_ADMIN_FLAT_PATH, app, senaAdminDocument, {
+    customSiteTitle: 'Capital Sena API - Swagger Admin',
+    swaggerOptions: { persistAuthorization: true, url: `/${DOCS_JSON_BASE_PATH}/sena-admin` },
+  });
+  SwaggerModule.setup(SWAGGER_SENA_LOJA_FLAT_PATH, app, senaLojaDocument, {
+    customSiteTitle: 'Capital Sena API - Swagger Loja',
+    swaggerOptions: { persistAuthorization: true, url: `/${DOCS_JSON_BASE_PATH}/sena-loja` },
+  });
+
+  expressApp.get(
     `/${SWAGGER_BASE_PATH}/whatsapp`,
     (_request: unknown, response: Response) => {
       response.redirect(302, `/${SWAGGER_WHATSAPP_FLAT_PATH}`);
@@ -233,19 +339,17 @@ export function setupOpenApiDocs(
   });
   logger.log(`📚 Redoc WhatsApp: http://localhost:${port}/api/docs/whatsapp`);
   logger.log(`📚 Swagger WhatsApp: http://localhost:${port}/api/swagger/whatsapp`);
-  logger.log(
-    `📚 OpenAPI WhatsApp JSON: http://localhost:${port}/api/docs-json/whatsapp`,
-  );
+  logger.log(`📚 OpenAPI WhatsApp JSON: http://localhost:${port}/api/docs-json/whatsapp`);
+  logger.log(`📚 Redoc Sena Admin: http://localhost:${port}/api/docs/sena-admin`);
+  logger.log(`📚 Redoc Sena Loja:  http://localhost:${port}/api/docs/sena-loja`);
+  logger.log(`📚 Swagger Sena Admin: http://localhost:${port}/api/swagger/sena-admin`);
+  logger.log(`📚 Swagger Sena Loja:  http://localhost:${port}/api/swagger/sena-loja`);
   logger.log(`📚 Redoc Admin: http://localhost:${port}/api/docs/admin`);
   logger.log(`📚 Redoc Geral: http://localhost:${port}/api/docs/geral`);
   logger.log(`📚 Swagger Admin: http://localhost:${port}/api/swagger/admin`);
   logger.log(`📚 Swagger Geral: http://localhost:${port}/api/swagger/geral`);
-  logger.log(
-    `📚 OpenAPI Admin JSON: http://localhost:${port}/api/docs-json/admin`,
-  );
-  logger.log(
-    `📚 OpenAPI Geral JSON: http://localhost:${port}/api/docs-json/geral`,
-  );
+  logger.log(`📚 OpenAPI Admin JSON: http://localhost:${port}/api/docs-json/admin`);
+  logger.log(`📚 OpenAPI Geral JSON: http://localhost:${port}/api/docs-json/geral`);
 }
 
 function isHttpMethod(value: string): value is HttpMethod {
@@ -284,6 +388,15 @@ function getSwaggerAudience(
 
   if (path.includes('/whatsapp/')) {
     return 'whatsapp';
+  }
+
+  // Capital Sena
+  if (path.includes('/capital-sena/')) {
+    const isSenaAdmin =
+      isAdminPath(path) ||
+      (operation.tags ?? []).some((tag: string) => tag.startsWith(SENA_ADMIN_TAG_PREFIX));
+    if (isSenaAdmin) return 'sena-admin';
+    return 'sena-loja';
   }
 
   if (
@@ -536,6 +649,20 @@ function buildDocsIndexHtml(port: number): string {
           <code>/api/docs/whatsapp</code>
         </a>
 
+        <a class="card" href="/api/docs/sena-admin">
+          <span class="eyebrow" style="background:#fef3c7;color:#b45309">Sena · Redoc</span>
+          <h2>Redoc Capital Sena Admin</h2>
+          <p>Gerenciamento de edições, sorteios, apuração e ganhadores da Mega-Sena.</p>
+          <code>/api/docs/sena-admin</code>
+        </a>
+
+        <a class="card" href="/api/docs/sena-loja">
+          <span class="eyebrow" style="background:#fef3c7;color:#b45309">Sena · Redoc</span>
+          <h2>Redoc Capital Sena Loja</h2>
+          <p>Endpoints de compra de cartelas, resultado público e área do cliente.</p>
+          <code>/api/docs/sena-loja</code>
+        </a>
+
         <a class="card" href="/api/swagger/admin">
           <span class="eyebrow">Swagger</span>
           <h2>Swagger Admin</h2>
@@ -555,6 +682,20 @@ function buildDocsIndexHtml(port: number): string {
           <h2>Swagger WhatsApp</h2>
           <p>Interface interativa para testar os fluxos da API de vendas via WhatsApp.</p>
           <code>/api/swagger/whatsapp</code>
+        </a>
+
+        <a class="card" href="/api/swagger/sena-admin">
+          <span class="eyebrow" style="background:#fef3c7;color:#b45309">Sena · Swagger</span>
+          <h2>Swagger Capital Sena Admin</h2>
+          <p>Interface interativa para testar e executar as rotas administrativas do Capital Sena.</p>
+          <code>/api/swagger/sena-admin</code>
+        </a>
+
+        <a class="card" href="/api/swagger/sena-loja">
+          <span class="eyebrow" style="background:#fef3c7;color:#b45309">Sena · Swagger</span>
+          <h2>Swagger Capital Sena Loja</h2>
+          <p>Interface interativa para o fluxo de compra e área do cliente Sena.</p>
+          <code>/api/swagger/sena-loja</code>
         </a>
 
         <a class="card" href="/api/admin/filas">

@@ -105,6 +105,45 @@ enum AuditAction {
   DELETE_MANY
 }
 
+// ─── Capital Sena Enums ──────────────────────────────────
+
+enum StatusEdicaoSena {
+  RASCUNHO
+  ATIVA
+  ENCERRADA
+  APURANDO
+  FINALIZADA
+}
+
+enum StatusCartelaSena {
+  PENDENTE_PAGAMENTO
+  CONFIRMADA
+  NAO_PREMIADA
+  QUADRA
+  QUINA
+  SENA
+  SENA_BONUS
+}
+
+enum StatusVendaSena {
+  PENDENTE
+  APROVADO
+  RECUSADO
+  CANCELADO
+}
+
+enum ModoSelecaoSena {
+  MANUAL
+  SURPRESINHA
+}
+
+enum FaixaPremiacao {
+  QUADRA
+  QUINA
+  SENA
+  SENA_BONUS
+}
+
 model Usuario {
   id                 String        @id @default(uuid())
   cpf                String?       @unique
@@ -118,33 +157,34 @@ model Usuario {
 }
 
 model Distribuidor {
-  id             String         @id @default(uuid())
-  codigo         Int            @unique @default(autoincrement())
-  usuarioId      String         @unique
-  nome           String
-  cpf            String         @unique
-  telefone       String
-  dataNascimento DateTime?
-  cep            String?
-  endereco       String?
-  numero         String?
-  bairro         String?
-  cidade         String?
-  estado         String?
-  email          String
-  tipoChavePix   TipoChavePix?
-  chavePix       String?
-  comissaoPercent Decimal        @default(0)
-  saldo          Decimal        @default(0)
-  link           String?
-  qrcode         String?
-  status         StatusUsuario  @default(ATIVO)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  vendedores     Vendedor[]
-  clientes       Cliente[]
-  saques         Saque[]
-  comissoesDistribuidor ComissaoDistribuidor[]
+  id                        String                     @id @default(uuid())
+  codigo                    Int                        @unique @default(autoincrement())
+  usuarioId                 String                     @unique
+  nome                      String
+  cpf                       String                     @unique
+  telefone                  String
+  dataNascimento            DateTime?
+  cep                       String?
+  endereco                  String?
+  numero                    String?
+  bairro                    String?
+  cidade                    String?
+  estado                    String?
+  email                     String
+  tipoChavePix              TipoChavePix?
+  chavePix                  String?
+  comissaoPercent           Decimal                    @default(0)
+  saldo                     Decimal                    @default(0)
+  link                      String?
+  qrcode                    String?
+  status                    StatusUsuario              @default(ATIVO)
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  vendedores                Vendedor[]
+  clientes                  Cliente[]
+  saques                    Saque[]
+  comissoesDistribuidor     ComissaoDistribuidor[]
+  comissoesDistribuidorSena ComissaoDistribuidorSena[]
 }
 
 model Vendedor {
@@ -176,7 +216,9 @@ model Vendedor {
   distribuidor    Distribuidor   @relation(fields: [distribuidorId], references: [id])
   clientes        Cliente[]
   vendas          Venda[]
+  vendasSena      VendaSena[]
   comissoes       Comissao[]
+  comissoesSena   ComissaoSena[]
   saques          Saque[]
 }
 
@@ -202,37 +244,38 @@ model Cliente {
   vendedor       Vendedor?     @relation(fields: [vendedorId], references: [id])
   distribuidor   Distribuidor? @relation(fields: [distribuidorId], references: [id])
   vendas         Venda[]
+  vendasSena     VendaSena[]
 }
 
 model Edicao {
-  id               String       @id @default(uuid())
-  numero           String
-  dataSorteio      DateTime
-  dataEncerramento DateTime
-  valorCartela     Decimal
-  qtdNumerosCartela Int
-  rangeInicio      BigInt
-  rangeFinal       BigInt
-  qtdPremios       Int
-  destino          DestinoEdicao @default(SITE)
-  raspadinha       Boolean       @default(false)
-  frase            String?
-  especie          String?
-  imagemUrl        String?
-  manutencaoAtiva  Boolean       @default(false)
+  id                 String            @id @default(uuid())
+  numero             String
+  dataSorteio        DateTime
+  dataEncerramento   DateTime
+  valorCartela       Decimal
+  qtdNumerosCartela  Int
+  rangeInicio        BigInt
+  rangeFinal         BigInt
+  qtdPremios         Int
+  destino            DestinoEdicao     @default(SITE)
+  raspadinha         Boolean           @default(false)
+  frase              String?
+  especie            String?
+  imagemUrl          String?
+  manutencaoAtiva    Boolean           @default(false)
   manutencaoMensagem String?
-  status           StatusEdicao @default(RASCUNHO)
-  createdAt        DateTime     @default(now())
-  premios          Premio[]
-  detalhes         EdicaoDetalhe[]
-  combos           EdicaoCombo[]
-  vendas           Venda[]
-  resultado        Resultado?
-  resultadosPremio ResultadoPremio[]
+  status             StatusEdicao      @default(RASCUNHO)
+  createdAt          DateTime          @default(now())
+  premios            Premio[]
+  detalhes           EdicaoDetalhe[]
+  combos             EdicaoCombo[]
+  vendas             Venda[]
+  resultado          Resultado?
+  resultadosPremio   ResultadoPremio[]
 }
 
 model EdicaoDetalhe {
-  id                 String               @id @default(uuid())
+  id                 String             @id @default(uuid())
   edicaoId           String
   origemParticipacao OrigemParticipacao
   tipoCartela        TipoCartela
@@ -240,12 +283,12 @@ model EdicaoDetalhe {
   rangeInicio        BigInt
   rangeFinal         BigInt
   preco              Decimal?
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
-  edicao             Edicao               @relation(fields: [edicaoId], references: [id], onDelete: Cascade)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  edicao             Edicao             @relation(fields: [edicaoId], references: [id], onDelete: Cascade)
 
-  @@index([edicaoId])
   @@unique([edicaoId, origemParticipacao, indiceRange])
+  @@index([edicaoId])
 }
 
 model EdicaoCombo {
@@ -258,8 +301,8 @@ model EdicaoCombo {
   updatedAt          DateTime           @updatedAt
   edicao             Edicao             @relation(fields: [edicaoId], references: [id], onDelete: Cascade)
 
-  @@index([edicaoId])
   @@unique([edicaoId, origemParticipacao, tipoCartela])
+  @@index([edicaoId])
 }
 
 model Premio {
@@ -282,25 +325,25 @@ model MatrizRange {
 }
 
 model Venda {
-  id             String        @id @default(uuid())
-  edicaoId       String
-  clienteId      String
-  vendedorId     String?
-  distribuidorId String?
-  quantidade     Int
-  tipoCartela    TipoCartela?
-  total          Decimal
-  status         StatusVenda   @default(PENDENTE)
-  origemParticipacao OrigemParticipacao @default(DIGITAL)
-  tipoPagamento  TipoPagamento
-  gatewayId      String?
-  gatewayPayload Json?
-  createdAt      DateTime      @default(now())
-  edicao         Edicao        @relation(fields: [edicaoId], references: [id])
-  cliente        Cliente       @relation(fields: [clienteId], references: [id])
-  vendedor       Vendedor?     @relation(fields: [vendedorId], references: [id])
-  bilhetes       Bilhete[]
-  comissao       Comissao?
+  id                   String                @id @default(uuid())
+  edicaoId             String
+  clienteId            String
+  vendedorId           String?
+  distribuidorId       String?
+  quantidade           Int
+  tipoCartela          TipoCartela?
+  total                Decimal
+  status               StatusVenda           @default(PENDENTE)
+  origemParticipacao   OrigemParticipacao    @default(DIGITAL)
+  tipoPagamento        TipoPagamento
+  gatewayId            String?
+  gatewayPayload       Json?
+  createdAt            DateTime              @default(now())
+  edicao               Edicao                @relation(fields: [edicaoId], references: [id])
+  cliente              Cliente               @relation(fields: [clienteId], references: [id])
+  vendedor             Vendedor?             @relation(fields: [vendedorId], references: [id])
+  bilhetes             Bilhete[]
+  comissao             Comissao?
   comissaoDistribuidor ComissaoDistribuidor?
 }
 
@@ -425,4 +468,139 @@ model AuditLog {
   @@index([model, createdAt])
   @@index([actorId, createdAt])
   @@index([requestId])
+}
+
+// ─── Capital Sena Models ─────────────────────────────────
+
+model EdicaoSena {
+  id                  String           @id @default(uuid())
+  numero              String           @unique
+  descricao           String?
+  dataSorteioMegaSena DateTime
+  dataEncerramento    DateTime
+  valorCartela        Decimal
+  imagemUrl           String?
+  status              StatusEdicaoSena @default(RASCUNHO)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  premios   PremioSena[]
+  combos    ComboSena[]
+  vendas    VendaSena[]
+  resultado ResultadoSena?
+  cartelas  CartelaSena[]
+
+  @@index([status])
+}
+
+model ComboSena {
+  id           String   @id @default(uuid())
+  edicaoSenaId String
+  nome         String
+  quantidade   Int
+  preco        Decimal
+  ativo        Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  edicaoSena EdicaoSena @relation(fields: [edicaoSenaId], references: [id], onDelete: Cascade)
+
+  @@index([edicaoSenaId])
+}
+
+model PremioSena {
+  id           String         @id @default(uuid())
+  edicaoSenaId String
+  faixa        FaixaPremiacao
+  descricao    String
+  valor        Decimal
+  imagemUrl    String?
+
+  edicaoSena EdicaoSena @relation(fields: [edicaoSenaId], references: [id], onDelete: Cascade)
+
+  @@unique([edicaoSenaId, faixa])
+  @@index([edicaoSenaId])
+}
+
+model VendaSena {
+  id             String          @id @default(uuid())
+  edicaoSenaId   String
+  clienteId      String
+  vendedorId     String?
+  distribuidorId String?
+  comboSenaId    String?
+  quantidade     Int
+  total          Decimal
+  status         StatusVendaSena @default(PENDENTE)
+  tipoPagamento  TipoPagamento
+  gatewayId      String?
+  gatewayPayload Json?
+  createdAt      DateTime        @default(now())
+
+  edicaoSena               EdicaoSena                @relation(fields: [edicaoSenaId], references: [id])
+  cliente                  Cliente                   @relation(fields: [clienteId], references: [id])
+  vendedor                 Vendedor?                 @relation(fields: [vendedorId], references: [id])
+  cartelas                 CartelaSena[]
+  comissaoSena             ComissaoSena?
+  comissaoDistribuidorSena ComissaoDistribuidorSena?
+
+  @@index([edicaoSenaId])
+  @@index([clienteId])
+}
+
+model CartelaSena {
+  id                String            @id @default(uuid())
+  vendaSenaId       String
+  edicaoSenaId      String
+  numerosEscolhidos Int[]
+  setimoNumero      Int?
+  modoSelecao       ModoSelecaoSena
+  acertos           Int?
+  setimoAcertou     Boolean?
+  status            StatusCartelaSena @default(PENDENTE_PAGAMENTO)
+  createdAt         DateTime          @default(now())
+
+  vendaSena  VendaSena  @relation(fields: [vendaSenaId], references: [id])
+  edicaoSena EdicaoSena @relation(fields: [edicaoSenaId], references: [id])
+
+  @@index([edicaoSenaId])
+  @@index([vendaSenaId])
+  @@index([status])
+}
+
+model ResultadoSena {
+  id                 String    @id @default(uuid())
+  edicaoSenaId       String    @unique
+  numerosSorteados   Int[]
+  imagemResultadoUrl String?
+  apurado            Boolean   @default(false)
+  apuradoEm          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  edicaoSena EdicaoSena @relation(fields: [edicaoSenaId], references: [id])
+}
+
+model ComissaoSena {
+  id          String         @id @default(uuid())
+  vendedorId  String
+  vendaSenaId String         @unique
+  valor       Decimal
+  status      StatusComissao @default(PENDENTE)
+  createdAt   DateTime       @default(now())
+
+  vendedor  Vendedor  @relation(fields: [vendedorId], references: [id])
+  vendaSena VendaSena @relation(fields: [vendaSenaId], references: [id])
+}
+
+model ComissaoDistribuidorSena {
+  id             String         @id @default(uuid())
+  distribuidorId String
+  vendaSenaId    String         @unique
+  valor          Decimal
+  status         StatusComissao @default(PENDENTE)
+  createdAt      DateTime       @default(now())
+
+  distribuidor Distribuidor @relation(fields: [distribuidorId], references: [id])
+  vendaSena    VendaSena    @relation(fields: [vendaSenaId], references: [id])
 }
