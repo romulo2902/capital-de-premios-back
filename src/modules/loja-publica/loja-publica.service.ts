@@ -42,6 +42,7 @@ export type TipoCompraEdicao = 'UNITARIO' | 'COMBO';
 
 export interface OpcaoCompraEdicao {
   id?: string;
+  tipoCartela?: TipoCartela;
   tipoCompra: TipoCompraEdicao;
   isCombo: boolean;
   quantidadeCartelas: number;
@@ -158,8 +159,6 @@ export class LojaPublicaService {
       tipoCartela: filtros.tipoCartela,
       quantidadeCartelas:
         filtros.quantidadeCartelas ?? (filtros.tipoCartela ? undefined : 1),
-      cursorNumeroBase: filtros.cursorNumeroBase,
-      direcao: filtros.direcao as any,
       limit: filtros.limit ?? 5,
       indiceRange: filtros.indiceRange,
       numerosReservados,
@@ -842,31 +841,33 @@ export class LojaPublicaService {
     const valorUnitarioCartela =
       this.formatarValorMonetario(valorCartelaPadrao);
     const primeiroSetorBase = setoresBase[0];
-    const segundoSetorBase = setoresBase[1];
+    const comboUnitario = combos.find(
+      (c) =>
+        c.tipoCartela === TipoCartela.UMA_CHANCE &&
+        c.origemParticipacao === OrigemParticipacao.DIGITAL,
+    );
+
     const opcoes: OpcaoCompraEdicao[] = [
       {
+        id: comboUnitario?.id,
+        tipoCartela: TipoCartela.UMA_CHANCE,
         tipoCompra: 'UNITARIO',
         isCombo: false,
         quantidadeCartelas: 1,
         valorUnitarioCartela,
         valorUnitario: valorUnitarioCartela,
         valorCombo: null,
-        preco: valorUnitarioCartela,
-        rangeTotalInicio: primeiroSetorBase.rangeTotalInicio.toString(),
-        rangeTotalFinal: primeiroSetorBase.rangeTotalFinal.toString(),
-        passoEntreCartelas:
-          primeiroSetorBase && segundoSetorBase
-            ? (
-                segundoSetorBase.rangeInicio - primeiroSetorBase.rangeInicio
-              ).toString()
-            : '0',
+        rangeTotalInicio: primeiroSetorBase?.rangeTotalInicio.toString() ?? '0',
+        rangeTotalFinal: primeiroSetorBase?.rangeTotalFinal.toString() ?? '0',
+        passoEntreCartelas: '0',
         setores: [
           {
-            indiceCartela: primeiroSetorBase.indiceCartela,
-            rangeInicio: primeiroSetorBase.rangeInicio.toString(),
-            rangeFinal: primeiroSetorBase.rangeFinal.toString(),
+            indiceCartela: 1,
+            rangeInicio: primeiroSetorBase?.rangeInicio.toString() ?? '0',
+            rangeFinal: primeiroSetorBase?.rangeFinal.toString() ?? '0',
           },
         ],
+        preco: valorUnitarioCartela,
       },
     ];
 
@@ -892,6 +893,7 @@ export class LojaPublicaService {
 
         return {
           id: combo.id,
+          tipoCartela: combo.tipoCartela,
           tipoCompra: 'COMBO' as const,
           isCombo: true,
           quantidadeCartelas,

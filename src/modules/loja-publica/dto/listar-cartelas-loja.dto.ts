@@ -26,7 +26,7 @@ export class ListarCartelasLojaDto {
   @ApiPropertyOptional({
     example: 6,
     description:
-      'Quantidade de cartelas do combo (inteiro de 1 a 12). Se omitida, assume 1.',
+      'Quantidade de cartelas/chances a serem listadas. Se omitida, assume 1.',
   })
   @IsOptional()
   @Type(() => Number)
@@ -47,31 +47,11 @@ export class ListarCartelasLojaDto {
   })
   origemParticipacao?: OrigemParticipacao;
 
-  @ApiPropertyOptional({
-    example: '0276145',
-    description:
-      'Número base do combo atual. Quando informado, a API navega a sequência a partir dele.',
-  })
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d+$/, {
-    message: 'cursorNumeroBase deve conter apenas dígitos',
-  })
-  cursorNumeroBase?: string;
-
-  @ApiPropertyOptional({
-    enum: DirecaoCartelaLoja,
-    example: DirecaoCartelaLoja.PROXIMO,
-    description: 'Direção da navegação na sequência determinística.',
-  })
-  @IsOptional()
-  @IsEnum(DirecaoCartelaLoja)
-  direcao?: DirecaoCartelaLoja;
 
   @ApiPropertyOptional({
     example: 12,
     description:
-      'Quantidade máxima de combos retornados por página (útil para renderizar a grade de opções). Se omitido, retorna 1.',
+      'Quantidade máxima de cartelas retornadas por página. Se omitido, retorna 5.',
   })
   @IsOptional()
   @Type(() => Number)

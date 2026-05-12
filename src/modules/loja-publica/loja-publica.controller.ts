@@ -37,21 +37,9 @@ export class LojaPublicaController {
   @Get('edicoes/:edicaoId/cartelas')
   @ApiOperation({
     summary:
-      'Navegar pelas cartelas unitárias disponíveis de uma edição (Público)',
+      'Listar cartelas disponíveis para seleção visual',
+    description: 'Retorna cartelas paginadas e filtradas por setor (indiceRange).',
   })
-  @ApiQuery({ name: 'quantidadeCartelas', required: false, type: Number })
-  @ApiQuery({
-    name: 'origemParticipacao',
-    required: false,
-    enum: OrigemParticipacao,
-  })
-  @ApiQuery({ name: 'cursorNumeroBase', required: false, type: String })
-  @ApiQuery({
-    name: 'direcao',
-    required: false,
-    enum: ['PROXIMO', 'ANTERIOR'],
-  })
-  @ApiQuery({ name: 'limit', required: false, type: Number, deprecated: true })
   listarCartelasDisponiveis(
     @Param('edicaoId', ParseUUIDPipe) edicaoId: string,
     @Query() filtros: ListarCartelasLojaDto,
