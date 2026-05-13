@@ -581,6 +581,9 @@ export class LojaPublicaService {
               ),
               valorCartelaFormatado: this.formatarMoeda(v.edicao.valorCartela),
               qtdNumerosCartela: v.edicao.qtdNumerosCartela,
+              manutencaoAtiva: v.edicao.manutencaoAtiva,
+              manutencaoMensagem: v.edicao.manutencaoMensagem,
+              vendasBloqueadas: v.edicao.manutencaoAtiva,
               opcoesCompra: this.mapearOpcoesCompraDaEdicao(
                 v.edicao.detalhes,
                 v.edicao.combos,

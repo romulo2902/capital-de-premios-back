@@ -24,6 +24,8 @@ export const VENDA_INCLUDE = {
       qtdNumerosCartela: true,
       status: true,
       imagemUrl: true,
+      manutencaoAtiva: true,
+      manutencaoMensagem: true,
     },
   },
   vendedor: {
