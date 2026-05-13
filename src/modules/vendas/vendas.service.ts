@@ -40,6 +40,7 @@ import {
 } from '../edicoes/edicoes-range.util';
 import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
 import { calcularQuantidadeCartelasDaVenda } from './vendas-quantidade.util';
+import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
 
 type DetalheVenda = Pick<
   EdicaoDetalhe,
@@ -82,6 +83,7 @@ export class VendasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
+    private readonly configuracaoComissaoService: ConfiguracaoComissaoService,
   ) {}
 
   // ─── CREATE ────────────────────────────────────────────
@@ -867,75 +869,85 @@ export class VendasService {
         select: { comissaoPercent: true },
       });
       if (distribuidor) {
-        const distPercent = Number(distribuidor.comissaoPercent);
-        if (distPercent > 0) {
-          const fatiaBrutaDistribuidor =
-            Number(venda.total) * (distPercent / 100);
-          let comissaoVendedor = 0;
+        // Busca configuração global (usada como fallback quando o percentual individual é 0)
+        const configGlobal =
+          await this.configuracaoComissaoService.obterConfiguracaoGlobal();
 
-          if (venda.vendedorId && venda.vendedor) {
-            const vendPercentDaFatia =
-              Number(venda.vendedor.comissaoPercent) || 0;
-            comissaoVendedor =
-              fatiaBrutaDistribuidor * (vendPercentDaFatia / 100);
+        const distPercentIndividual = Number(distribuidor.comissaoPercent);
+        const distPercent =
+          distPercentIndividual > 0
+            ? distPercentIndividual
+            : configGlobal.percentualDistribuidor;
 
-            if (comissaoVendedor > 0) {
-              await tx.comissao.create({
-                data: {
-                  vendedorId: venda.vendedorId,
-                  vendaId: venda.id,
-                  valor: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
-                  status: StatusComissao.PENDENTE,
-                },
-              });
+        const totalVenda = Number(venda.total);
 
-              await tx.vendedor.update({
-                where: { id: venda.vendedorId },
-                data: {
-                  saldo: {
-                    increment: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
-                  },
-                },
-              });
+        // ── Comissão do Vendedor ──────────────────────────────────────────
+        // Aplicada diretamente sobre o total da venda (percentual fixo e independente)
+        if (venda.vendedorId && venda.vendedor) {
+          const vendPercentIndividual =
+            Number(venda.vendedor.comissaoPercent) || 0;
+          const vendPercent =
+            vendPercentIndividual > 0
+              ? vendPercentIndividual
+              : configGlobal.percentualVendedor;
 
-              this.logger.log(
-                `Comissão Vendedor (R$ ${comissaoVendedor.toFixed(2)}) creditada -> ${venda.vendedorId}`,
-              );
-            }
-          }
+          const comissaoVendedor = totalVenda * (vendPercent / 100);
 
-          const comissaoLiquidaDistribuidor =
-            fatiaBrutaDistribuidor - comissaoVendedor;
-          if (comissaoLiquidaDistribuidor > 0) {
-            await tx.comissaoDistribuidor.create({
+          if (comissaoVendedor > 0) {
+            await tx.comissao.create({
               data: {
-                distribuidorId: venda.distribuidorId,
+                vendedorId: venda.vendedorId,
                 vendaId: venda.id,
-                valor: new Prisma.Decimal(
-                  comissaoLiquidaDistribuidor.toFixed(2),
-                ),
+                valor: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
                 status: StatusComissao.PENDENTE,
               },
             });
 
-            await tx.distribuidor.update({
-              where: { id: venda.distribuidorId },
+            await tx.vendedor.update({
+              where: { id: venda.vendedorId },
               data: {
                 saldo: {
-                  increment: new Prisma.Decimal(
-                    comissaoLiquidaDistribuidor.toFixed(2),
-                  ),
+                  increment: new Prisma.Decimal(comissaoVendedor.toFixed(2)),
                 },
               },
             });
 
             this.logger.log(
-              `Comissão Distribuidor Líquida (R$ ${comissaoLiquidaDistribuidor.toFixed(2)}) creditada -> ${venda.distribuidorId}`,
+              `Comissão Vendedor ${vendPercent}% (R$ ${comissaoVendedor.toFixed(2)}) creditada -> ${venda.vendedorId}`,
             );
           }
         }
+
+        // ── Comissão do Distribuidor ──────────────────────────────────────
+        // Aplicada diretamente sobre o total da venda (percentual fixo e independente)
+        const comissaoDistribuidor = totalVenda * (distPercent / 100);
+
+        if (comissaoDistribuidor > 0) {
+          await tx.comissaoDistribuidor.create({
+            data: {
+              distribuidorId: venda.distribuidorId,
+              vendaId: venda.id,
+              valor: new Prisma.Decimal(comissaoDistribuidor.toFixed(2)),
+              status: StatusComissao.PENDENTE,
+            },
+          });
+
+          await tx.distribuidor.update({
+            where: { id: venda.distribuidorId },
+            data: {
+              saldo: {
+                increment: new Prisma.Decimal(comissaoDistribuidor.toFixed(2)),
+              },
+            },
+          });
+
+          this.logger.log(
+            `Comissão Distribuidor ${distPercent}% (R$ ${comissaoDistribuidor.toFixed(2)}) creditada -> ${venda.distribuidorId}`,
+          );
+        }
       }
     }
+
 
     const vendaAtualizada = await tx.venda.update({
       where: { id: venda.id },

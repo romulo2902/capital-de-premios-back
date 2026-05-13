@@ -604,3 +604,12 @@ model ComissaoDistribuidorSena {
   distribuidor Distribuidor @relation(fields: [distribuidorId], references: [id])
   vendaSena    VendaSena    @relation(fields: [vendaSenaId], references: [id])
 }
+
+/// Configuração global de percentuais de comissão padrão.
+/// Tabela singleton — apenas uma linha com chave = "DEFAULT".
+model ConfiguracaoComissao {
+  chave                    String  @id @default("DEFAULT")
+  percentualDistribuidor   Decimal @default(0)
+  percentualVendedor       Decimal @default(0)
+  updatedAt                DateTime @updatedAt
+}
