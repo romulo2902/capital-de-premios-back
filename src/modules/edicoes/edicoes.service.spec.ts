@@ -67,6 +67,7 @@ describe('EdicoesService', () => {
   };
   const mockS3UploadService = {
     uploadImage: jest.fn(),
+    uploadImageFromBase64: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -184,7 +185,7 @@ describe('EdicoesService', () => {
     expect(result.data.imagemUrl).toBe(imagemUrl);
   });
 
-  it('create should upload imagem para o s3 quando arquivo for enviado', async () => {
+  it('create should upload imagem para o s3 via base64', async () => {
     const edicao = {
       id: 'edicao-1',
       numero: 125,
@@ -211,7 +212,7 @@ describe('EdicoesService', () => {
           tipoCartela: TipoCartela.DOZE_CHANCES,
           rangeInicio: BigInt(1000000),
           rangeFinal: BigInt(1999995),
-          quantidadeSetores: 12,
+          indiceRange: 1,
           createdAt: new Date('2026-03-20T10:00:00.000Z'),
           updatedAt: new Date('2026-03-20T10:00:00.000Z'),
         },
@@ -264,74 +265,47 @@ describe('EdicoesService', () => {
     mockPrisma.$transaction.mockImplementation(async (callback) =>
       callback(tx),
     );
-    mockS3UploadService.uploadImage
+    mockS3UploadService.uploadImageFromBase64
       .mockResolvedValueOnce(edicao.imagemUrl)
       .mockResolvedValueOnce(edicao.premios[0].imagemUrl);
 
-    const result = await service.create(
-      {
-        numero: 125,
-        dataSorteio: '2026-03-27T10:20',
-        dataEncerramento: '2026-03-27T09:59',
-        valorCartela: '10.00',
-        raspadinha: false,
-        detalhes: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            rangeInicio: '1000000',
-            rangeFinal: '1999995',
-            quantidadeSetores: 12,
-          },
-        ],
-        combos: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.UMA_CHANCE,
-            preco: '10.00',
-          },
-        ],
-        premios: [
-          {
-            descricao: '1º Prêmio - Moto 0km',
-            valor: '25000.00',
-          },
-        ],
-      },
+    const result = await service.create({
+      numero: 125,
+      dataSorteio: '2026-03-27T10:20',
+      dataEncerramento: '2026-03-27T09:59',
+      valorCartela: '10.00',
+      raspadinha: false,
+      imagemBase64: 'data:image/png;base64,Y2FwYQ==',
+      detalhes: [
+        {
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          rangeInicio: '1000000',
+          rangeFinal: '1999995',
+          quantidadeSetores: 12,
+        },
+      ],
+      combos: [
+        {
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          tipoCartela: TipoCartela.UMA_CHANCE,
+          preco: '10.00',
+        },
+      ],
+      premios: [
+        {
+          descricao: '1º Prêmio - Moto 0km',
+          valor: '25000.00',
+          imagemBase64: 'data:image/png;base64,bW90bw==',
+        },
+      ],
+    });
 
-      {
-        imagem: [
-          {
-            buffer: Buffer.from('imagem'),
-            mimetype: 'image/png',
-            originalname: 'capa.png',
-            fieldname: 'imagem',
-            size: 6,
-          },
-        ],
-        premioImagens: [
-          {
-            buffer: Buffer.from('premio'),
-            mimetype: 'image/png',
-            originalname: 'moto.png',
-            fieldname: 'premioImagens[1]',
-            size: 6,
-          },
-        ],
-      },
-    );
-
-    expect(mockS3UploadService.uploadImage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mimetype: 'image/png',
-        originalname: 'capa.png',
-      }),
+    expect(mockS3UploadService.uploadImageFromBase64).toHaveBeenCalledWith(
+      'data:image/png;base64,Y2FwYQ==',
       'edicoes/125',
     );
-    expect(mockS3UploadService.uploadImage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mimetype: 'image/png',
-        originalname: 'moto.png',
-      }),
+    expect(mockS3UploadService.uploadImageFromBase64).toHaveBeenCalledWith(
+      'data:image/png;base64,bW90bw==',
       'edicoes/125/premios/1',
     );
     expect(tx.edicao.create).toHaveBeenCalledWith(
@@ -354,139 +328,6 @@ describe('EdicoesService', () => {
     });
     expect(result.data.imagemUrl).toBe(edicao.imagemUrl);
     expect(result.data.premios[0].imagemUrl).toBe(edicao.premios[0].imagemUrl);
-  });
-
-  it('create should allow sparse prize images keyed by prize order', async () => {
-    const imagemUrl =
-      'https://bucket.s3.sa-east-1.amazonaws.com/edicoes/126/capa.png';
-    const premioUrl =
-      'https://bucket.s3.sa-east-1.amazonaws.com/edicoes/126/premios/3/terceiro.png';
-
-    const tx = {
-      edicao: {
-        create: jest.fn().mockResolvedValue({ id: 'edicao-2', numero: 126 }),
-        findUnique: jest.fn().mockResolvedValue(
-          criarEdicaoMock({
-            id: 'edicao-2',
-            numero: '126',
-            imagemUrl,
-          }),
-        ),
-      },
-      premio: {
-        findMany: jest.fn().mockResolvedValue([]),
-        create: jest.fn().mockResolvedValue({}),
-        update: jest.fn().mockResolvedValue({}),
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-      },
-      resultadoPremio: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-      },
-    };
-
-    mockPrisma.edicao.findFirst.mockResolvedValue(null);
-    mockPrisma.edicaoDetalhe.findMany.mockResolvedValue([]);
-    mockPrisma.$transaction.mockImplementation(async (callback) =>
-      callback(tx),
-    );
-    mockS3UploadService.uploadImage
-      .mockResolvedValueOnce(imagemUrl)
-      .mockResolvedValueOnce(premioUrl);
-
-    const result = await service.create(
-      {
-        numero: 126,
-        dataSorteio: '2026-03-27T10:20',
-        dataEncerramento: '2026-03-27T09:59',
-        valorCartela: '10.00',
-        raspadinha: false,
-        detalhes: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            rangeInicio: '1000000',
-            rangeFinal: '1999995',
-            quantidadeSetores: 12,
-          },
-        ],
-        combos: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.UMA_CHANCE,
-            preco: '10.00',
-          },
-        ],
-        premios: [
-          {
-            descricao: '1º Prêmio - Moto 0km',
-            valor: '25000.00',
-          },
-          {
-            descricao: '2º Prêmio - Smart TV',
-            valor: '5000.00',
-          },
-          {
-            descricao: '3º Prêmio - Pix',
-            valor: '1000.00',
-          },
-        ],
-      },
-      {
-        imagem: [
-          {
-            buffer: Buffer.from('imagem'),
-            mimetype: 'image/png',
-            originalname: 'capa.png',
-            fieldname: 'imagem',
-            size: 6,
-          },
-        ],
-        premioImagens: [
-          {
-            buffer: Buffer.from('premio'),
-            mimetype: 'image/png',
-            originalname: 'terceiro.png',
-            fieldname: 'premioImagens[3]',
-            size: 6,
-          },
-        ],
-      },
-    );
-
-    expect(mockS3UploadService.uploadImage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mimetype: 'image/png',
-        originalname: 'terceiro.png',
-      }),
-      'edicoes/126/premios/3',
-    );
-    expect(tx.premio.create).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        data: expect.objectContaining({
-          ordem: 1,
-          imagemUrl: null,
-        }),
-      }),
-    );
-    expect(tx.premio.create).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        data: expect.objectContaining({
-          ordem: 2,
-          imagemUrl: null,
-        }),
-      }),
-    );
-    expect(tx.premio.create).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        data: expect.objectContaining({
-          ordem: 3,
-          imagemUrl: premioUrl,
-        }),
-      }),
-    );
-    expect(result.data.premios[2].imagemUrl).toBe(premioUrl);
   });
 
   function criarEdicaoMock(

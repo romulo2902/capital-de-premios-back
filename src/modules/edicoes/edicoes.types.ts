@@ -18,9 +18,3 @@ export interface DetalheRangeNormalizado {
   preco?: string;
   ordemConfiguracao?: number;
 }
-
-export interface ArquivoImagemUpload extends UploadFile {
-  fieldname: string;
-}
-
-export type ArquivosEdicaoUpload = ArquivoImagemUpload[];

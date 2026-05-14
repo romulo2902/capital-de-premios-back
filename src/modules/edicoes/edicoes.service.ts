@@ -45,8 +45,6 @@ import {
 } from './edicoes-range.util';
 import { serializarEdicao as serializarEdicaoUtil } from './edicoes-serialization.util';
 import type {
-  ArquivoImagemUpload,
-  ArquivosEdicaoUpload,
   DetalheRangeNormalizado,
   EdicaoComRelacoes,
 } from './edicoes.types';
@@ -64,10 +62,6 @@ interface PremioDetalhadoNormalizado {
   imagemUrl: string | null;
 }
 
-const PREMIO_IMAGEM_INDEXED_FIELDNAME_REGEX =
-  /^premioImagens(?:\[(\d+)\]|[._](\d+))$/;
-const PREMIO_IMAGEM_LEGACY_FIELDNAME_REGEX = /^premioImagens(?:\[\])?$/;
-
 @Injectable()
 export class EdicoesService {
   private readonly logger = new Logger(EdicoesService.name);
@@ -78,7 +72,7 @@ export class EdicoesService {
     private readonly s3UploadService: S3UploadService,
   ) {}
 
-  async create(dto: CreateEdicaoDto, arquivos?: ArquivosEdicaoUpload) {
+  async create(dto: CreateEdicaoDto) {
     const detalhes = this.normalizarDetalhes(dto.detalhes);
     const combos = this.normalizarCombos(dto.combos);
     this.validarDetalhesInternos(detalhes);
@@ -101,13 +95,11 @@ export class EdicoesService {
 
     const { rangeInicio, rangeFinal } = this.calcularResumoDosRanges(detalhes);
     const imagemUrl = await this.resolverImagemUrl(
-      this.extrairArquivoPorCampo(arquivos, 'imagem'),
       `edicoes/${dto.numero}`,
       dto.imagemBase64,
     );
     const premiosDetalhados = await this.resolverPremiosDetalhados(
       dto.premios,
-      arquivos,
       `edicoes/${dto.numero}/premios`,
     );
 
@@ -238,7 +230,6 @@ export class EdicoesService {
   async update(
     id: string,
     dto: UpdateEdicaoDto,
-    arquivos?: ArquivosEdicaoUpload,
   ) {
     const atual = await this.obterEdicaoOuFalhar(id);
 
@@ -291,27 +282,14 @@ export class EdicoesService {
         ? this.normalizarValorCartela(dto.valorCartela)
         : undefined;
     const imagemUrl = await this.resolverImagemUrl(
-      this.extrairArquivoPorCampo(arquivos, 'imagem'),
       `edicoes/${dto.numero ?? atual.numero}`,
       dto.imagemBase64,
     );
-    const possuiArquivosDePremios = (arquivos ?? []).some(
-      (a) =>
-        PREMIO_IMAGEM_INDEXED_FIELDNAME_REGEX.test(a.fieldname) ||
-        PREMIO_IMAGEM_LEGACY_FIELDNAME_REGEX.test(a.fieldname) ||
-        a.fieldname.startsWith('premioImagem_'),
-    );
 
     const premiosDetalhados =
-      dto.premios || possuiArquivosDePremios
+      dto.premios && dto.premios.length > 0
         ? await this.resolverPremiosDetalhados(
-            dto.premios ??
-              atual.premios.map((p) => ({
-                id: p.id,
-                descricao: p.descricao,
-                valor: p.valor.toString(),
-              })),
-            arquivos,
+            dto.premios,
             `edicoes/${dto.numero ?? atual.numero}/premios`,
             atual.premios.map((premio) => ({
               id: premio.id,
@@ -399,7 +377,6 @@ export class EdicoesService {
   }
 
   private async resolverImagemUrl(
-    imagem: ArquivoImagemUpload | undefined,
     folder: string,
     base64?: string,
   ): Promise<string | undefined> {
@@ -408,11 +385,7 @@ export class EdicoesService {
       return url ?? undefined;
     }
 
-    if (!imagem) {
-      return undefined;
-    }
-
-    return this.s3UploadService.uploadImage(imagem, folder);
+    return undefined;
   }
 
   private normalizarMensagemManutencao(message?: string): string | null {
@@ -998,58 +971,29 @@ export class EdicoesService {
 
   private async resolverPremiosDetalhados(
     premiosPayload: CreateEdicaoPremioDto[],
-    arquivos: ArquivosEdicaoUpload | undefined,
     folder: string,
     premiosExistentes: Array<{ id: string; imagemUrl: string | null }> = [],
   ): Promise<PremioDetalhadoNormalizado[]> {
-    const { keyed, legacy, all } = this.extrairArquivosDePremios(arquivos);
-
     const premiosNormalizados: PremioDetalhadoNormalizado[] = [];
 
     for (let index = 0; index < premiosPayload.length; index++) {
       const premio = premiosPayload[index];
       const ordem = index + 1;
 
-      let arquivoParaUpload: ArquivoImagemUpload | undefined;
       let imagemUrl: string | null = null;
 
-      // 1. Prioridade Máxima: imagemBase64 direta no objeto
+      // 1. Prioridade: imagemBase64 direta no objeto
       if (premio.imagemBase64) {
         imagemUrl = await this.s3UploadService.uploadImageFromBase64(
           premio.imagemBase64,
           `${folder}/${ordem}`,
         );
-      }
-
-      // 2. Segunda opção: imagemKey explícito (multipart)
-      if (!imagemUrl && premio.imagemKey) {
-        arquivoParaUpload = all.get(premio.imagemKey);
-      }
-
-      // 3. Terceira opção: ID do prêmio no fieldname (ex: premioImagem_UUID)
-      if (!imagemUrl && !arquivoParaUpload && premio.id) {
-        arquivoParaUpload = all.get(`premioImagem_${premio.id}`);
-      }
-
-      // 4. Quarta opção: mapeamento por índice [N] (ex: premioImagens[1])
-      if (!imagemUrl && !arquivoParaUpload) {
-        arquivoParaUpload = keyed.get(ordem);
-      }
-
-      // 5. Quinta opção: mapeamento legado sequencial [] (ex: premioImagens[])
-      if (!imagemUrl && !arquivoParaUpload && legacy.length > 0) {
-        arquivoParaUpload = legacy[index];
-      }
-
-      if (!imagemUrl && arquivoParaUpload) {
-        imagemUrl = await this.s3UploadService.uploadImage(
-          arquivoParaUpload,
-          `${folder}/${ordem}`,
-        );
-      } else if (!imagemUrl && premio.id) {
+      } else if (premio.id) {
+        // Manter imagem existente se o prêmio tem ID e não enviou nova imagem
         const existente = premiosExistentes.find((p) => p.id === premio.id);
         imagemUrl = existente?.imagemUrl ?? null;
       } else {
+        // Se for prêmio novo sem imagem, tenta pegar por índice do array de URLs existentes (fallback legado)
         imagemUrl = premiosExistentes[index]?.imagemUrl ?? null;
       }
 
@@ -1137,60 +1081,6 @@ export class EdicoesService {
     comparado: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
   ): boolean {
     return possuiSobreposicaoUtil(atual, comparado);
-  }
-
-  private extrairArquivoPorCampo(
-    arquivos: ArquivosEdicaoUpload | undefined,
-    fieldname: string,
-  ): ArquivoImagemUpload | undefined {
-    return arquivos?.find((arquivo) => arquivo.fieldname === fieldname);
-  }
-
-  private extrairArquivosDePremios(arquivos: ArquivosEdicaoUpload | undefined): {
-    keyed: Map<number, ArquivoImagemUpload>;
-    legacy: ArquivoImagemUpload[];
-    all: Map<string, ArquivoImagemUpload>;
-  } {
-    const keyed = new Map<number, ArquivoImagemUpload>();
-    const legacy: ArquivoImagemUpload[] = [];
-    const all = new Map<string, ArquivoImagemUpload>();
-
-    for (const arquivo of arquivos ?? []) {
-      all.set(arquivo.fieldname, arquivo);
-
-      const indexedField = arquivo.fieldname.match(
-        PREMIO_IMAGEM_INDEXED_FIELDNAME_REGEX,
-      );
-
-      if (indexedField) {
-        const ordem = Number(indexedField[1] ?? indexedField[2] ?? '0');
-
-        if (!Number.isInteger(ordem) || ordem <= 0) {
-          throw new BadRequestException(
-            `Campo de imagem de prêmio inválido: ${arquivo.fieldname}`,
-          );
-        }
-
-        if (keyed.has(ordem)) {
-          throw new BadRequestException(
-            `Há mais de uma imagem enviada para o prêmio na ordem ${ordem}`,
-          );
-        }
-
-        keyed.set(ordem, arquivo);
-        continue;
-      }
-
-      if (PREMIO_IMAGEM_LEGACY_FIELDNAME_REGEX.test(arquivo.fieldname)) {
-        legacy.push(arquivo);
-      }
-    }
-
-    return {
-      keyed,
-      legacy,
-      all,
-    };
   }
 
   private serializarEdicao(edicao: EdicaoComRelacoes) {

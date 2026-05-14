@@ -33,19 +33,10 @@ export class CreateEdicaoPremioDto {
   valor: string;
 
   @ApiPropertyOptional({
-    example: 'premio-1',
-    description:
-      'Chave para associar o arquivo de imagem enviado via multipart/form-data. Se informado, a API busca um arquivo com fieldname igual a este valor (ex: `premio-1`). Prevalece sobre o mapeamento por ordem.',
-  })
-  @IsOptional()
-  @IsString()
-  imagemKey?: string;
-
-  @ApiPropertyOptional({
     example:
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     description:
-      'Conteúdo da imagem em base64 (incluindo o prefixo data:image). Se enviado, a API faz o upload para o S3 e ignora os campos de arquivos multipart para este prêmio.',
+      'Conteúdo da imagem em base64 (incluindo o prefixo data:image). Se enviado, a API faz o upload para o S3.',
   })
   @IsOptional()
   @IsString()

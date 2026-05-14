@@ -8,30 +8,20 @@ import {
   Patch,
   Post,
   Query,
-  UploadedFiles,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiBody,
-  ApiConsumes,
   ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { EdicoesService } from './edicoes.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CreateEdicaoDto } from './dto/create-edicao.dto';
 import { UpdateEdicaoDto } from './dto/update-edicao.dto';
-import {
-  CreateEdicaoUploadDto,
-  UpdateEdicaoUploadDto,
-} from './dto/edicao-upload.dto';
-import type { ArquivosEdicaoUpload } from './edicoes.types';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @ApiTags('Admin / Edições')
@@ -46,16 +36,10 @@ export class EdicoesController {
   @ApiOperation({
     summary: 'Criar edição com matriz, combos e prêmios detalhados (ADMIN)',
     description:
-      'Cria uma nova edição em RASCUNHO. Para os campos de data no Swagger, use o formato `YYYY-MM-DDTHH:mm`, por exemplo `2026-04-28T15:30`. Para imagens de prêmio, envie os arquivos com o nome do campo por ordem, como `premioImagens[1]` e `premioImagens[3]`.',
+      'Cria uma nova edição em RASCUNHO. As imagens devem ser enviadas via Base64 no JSON (`imagemBase64` na raiz para a edição e dentro de cada objeto no array `premios`).',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ type: CreateEdicaoUploadDto })
-  @UseInterceptors(AnyFilesInterceptor())
-  create(
-    @Body() dto: CreateEdicaoDto,
-    @UploadedFiles() arquivos?: ArquivosEdicaoUpload,
-  ) {
-    return this.edicoesService.create(dto, arquivos);
+  create(@Body() dto: CreateEdicaoDto) {
+    return this.edicoesService.create(dto);
   }
 
   @Get()
@@ -85,17 +69,13 @@ export class EdicoesController {
   @ApiOperation({
     summary: 'Atualizar edição, combos e prêmios detalhados (ADMIN)',
     description:
-      'Atualiza a edição e seus relacionamentos. Para os campos de data no Swagger, use o formato `YYYY-MM-DDTHH:mm`, por exemplo `2026-04-28T15:30`. As imagens dos prêmios também podem ser enviadas por campo nomeado, como `premioImagens[2]`.',
+      'Atualiza a edição e seus relacionamentos. As imagens podem ser atualizadas via Base64. Prêmios com `id` são atualizados, sem `id` são criados, e prêmios omitidos são removidos.',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ type: UpdateEdicaoUploadDto })
-  @UseInterceptors(AnyFilesInterceptor())
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEdicaoDto,
-    @UploadedFiles() arquivos?: ArquivosEdicaoUpload,
   ) {
-    return this.edicoesService.update(id, dto, arquivos);
+    return this.edicoesService.update(id, dto);
   }
 
   @Patch(':id/ativar')
