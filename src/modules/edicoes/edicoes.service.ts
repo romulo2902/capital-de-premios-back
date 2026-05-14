@@ -58,10 +58,15 @@ interface ComboEdicaoNormalizado {
 }
 
 interface PremioDetalhadoNormalizado {
+  id?: string;
   descricao: string;
   valor: string;
   imagemUrl: string | null;
 }
+
+const PREMIO_IMAGEM_INDEXED_FIELDNAME_REGEX =
+  /^premioImagens(?:\[(\d+)\]|[._](\d+))$/;
+const PREMIO_IMAGEM_LEGACY_FIELDNAME_REGEX = /^premioImagens(?:\[\])?$/;
 
 @Injectable()
 export class EdicoesService {
@@ -96,12 +101,13 @@ export class EdicoesService {
 
     const { rangeInicio, rangeFinal } = this.calcularResumoDosRanges(detalhes);
     const imagemUrl = await this.resolverImagemUrl(
-      arquivos?.imagem?.[0],
+      this.extrairArquivoPorCampo(arquivos, 'imagem'),
       `edicoes/${dto.numero}`,
+      dto.imagemBase64,
     );
     const premiosDetalhados = await this.resolverPremiosDetalhados(
       dto.premios,
-      arquivos?.premioImagens,
+      arquivos,
       `edicoes/${dto.numero}/premios`,
     );
 
@@ -285,17 +291,34 @@ export class EdicoesService {
         ? this.normalizarValorCartela(dto.valorCartela)
         : undefined;
     const imagemUrl = await this.resolverImagemUrl(
-      arquivos?.imagem?.[0],
+      this.extrairArquivoPorCampo(arquivos, 'imagem'),
       `edicoes/${dto.numero ?? atual.numero}`,
+      dto.imagemBase64,
     );
-    const premiosDetalhados = dto.premios
-      ? await this.resolverPremiosDetalhados(
-          dto.premios,
-          arquivos?.premioImagens,
-          `edicoes/${dto.numero ?? atual.numero}/premios`,
-          atual.premios.map((premio) => premio.imagemUrl ?? null),
-        )
-      : undefined;
+    const possuiArquivosDePremios = (arquivos ?? []).some(
+      (a) =>
+        PREMIO_IMAGEM_INDEXED_FIELDNAME_REGEX.test(a.fieldname) ||
+        PREMIO_IMAGEM_LEGACY_FIELDNAME_REGEX.test(a.fieldname) ||
+        a.fieldname.startsWith('premioImagem_'),
+    );
+
+    const premiosDetalhados =
+      dto.premios || possuiArquivosDePremios
+        ? await this.resolverPremiosDetalhados(
+            dto.premios ??
+              atual.premios.map((p) => ({
+                id: p.id,
+                descricao: p.descricao,
+                valor: p.valor.toString(),
+              })),
+            arquivos,
+            `edicoes/${dto.numero ?? atual.numero}/premios`,
+            atual.premios.map((premio) => ({
+              id: premio.id,
+              imagemUrl: premio.imagemUrl ?? null,
+            })),
+          )
+        : undefined;
 
     const item = await this.prisma.$transaction(async (tx) => {
       const data: Prisma.EdicaoUpdateInput = {
@@ -378,7 +401,13 @@ export class EdicoesService {
   private async resolverImagemUrl(
     imagem: ArquivoImagemUpload | undefined,
     folder: string,
+    base64?: string,
   ): Promise<string | undefined> {
+    if (base64) {
+      const url = await this.s3UploadService.uploadImageFromBase64(base64, folder);
+      return url ?? undefined;
+    }
+
     if (!imagem) {
       return undefined;
     }
@@ -969,29 +998,70 @@ export class EdicoesService {
 
   private async resolverPremiosDetalhados(
     premiosPayload: CreateEdicaoPremioDto[],
-    premioImagens: ArquivoImagemUpload[] | undefined,
+    arquivos: ArquivosEdicaoUpload | undefined,
     folder: string,
-    imagemUrlsExistentes: Array<string | null> = [],
+    premiosExistentes: Array<{ id: string; imagemUrl: string | null }> = [],
   ): Promise<PremioDetalhadoNormalizado[]> {
-    if (premioImagens && premioImagens.length > premiosPayload.length) {
-      throw new BadRequestException(
-        'A quantidade de imagens dos prêmios não pode ser maior que a quantidade de prêmios enviados',
-      );
+    const { keyed, legacy, all } = this.extrairArquivosDePremios(arquivos);
+
+    const premiosNormalizados: PremioDetalhadoNormalizado[] = [];
+
+    for (let index = 0; index < premiosPayload.length; index++) {
+      const premio = premiosPayload[index];
+      const ordem = index + 1;
+
+      let arquivoParaUpload: ArquivoImagemUpload | undefined;
+      let imagemUrl: string | null = null;
+
+      // 1. Prioridade Máxima: imagemBase64 direta no objeto
+      if (premio.imagemBase64) {
+        imagemUrl = await this.s3UploadService.uploadImageFromBase64(
+          premio.imagemBase64,
+          `${folder}/${ordem}`,
+        );
+      }
+
+      // 2. Segunda opção: imagemKey explícito (multipart)
+      if (!imagemUrl && premio.imagemKey) {
+        arquivoParaUpload = all.get(premio.imagemKey);
+      }
+
+      // 3. Terceira opção: ID do prêmio no fieldname (ex: premioImagem_UUID)
+      if (!imagemUrl && !arquivoParaUpload && premio.id) {
+        arquivoParaUpload = all.get(`premioImagem_${premio.id}`);
+      }
+
+      // 4. Quarta opção: mapeamento por índice [N] (ex: premioImagens[1])
+      if (!imagemUrl && !arquivoParaUpload) {
+        arquivoParaUpload = keyed.get(ordem);
+      }
+
+      // 5. Quinta opção: mapeamento legado sequencial [] (ex: premioImagens[])
+      if (!imagemUrl && !arquivoParaUpload && legacy.length > 0) {
+        arquivoParaUpload = legacy[index];
+      }
+
+      if (!imagemUrl && arquivoParaUpload) {
+        imagemUrl = await this.s3UploadService.uploadImage(
+          arquivoParaUpload,
+          `${folder}/${ordem}`,
+        );
+      } else if (!imagemUrl && premio.id) {
+        const existente = premiosExistentes.find((p) => p.id === premio.id);
+        imagemUrl = existente?.imagemUrl ?? null;
+      } else {
+        imagemUrl = premiosExistentes[index]?.imagemUrl ?? null;
+      }
+
+      premiosNormalizados.push({
+        id: premio.id,
+        descricao: premio.descricao,
+        valor: premio.valor,
+        imagemUrl,
+      });
     }
 
-    const imagemUrls = premioImagens
-      ? await Promise.all(
-          premioImagens.map((imagem, index) =>
-            this.s3UploadService.uploadImage(imagem, `${folder}/${index + 1}`),
-          ),
-        )
-      : [];
-
-    return premiosPayload.map((premio, index) => ({
-      descricao: premio.descricao,
-      valor: premio.valor,
-      imagemUrl: imagemUrls[index] ?? imagemUrlsExistentes[index] ?? null,
-    }));
+    return premiosNormalizados;
   }
 
   private async sincronizarPremiosDetalhados(
@@ -1001,22 +1071,28 @@ export class EdicoesService {
   ): Promise<void> {
     const premiosExistentes = await tx.premio.findMany({
       where: { edicaoId },
-      orderBy: { ordem: 'asc' },
     });
 
-    const excedentes = premiosExistentes.slice(premiosPayload.length);
+    const idsNoPayload = premiosPayload
+      .map((p) => p.id)
+      .filter((id): id is string => !!id);
+    
+    // Prêmios que não estão no payload devem ser removidos
+    const premiosParaRemover = premiosExistentes.filter(
+      (p) => !idsNoPayload.includes(p.id)
+    );
 
-    if (excedentes.length > 0) {
-      if (excedentes.some((premio) => premio.ganhadorBilheteId)) {
+    if (premiosParaRemover.length > 0) {
+      if (premiosParaRemover.some((premio) => premio.ganhadorBilheteId)) {
         throw new BadRequestException(
-          'Não é possível reduzir a quantidade de prêmios quando já existem ganhadores vinculados',
+          'Não é possível remover prêmios que já possuem ganhadores vinculados',
         );
       }
 
       await tx.resultadoPremio.deleteMany({
         where: {
           premioId: {
-            in: excedentes.map((premio) => premio.id),
+            in: premiosParaRemover.map((p) => p.id),
           },
         },
       });
@@ -1024,12 +1100,13 @@ export class EdicoesService {
       await tx.premio.deleteMany({
         where: {
           id: {
-            in: excedentes.map((premio) => premio.id),
+            in: premiosParaRemover.map((p) => p.id),
           },
         },
       });
     }
 
+    // Upsert dos prêmios do payload
     for (const [index, premioPayload] of premiosPayload.entries()) {
       const ordem = index + 1;
       const data = {
@@ -1038,22 +1115,20 @@ export class EdicoesService {
         valor: this.normalizarValorPremio(premioPayload.valor),
         imagemUrl: premioPayload.imagemUrl,
       };
-      const premioExistente = premiosExistentes[index];
 
-      if (premioExistente) {
+      if (premioPayload.id) {
         await tx.premio.update({
-          where: { id: premioExistente.id },
+          where: { id: premioPayload.id },
           data,
         });
-        continue;
+      } else {
+        await tx.premio.create({
+          data: {
+            edicaoId,
+            ...data,
+          },
+        });
       }
-
-      await tx.premio.create({
-        data: {
-          edicaoId,
-          ...data,
-        },
-      });
     }
   }
 
@@ -1062,6 +1137,60 @@ export class EdicoesService {
     comparado: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
   ): boolean {
     return possuiSobreposicaoUtil(atual, comparado);
+  }
+
+  private extrairArquivoPorCampo(
+    arquivos: ArquivosEdicaoUpload | undefined,
+    fieldname: string,
+  ): ArquivoImagemUpload | undefined {
+    return arquivos?.find((arquivo) => arquivo.fieldname === fieldname);
+  }
+
+  private extrairArquivosDePremios(arquivos: ArquivosEdicaoUpload | undefined): {
+    keyed: Map<number, ArquivoImagemUpload>;
+    legacy: ArquivoImagemUpload[];
+    all: Map<string, ArquivoImagemUpload>;
+  } {
+    const keyed = new Map<number, ArquivoImagemUpload>();
+    const legacy: ArquivoImagemUpload[] = [];
+    const all = new Map<string, ArquivoImagemUpload>();
+
+    for (const arquivo of arquivos ?? []) {
+      all.set(arquivo.fieldname, arquivo);
+
+      const indexedField = arquivo.fieldname.match(
+        PREMIO_IMAGEM_INDEXED_FIELDNAME_REGEX,
+      );
+
+      if (indexedField) {
+        const ordem = Number(indexedField[1] ?? indexedField[2] ?? '0');
+
+        if (!Number.isInteger(ordem) || ordem <= 0) {
+          throw new BadRequestException(
+            `Campo de imagem de prêmio inválido: ${arquivo.fieldname}`,
+          );
+        }
+
+        if (keyed.has(ordem)) {
+          throw new BadRequestException(
+            `Há mais de uma imagem enviada para o prêmio na ordem ${ordem}`,
+          );
+        }
+
+        keyed.set(ordem, arquivo);
+        continue;
+      }
+
+      if (PREMIO_IMAGEM_LEGACY_FIELDNAME_REGEX.test(arquivo.fieldname)) {
+        legacy.push(arquivo);
+      }
+    }
+
+    return {
+      keyed,
+      legacy,
+      all,
+    };
   }
 
   private serializarEdicao(edicao: EdicaoComRelacoes) {

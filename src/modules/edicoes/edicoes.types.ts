@@ -19,9 +19,8 @@ export interface DetalheRangeNormalizado {
   ordemConfiguracao?: number;
 }
 
-export interface ArquivoImagemUpload extends UploadFile {}
-
-export interface ArquivosEdicaoUpload {
-  imagem?: ArquivoImagemUpload[];
-  premioImagens?: ArquivoImagemUpload[];
+export interface ArquivoImagemUpload extends UploadFile {
+  fieldname: string;
 }
+
+export type ArquivosEdicaoUpload = ArquivoImagemUpload[];

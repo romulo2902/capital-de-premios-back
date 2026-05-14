@@ -206,4 +206,13 @@ export class CreateEdicaoDto {
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   premios: CreateEdicaoPremioDto[];
+
+  @ApiPropertyOptional({
+    example: 'data:image/png;base64,...',
+    description:
+      'Conteúdo da imagem principal da edição em base64. Se enviado, prevalece sobre o arquivo multipart.',
+  })
+  @IsOptional()
+  @IsString()
+  imagemBase64?: string;
 }

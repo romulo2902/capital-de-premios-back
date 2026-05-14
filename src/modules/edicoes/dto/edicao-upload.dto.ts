@@ -29,9 +29,9 @@ export class CreateEdicaoUploadDto extends OmitType(CreateEdicaoDto, [
 
   @ApiProperty({
     example:
-      '[{"descricao":"1º Prêmio - Moto 0km","valor":"25000.00"},{"descricao":"2º Prêmio - Smart TV","valor":"3500.00"}]',
+      '[{"descricao":"1º Prêmio - Moto 0km","valor":"25000.00","imagemKey":"img-1"},{"id":"uuid-existente","descricao":"2º Prêmio - Smart TV","valor":"3500.00"}]',
     description:
-      'JSON serializado com o array de prêmios da edição, na ordem do sorteio. Quando `premioImagens` for enviado, os arquivos são associados a este array pela mesma ordem.',
+      'JSON serializado com o array de prêmios. Para prêmios existentes no PATCH, envie o `id`. Para associar imagens, você pode usar `imagemKey` no objeto do prêmio e enviar o arquivo com esse mesmo nome de campo, ou usar os mapeamentos por índice `premioImagens[1]`.',
   })
   premios: string;
 
@@ -50,7 +50,7 @@ export class CreateEdicaoUploadDto extends OmitType(CreateEdicaoDto, [
       format: 'binary',
     },
     description:
-      'Imagens dos prêmios enviadas para a S3 na mesma ordem do array `premios`. A URL pública gerada é salva em `Premio.imagemUrl`.',
+      'Imagens dos prêmios enviadas via `multipart/form-data`. Suporta campos nomeados por `imagemKey` (definido no JSON de prêmios) ou por ordem, como `premioImagens[1]`. A URL pública gerada é salva em `Premio.imagemUrl`.',
   })
   premioImagens?: unknown[];
 }

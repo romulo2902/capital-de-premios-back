@@ -45,6 +45,43 @@ export class S3UploadService {
     });
   }
 
+  async uploadImageFromBase64(
+    base64: string,
+    folder: string,
+  ): Promise<string | null> {
+    if (!base64) {
+      return null;
+    }
+
+    const match = base64.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!match) {
+      // Se não tiver o prefixo data:image, tenta tratar como base64 puro
+      // mas precisamos do mimetype. Vamos assumir que se não tem prefixo, 
+      // pode ser um erro ou formato não suportado se não soubermos o tipo.
+      throw new BadRequestException(
+        'Formato base64 inválido. Use o padrão data:image/png;base64,...',
+      );
+    }
+
+    const mimetype = match[1];
+    const buffer = Buffer.from(match[2], 'base64');
+
+    const normalizedFile = this.validateImageFile({
+      buffer,
+      mimetype,
+      size: buffer.length,
+    });
+
+    const extension = IMAGE_EXTENSIONS[normalizedFile.mimetype];
+    const key = `${this.normalizeFolder(folder)}/${randomUUID()}.${extension}`;
+
+    return this.uploadPublicObject({
+      body: normalizedFile.buffer,
+      contentType: normalizedFile.mimetype,
+      key,
+    });
+  }
+
   async uploadPublicObject(params: {
     body: Buffer | Uint8Array;
     contentType: string;
