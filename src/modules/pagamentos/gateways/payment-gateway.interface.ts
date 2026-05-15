@@ -21,6 +21,12 @@ export interface CriarCobrancaInput {
   /** Nome do pagador */
   nomePagador: string;
 
+  /** E-mail do pagador, quando informado */
+  emailPagador?: string;
+
+  /** Telefone do pagador, preferencialmente com DDD */
+  telefonePagador?: string;
+
   /** Tempo de expiração em segundos (default: 1800 = 30 min) */
   expiracaoSegundos?: number;
 

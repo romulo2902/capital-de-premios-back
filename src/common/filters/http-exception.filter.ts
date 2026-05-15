@@ -78,6 +78,33 @@ export class HttpExceptionFilter implements ExceptionFilter {
       };
     }
 
+    if (
+      exception &&
+      typeof exception === 'object' &&
+      'type' in exception &&
+      exception.type === 'entity.too.large'
+    ) {
+      return {
+        status: HttpStatus.PAYLOAD_TOO_LARGE,
+        message: 'O payload enviado excede o limite máximo permitido',
+      };
+    }
+
+    if (
+      exception &&
+      typeof exception === 'object' &&
+      'status' in exception &&
+      typeof exception.status === 'number'
+    ) {
+      return {
+        status: exception.status,
+        message:
+          'message' in exception && typeof exception.message === 'string'
+            ? exception.message
+            : 'Erro na requisição',
+      };
+    }
+
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
       message: 'Erro interno do servidor',

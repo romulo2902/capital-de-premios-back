@@ -4,6 +4,7 @@ import { BadRequestException } from '@nestjs/common';
 import { PaymentGatewayFactory } from './payment-gateway.factory';
 import { PagBankPixGateway } from './pagbank-pix.gateway';
 import { PagBankCartaoGateway } from './pagbank-cartao.gateway';
+import { MockPixGateway } from './mock-pix.gateway';
 import { ConfigService } from '@nestjs/config';
 
 describe('PaymentGateway', () => {
@@ -19,7 +20,26 @@ describe('PaymentGateway', () => {
         providers: [
           PaymentGatewayFactory,
           {
+            provide: ConfigService,
+            useValue: {
+              get: jest.fn().mockImplementation((key: string) => {
+                const config: Record<string, string> = {
+                  MOCK_PIX_AUTO_APPROVE: 'false',
+                };
+                return config[key];
+              }),
+            },
+          },
+          {
             provide: PagBankPixGateway,
+            useValue: {
+              criarCobranca: jest.fn(),
+              consultarCobranca: jest.fn(),
+              cancelarCobranca: jest.fn(),
+            },
+          },
+          {
+            provide: MockPixGateway,
             useValue: {
               criarCobranca: jest.fn(),
               consultarCobranca: jest.fn(),

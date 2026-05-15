@@ -50,10 +50,41 @@ interface PagBankCharge {
 
 interface PagBankOrderResponse {
   id: string;
-  charges: PagBankCharge[];
+  reference_id: string;
+  charges?: PagBankCharge[];
   qr_codes?: PagBankQrCode[];
   [key: string]: unknown;
 }
+
+type PagBankOrderRequest = {
+  reference_id: string;
+  customer: {
+    name: string;
+    email?: string;
+    tax_id: string;
+    phones?: Array<{
+      country: string;
+      area: string;
+      number: string;
+      type: 'MOBILE';
+    }>;
+  };
+  items: Array<{
+    reference_id: string;
+    name: string;
+    quantity: number;
+    unit_amount: number;
+  }>;
+  qr_codes: Array<{
+    amount: { value: number };
+    expiration_date?: string;
+  }>;
+  notification_urls?: string[];
+};
+
+type PagBankCustomerPhone = NonNullable<
+  PagBankOrderRequest['customer']['phones']
+>[number];
 
 @Injectable()
 export class PagBankPixGateway implements PaymentGateway {
@@ -65,8 +96,6 @@ export class PagBankPixGateway implements PaymentGateway {
   private readonly apiUrl: string;
   private readonly clientId: string;
   private readonly clientSecret: string;
-  private readonly pixKey: string;
-
   constructor(private readonly config: ConfigService) {
     this.apiUrl = this.config.get<string>(
       'PAGBANK_API_URL',
@@ -74,7 +103,6 @@ export class PagBankPixGateway implements PaymentGateway {
     );
     this.clientId = this.config.get<string>('PAGBANK_CLIENT_ID', '');
     this.clientSecret = this.config.get<string>('PAGBANK_CLIENT_SECRET', '');
-    this.pixKey = this.config.get<string>('PAGBANK_PIX_KEY', '');
   }
 
   private get directToken(): string | undefined {
@@ -83,21 +111,23 @@ export class PagBankPixGateway implements PaymentGateway {
 
   async criarCobranca(input: CriarCobrancaInput): Promise<CriarCobrancaOutput> {
     const token = await this.obterToken();
-    const expiracaoMinutos = Math.ceil(
-      (input.expiracaoSegundos ?? 1800) / 60,
-    );
+    const expiracaoMinutos = Math.ceil((input.expiracaoSegundos ?? 1800) / 60);
     const expiracao = new Date(
       Date.now() + (input.expiracaoSegundos ?? 1800) * 1000,
     ).toISOString();
 
-    const body = {
+    const telefone = this.normalizarTelefone(input.telefonePagador);
+    const body: PagBankOrderRequest = {
       reference_id: input.vendaId,
       customer: {
         name: input.nomePagador,
+        ...(input.emailPagador ? { email: input.emailPagador } : {}),
         tax_id: input.cpfPagador.replace(/\D/g, ''),
+        ...(telefone ? { phones: [telefone] } : {}),
       },
       items: [
         {
+          reference_id: input.vendaId,
           name: input.descricao,
           quantity: 1,
           unit_amount: input.valorCentavos,
@@ -109,7 +139,7 @@ export class PagBankPixGateway implements PaymentGateway {
           expiration_date: expiracao,
         },
       ],
-      notification_urls: [], // configurado via dashboard PagBank
+      notification_urls: [this.resolverWebhookUrl()],
     };
 
     this.logger.log(
@@ -123,15 +153,18 @@ export class PagBankPixGateway implements PaymentGateway {
       body,
     );
 
-    const charge = response.charges?.[0];
     const qrCode = response.qr_codes?.[0];
 
-    if (!charge) {
-      throw new Error('PagBank não retornou charge na criação do pedido PIX');
+    if (!response.id) {
+      throw new Error('PagBank não retornou id do pedido PIX');
+    }
+
+    if (!qrCode) {
+      throw new Error('PagBank não retornou QR Code na criação do pedido PIX');
     }
 
     this.logger.log(
-      `Cobrança PIX criada: chargeId=${charge.id} orderId=${response.id}`,
+      `Pedido PIX criado: orderId=${response.id} qrCodeId=${qrCode.id}`,
     );
 
     // Link da imagem do QR Code
@@ -139,18 +172,51 @@ export class PagBankPixGateway implements PaymentGateway {
       (l) => l.rel === 'QRCODE.PNG' || l.media?.includes('image'),
     )?.href;
 
+    const qrBase64Link = qrCode.links?.find(
+      (l) => l.rel === 'QRCODE.BASE64' || l.media?.includes('text/plain'),
+    )?.href;
+
     return {
-      gatewayId: charge.id,
-      pixCopiaECola: qrCode?.text,
-      qrCodeBase64: qrImageLink, // URL da imagem (não base64 nativo — renderizar via <img src>)
-      payload: response as unknown as Record<string, unknown>,
+      gatewayId: response.id,
+      pixCopiaECola: qrCode.text,
+      qrCodeBase64: qrBase64Link ?? qrImageLink,
+      urlPagamento: qrImageLink,
+      payload: {
+        pagbankRequest: body,
+        pagbankResponse: response,
+        orderId: response.id,
+        qrCodeId: qrCode.id,
+        qrCodeText: qrCode.text,
+        qrCodePngUrl: qrImageLink,
+        qrCodeBase64Url: qrBase64Link,
+      },
     };
   }
 
-  async consultarCobranca(
-    gatewayId: string,
-  ): Promise<ConsultarCobrancaOutput> {
+  async consultarCobranca(gatewayId: string): Promise<ConsultarCobrancaOutput> {
     const token = await this.obterToken();
+
+    if (gatewayId.startsWith('ORDE_')) {
+      const response = await this.request<PagBankOrderResponse>(
+        'GET',
+        `/orders/${gatewayId}`,
+        token,
+      );
+      const charge = response.charges?.[0];
+      const status = charge
+        ? (STATUS_MAP[charge.status] ?? 'PENDENTE')
+        : 'PENDENTE';
+      const paidAt =
+        status === 'APROVADO' && charge?.paid_at
+          ? new Date(charge.paid_at)
+          : undefined;
+
+      return {
+        status,
+        paidAt,
+        payload: response as unknown as Record<string, unknown>,
+      };
+    }
 
     const response = await this.request<PagBankCharge>(
       'GET',
@@ -172,6 +238,13 @@ export class PagBankPixGateway implements PaymentGateway {
   }
 
   async cancelarCobranca(gatewayId: string): Promise<void> {
+    if (gatewayId.startsWith('ORDE_')) {
+      this.logger.warn(
+        `Cancelamento direto de pedido PIX PagBank não executado: orderId=${gatewayId}`,
+      );
+      return;
+    }
+
     const token = await this.obterToken();
 
     await this.request(
@@ -228,12 +301,48 @@ export class PagBankPixGateway implements PaymentGateway {
     token: string,
     body?: unknown,
   ): Promise<T> {
-    // Se for o token direto, geralmente o PagBank espera sem o prefixo "Bearer" ou com ele.
-    // Para a API de Orders/Charges com Token de API, o padrão é o token puro ou Bearer.
-    // Vamos usar Bearer se for o token cacheado (OAuth) e o token puro se for o do .env,
-    // ou simplesmente testar o que o PagBank Sandbox aceita melhor.
-    const authHeader = this.directToken === token ? token : `Bearer ${token}`;
+    const authHeader =
+      this.directToken === token
+        ? this.formatarBearerToken(token)
+        : `Bearer ${token}`;
     return this.requestRaw<T>(method, path, authHeader, body);
+  }
+
+  private formatarBearerToken(token: string): string {
+    return token.trim().toLowerCase().startsWith('bearer ')
+      ? token.trim()
+      : `Bearer ${token.trim()}`;
+  }
+
+  private resolverWebhookUrl(): string {
+    const webhookUrl = this.config.get<string>('PAGBANK_NOTIFICATION_URL');
+    if (webhookUrl?.trim()) {
+      return webhookUrl.trim();
+    }
+
+    const appUrl = this.config.get<string>('APP_URL', 'http://localhost:3000');
+    return `${appUrl.replace(/\/+$/, '')}/api/pagamentos/webhook/pix`;
+  }
+
+  private normalizarTelefone(telefone?: string): PagBankCustomerPhone | null {
+    if (!telefone) {
+      return null;
+    }
+
+    const digits = telefone.replace(/\D/g, '');
+    const semPais =
+      digits.startsWith('55') && digits.length > 11 ? digits.slice(2) : digits;
+
+    if (semPais.length < 10) {
+      return null;
+    }
+
+    return {
+      country: '55',
+      area: semPais.slice(0, 2),
+      number: semPais.slice(2),
+      type: 'MOBILE',
+    };
   }
 
   private async requestRaw<T>(
@@ -264,9 +373,7 @@ export class PagBankPixGateway implements PaymentGateway {
       this.logger.error(
         `Erro na API PagBank: ${method} ${path} → ${response.status}: ${errorBody}`,
       );
-      throw new Error(
-        `API PagBank retornou ${response.status}: ${errorBody}`,
-      );
+      throw new Error(`API PagBank retornou ${response.status}: ${errorBody}`);
     }
 
     const text = await response.text();

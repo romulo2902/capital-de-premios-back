@@ -67,6 +67,9 @@ async function bootstrap(): Promise<void> {
     credentials: true,
   });
 
+  app.useBodyParser('json', { limit: '50mb' });
+  app.useBodyParser('urlencoded', { limit: '50mb', extended: true });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

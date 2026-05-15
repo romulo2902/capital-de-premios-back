@@ -149,7 +149,7 @@ export class LojaPublicaService {
     let numerosReservados: string[] = [];
     if (this.redisService.isConfigured() && this.redisService.client) {
       const keys = await this.redisService.client.keys(`reserva:${edicaoId}:*`);
-      numerosReservados = keys.map(k => k.split(':').pop()!).filter(Boolean);
+      numerosReservados = keys.map((k) => k.split(':').pop()!).filter(Boolean);
     }
 
     const result = await this.vendasService.listarCombosDisponiveis({
@@ -202,9 +202,12 @@ export class LojaPublicaService {
     this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
     if (dto.comboId) {
-      comboSelecionado = edicao.combos.find((c) => c.id === dto.comboId) ?? null;
+      comboSelecionado =
+        edicao.combos.find((c) => c.id === dto.comboId) ?? null;
       if (!comboSelecionado) {
-        throw new BadRequestException('Combo selecionado não foi encontrado na edição');
+        throw new BadRequestException(
+          'Combo selecionado não foi encontrado na edição',
+        );
       }
       tipoCartelaSelecionada = comboSelecionado.tipoCartela;
     }
@@ -235,7 +238,9 @@ export class LojaPublicaService {
     const total = valorSelecionado * dto.quantidadeCartelas;
 
     if (Math.abs(total - dto.valor) > 0.01) {
-      throw new BadRequestException(`O valor total calculado (R$ ${total.toFixed(2)}) difere do valor enviado (R$ ${dto.valor.toFixed(2)})`);
+      throw new BadRequestException(
+        `O valor total calculado (R$ ${total.toFixed(2)}) difere do valor enviado (R$ ${dto.valor.toFixed(2)})`,
+      );
     }
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
@@ -268,7 +273,9 @@ export class LojaPublicaService {
         tipoPagamento: TipoPagamento.PIX,
         gatewayPayload: dto.cartelasSelecionadas
           ? ({
-              combosSelecionados: dto.cartelasSelecionadas.map(numero => ({ numeroBase: numero })),
+              combosSelecionados: dto.cartelasSelecionadas.map((numero) => ({
+                numeroBase: numero,
+              })),
             } as unknown as Prisma.InputJsonValue)
           : Prisma.JsonNull,
       },
@@ -345,6 +352,8 @@ export class LojaPublicaService {
         descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidadeCartelas} iten(s)`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
+        emailPagador: dto.email,
+        telefonePagador: dto.telefone,
         expiracaoSegundos: 3600,
       });
 
@@ -402,7 +411,7 @@ export class LojaPublicaService {
     const bilhetesComprados = await this.prisma.bilhete.findMany({
       where: {
         edicaoId: edicao.id,
-        numero: { in: dto.cartelas.map(n => BigInt(n)) },
+        numero: { in: dto.cartelas.map((n) => BigInt(n)) },
       },
       select: { numero: true },
     });
@@ -890,9 +899,10 @@ export class LojaPublicaService {
         const valorCombo = this.formatarValorMonetario(combo.preco);
 
         // Pegamos os setores disponíveis. Se não houver nenhum (erro de config), usamos o primeiro setor da edição como fallback.
-        const setoresParaUso = setoresBase.length > 0 
-          ? setoresBase.slice(0, quantidadeCartelas) 
-          : [primeiroSetorBase];
+        const setoresParaUso =
+          setoresBase.length > 0
+            ? setoresBase.slice(0, quantidadeCartelas)
+            : [primeiroSetorBase];
 
         return {
           id: combo.id,
@@ -903,7 +913,8 @@ export class LojaPublicaService {
           valorUnitarioCartela,
           valorUnitario: valorUnitarioCartela,
           valorCombo,
-          rangeTotalInicio: setoresParaUso[0]?.rangeTotalInicio.toString() ?? '0',
+          rangeTotalInicio:
+            setoresParaUso[0]?.rangeTotalInicio.toString() ?? '0',
           rangeTotalFinal: setoresParaUso[0]?.rangeTotalFinal.toString() ?? '0',
           passoEntreCartelas:
             setoresParaUso[0] && setoresParaUso[1]

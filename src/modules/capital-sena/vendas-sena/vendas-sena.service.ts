@@ -60,7 +60,9 @@ export class VendasSenaService {
 
     const dataAgora = new Date();
     if (dataAgora >= edicao.dataEncerramento) {
-      throw new BadRequestException('As compras para esta edição já foram encerradas');
+      throw new BadRequestException(
+        'As compras para esta edição já foram encerradas',
+      );
     }
 
     // 2. Validar e normalizar cartelas
@@ -70,7 +72,8 @@ export class VendasSenaService {
     let comboSenaId: string | null = null;
     if (dto.comboSenaId) {
       const combo = edicao.combos.find((c) => c.id === dto.comboSenaId);
-      if (!combo) throw new BadRequestException('Combo Sena não encontrado nesta edição');
+      if (!combo)
+        throw new BadRequestException('Combo Sena não encontrado nesta edição');
       if (cartelas.length !== combo.quantidade) {
         throw new BadRequestException(
           `O combo "${combo.nome}" requer exatamente ${combo.quantidade} cartela(s)`,
@@ -92,12 +95,16 @@ export class VendasSenaService {
 
     // 5. Validar vendedor / distribuidor
     if (dto.vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({ where: { id: dto.vendedorId } });
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { id: dto.vendedorId },
+      });
       if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
       if (!dto.distribuidorId) dto.distribuidorId = vendedor.distribuidorId;
     }
     if (dto.distribuidorId) {
-      const dist = await this.prisma.distribuidor.findUnique({ where: { id: dto.distribuidorId } });
+      const dist = await this.prisma.distribuidor.findUnique({
+        where: { id: dto.distribuidorId },
+      });
       if (!dist) throw new NotFoundException('Distribuidor não encontrado');
     }
 
@@ -115,7 +122,7 @@ export class VendasSenaService {
     const tipoPagamento = this.resolverTipoPagamento(dto.tipoPagamento, user);
 
     const valorCombo = dto.comboSenaId
-      ? edicao.combos.find((c) => c.id === dto.comboSenaId)?.preco ?? null
+      ? (edicao.combos.find((c) => c.id === dto.comboSenaId)?.preco ?? null)
       : null;
     const valorUnitario = Number(edicao.valorCartela);
     const total = valorCombo
@@ -144,7 +151,13 @@ export class VendasSenaService {
           edicao.id,
           cartelas,
         );
-        await this.gerarComissaoSena(tx, venda, vendedorId, distribuidorId, total);
+        await this.gerarComissaoSena(
+          tx,
+          venda,
+          vendedorId,
+          distribuidorId,
+          total,
+        );
         return { venda, cartelas: cartelasGeradas };
       });
 
@@ -189,6 +202,8 @@ export class VendasSenaService {
         descricao: `Capital Sena — Edição ${edicao.numero} — ${cartelas.length} cartela(s)`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
+        emailPagador: dto.email,
+        telefonePagador: dto.telefone,
         expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
       });
 
@@ -223,20 +238,28 @@ export class VendasSenaService {
 
     return {
       message: 'Venda Sena criada com sucesso',
-      data: { ...this.serializarVenda(vendaCompleta!), pagamento: dadosPagamento },
+      data: {
+        ...this.serializarVenda(vendaCompleta!),
+        pagamento: dadosPagamento,
+      },
     };
   }
 
   // ─── CONFIRMAR PAGAMENTO (webhook) ────────────────────
 
-  async confirmarPagamento(vendaSenaId: string, gatewayPayload?: Record<string, unknown>) {
+  async confirmarPagamento(
+    vendaSenaId: string,
+    gatewayPayload?: Record<string, unknown>,
+  ) {
     const venda = await this.prisma.vendaSena.findUnique({
       where: { id: vendaSenaId },
     });
 
     if (!venda) throw new NotFoundException('Venda Sena não encontrada');
     if (venda.status !== StatusVendaSena.PENDENTE) {
-      throw new ConflictException(`Venda Sena já processada (status: ${venda.status})`);
+      throw new ConflictException(
+        `Venda Sena já processada (status: ${venda.status})`,
+      );
     }
 
     // Recuperar cartelas do gatewayPayload
@@ -261,7 +284,12 @@ export class VendasSenaService {
       });
 
       // Criar cartelas com 7º número
-      await this.criarCartelasComSetimoNumero(tx, vendaSenaId, venda.edicaoSenaId, cartelasRaw);
+      await this.criarCartelasComSetimoNumero(
+        tx,
+        vendaSenaId,
+        venda.edicaoSenaId,
+        cartelasRaw,
+      );
 
       // Comissões
       await this.gerarComissaoSena(
@@ -274,13 +302,19 @@ export class VendasSenaService {
     });
 
     this.logger.log(`VendaSena ${vendaSenaId} confirmada e cartelas geradas`);
-    return { message: 'Pagamento Sena confirmado', data: await this.findOne(vendaSenaId) };
+    return {
+      message: 'Pagamento Sena confirmado',
+      data: await this.findOne(vendaSenaId),
+    };
   }
 
   // ─── FIND ALL ──────────────────────────────────────────
 
   async findAll(filtros: FiltroVendasSenaDto = {}) {
-    const pagination = normalizePagination(filtros.page ?? 1, filtros.limit ?? 20);
+    const pagination = normalizePagination(
+      filtros.page ?? 1,
+      filtros.limit ?? 20,
+    );
     const where = this.buildWhere(filtros);
 
     const [data, total] = await Promise.all([
@@ -299,7 +333,10 @@ export class VendasSenaService {
       total,
       pagination.page,
       pagination.limit,
-      { successMessage: 'Vendas Sena listadas com sucesso', emptyMessage: 'Nenhuma venda Sena encontrada' },
+      {
+        successMessage: 'Vendas Sena listadas com sucesso',
+        emptyMessage: 'Nenhuma venda Sena encontrada',
+      },
     );
   }
 
@@ -342,7 +379,10 @@ export class VendasSenaService {
       total,
       pagination.page,
       pagination.limit,
-      { successMessage: 'Vendas Sena do cliente listadas', emptyMessage: 'Nenhuma venda encontrada' },
+      {
+        successMessage: 'Vendas Sena do cliente listadas',
+        emptyMessage: 'Nenhuma venda encontrada',
+      },
     );
   }
 
@@ -376,7 +416,9 @@ export class VendasSenaService {
       // Cancelar no gateway
       if (venda.gatewayId) {
         try {
-          const gateway = this.paymentGatewayFactory.getGateway(venda.tipoPagamento);
+          const gateway = this.paymentGatewayFactory.getGateway(
+            venda.tipoPagamento,
+          );
           await gateway.cancelarCobranca(venda.gatewayId);
         } catch (err) {
           this.logger.warn(
@@ -409,10 +451,15 @@ export class VendasSenaService {
   ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[] {
     return itens.map((item) => {
       if (item.modoSelecao === ModoSelecaoSena.SURPRESINHA) {
-        return { numeros: this.gerarNumerosSurpresinha(), modoSelecao: item.modoSelecao };
+        return {
+          numeros: this.gerarNumerosSurpresinha(),
+          modoSelecao: item.modoSelecao,
+        };
       }
       if (!item.numeros || item.numeros.length !== 6) {
-        throw new BadRequestException('Cartela manual requer exatamente 6 números');
+        throw new BadRequestException(
+          'Cartela manual requer exatamente 6 números',
+        );
       }
       this.validarNumerosCartela(item.numeros);
       return { numeros: item.numeros, modoSelecao: item.modoSelecao };
@@ -424,7 +471,9 @@ export class VendasSenaService {
       throw new BadRequestException('Números da cartela não podem se repetir');
     }
     if (numeros.some((n) => n < 1 || n > 60)) {
-      throw new BadRequestException('Números da cartela devem estar entre 1 e 60');
+      throw new BadRequestException(
+        'Números da cartela devem estar entre 1 e 60',
+      );
     }
   }
 
@@ -492,7 +541,9 @@ export class VendasSenaService {
         });
         await tx.vendedor.update({
           where: { id: vendedorId },
-          data: { saldo: { increment: new Prisma.Decimal(valorComissao.toFixed(2)) } },
+          data: {
+            saldo: { increment: new Prisma.Decimal(valorComissao.toFixed(2)) },
+          },
         });
       }
     }
@@ -515,7 +566,9 @@ export class VendasSenaService {
         });
         await tx.distribuidor.update({
           where: { id: distId },
-          data: { saldo: { increment: new Prisma.Decimal(valorComissao.toFixed(2)) } },
+          data: {
+            saldo: { increment: new Prisma.Decimal(valorComissao.toFixed(2)) },
+          },
         });
       }
     }
@@ -562,7 +615,10 @@ export class VendasSenaService {
     });
   }
 
-  private resolverTipoPagamento(tipo: TipoPagamento, user?: RequestUser): TipoPagamento {
+  private resolverTipoPagamento(
+    tipo: TipoPagamento,
+    user?: RequestUser,
+  ): TipoPagamento {
     if (user?.perfil === 'ADMIN') return TipoPagamento.MANUAL;
     return tipo;
   }
@@ -594,7 +650,11 @@ export class VendasSenaService {
     tipoPagamento: string;
     gatewayId: string | null;
     createdAt: Date;
-    edicaoSena?: { id: string; numero: string; valorCartela: Prisma.Decimal } | null;
+    edicaoSena?: {
+      id: string;
+      numero: string;
+      valorCartela: Prisma.Decimal;
+    } | null;
     cliente?: { id: string; nome: string; cpf: string } | null;
     vendedor?: { id: string; nome: string; codigo: number } | null;
     cartelas?: {
@@ -611,7 +671,10 @@ export class VendasSenaService {
       ...venda,
       total: venda.total.toString(),
       edicaoSena: venda.edicaoSena
-        ? { ...venda.edicaoSena, valorCartela: venda.edicaoSena.valorCartela.toString() }
+        ? {
+            ...venda.edicaoSena,
+            valorCartela: venda.edicaoSena.valorCartela.toString(),
+          }
         : null,
     };
   }
