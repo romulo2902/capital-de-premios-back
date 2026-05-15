@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   ModoSelecaoSena,
+  Perfil,
   Prisma,
   StatusCartelaSena,
   StatusEdicaoSena,
@@ -33,6 +34,11 @@ const VENDA_SENA_INCLUDE = {
   vendedor: { select: { id: true, nome: true, codigo: true } },
   cartelas: true,
 } as const;
+
+interface SellerOrigemResolvida {
+  vendedorId: string | null;
+  distribuidorId: string | null;
+}
 
 @Injectable()
 export class VendasSenaService {
@@ -67,6 +73,10 @@ export class VendasSenaService {
 
     // 2. Validar e normalizar cartelas
     const cartelas = this.validarEGerarCartelas(dto.cartelas);
+
+    const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
+    dto.vendedorId = sellerOrigem.vendedorId ?? dto.vendedorId;
+    dto.distribuidorId = sellerOrigem.distribuidorId ?? dto.distribuidorId;
 
     // 3. Resolver combo
     let comboSenaId: string | null = null;
@@ -621,6 +631,56 @@ export class VendasSenaService {
   ): TipoPagamento {
     if (user?.perfil === 'ADMIN') return TipoPagamento.MANUAL;
     return tipo;
+  }
+
+  private async resolverSellerOrigem(
+    sellerId?: string,
+  ): Promise<SellerOrigemResolvida> {
+    if (!sellerId) {
+      return { vendedorId: null, distribuidorId: null };
+    }
+
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: sellerId },
+      select: { id: true, perfil: true },
+    });
+
+    if (!usuario) {
+      throw new NotFoundException('Seller não encontrado');
+    }
+
+    if (usuario.perfil === Perfil.VENDEDOR) {
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { usuarioId: usuario.id },
+        select: { id: true, distribuidorId: true },
+      });
+
+      if (!vendedor) {
+        throw new NotFoundException('Vendedor não encontrado');
+      }
+
+      return {
+        vendedorId: vendedor.id,
+        distribuidorId: vendedor.distribuidorId,
+      };
+    }
+
+    if (usuario.perfil === Perfil.DISTRIBUIDOR) {
+      const distribuidor = await this.prisma.distribuidor.findUnique({
+        where: { usuarioId: usuario.id },
+        select: { id: true },
+      });
+
+      if (!distribuidor) {
+        throw new NotFoundException('Distribuidor não encontrado');
+      }
+
+      return { vendedorId: null, distribuidorId: distribuidor.id };
+    }
+
+    throw new BadRequestException(
+      'seller_id deve pertencer a um vendedor ou distribuidor',
+    );
   }
 
   private buildWhere(filtros: FiltroVendasSenaDto): Record<string, unknown> {

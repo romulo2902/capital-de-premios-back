@@ -37,7 +37,7 @@ export class ComprarLojaDto {
   @IsUUID('4')
   edicaoId: string;
 
-  @ApiProperty({ example: 30.00, description: 'Valor total da compra' })
+  @ApiProperty({ example: 30.0, description: 'Valor total da compra' })
   @Type(() => Number)
   @Min(0)
   valor: number;
@@ -107,4 +107,14 @@ export class ComprarLojaDto {
   @IsOptional()
   @IsString()
   dataNascimento?: string;
+
+  @ApiPropertyOptional({
+    example: 'cfda6bc8-665d-4735-a217-3f51775d431c',
+    description:
+      'ID do usuário vendedor/distribuidor recebido pela URL da loja (?seller_id=...).',
+  })
+  @Transform(emptyStringToUndefined)
+  @IsOptional()
+  @IsUUID('4')
+  seller_id?: string;
 }

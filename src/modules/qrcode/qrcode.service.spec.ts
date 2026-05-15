@@ -26,7 +26,7 @@ describe('QrcodeService', () => {
 
   const mockConfig = {
     get: jest.fn((key: string, defaultValue?: string) => {
-      if (key === 'FRONTEND_LOJA_URL') {
+      if (key === 'URL_LOJA_CLIENTE') {
         return 'https://loja.capitalpremios.com.br';
       }
 
@@ -62,6 +62,7 @@ describe('QrcodeService', () => {
 
     mockPrisma.vendedor.findUnique.mockResolvedValue({
       id: 'vend-1',
+      usuarioId: 'cfda6bc8-665d-4735-a217-3f51775d431c',
       codigo: 123,
       link: null,
       qrcode: null,
@@ -79,7 +80,7 @@ describe('QrcodeService', () => {
     const result = await service.gerarQrcodeVendedor('vend-1');
 
     expect(qrcode.toBuffer).toHaveBeenCalledWith(
-      'https://loja.capitalpremios.com.br?ref=123',
+      'https://loja.capitalpremios.com.br/?seller_id=cfda6bc8-665d-4735-a217-3f51775d431c',
       expect.any(Object),
     );
     expect(mockS3UploadService.uploadPublicObject).toHaveBeenCalledWith({
@@ -90,6 +91,7 @@ describe('QrcodeService', () => {
     expect(mockPrisma.vendedor.update).toHaveBeenCalledWith({
       where: { id: 'vend-1' },
       data: {
+        link: 'https://loja.capitalpremios.com.br/?seller_id=cfda6bc8-665d-4735-a217-3f51775d431c',
         qrcode:
           'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-1/qrcode.png',
       },
@@ -103,8 +105,9 @@ describe('QrcodeService', () => {
   it('should reutilizar a url salva do qrcode do vendedor', async () => {
     mockPrisma.vendedor.findUnique.mockResolvedValue({
       id: 'vend-2',
+      usuarioId: 'd7ee8b71-0574-4795-bfbb-114ff941aa70',
       codigo: 456,
-      link: 'https://meu-link.com/vendedor',
+      link: 'https://loja.capitalpremios.com.br/?seller_id=d7ee8b71-0574-4795-bfbb-114ff941aa70',
       qrcode:
         'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-2/qrcode.png',
     });

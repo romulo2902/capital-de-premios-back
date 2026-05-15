@@ -15,7 +15,7 @@ import {
   ArrayMinSize,
   ArrayMaxSize,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ModoSelecaoSena, TipoPagamento } from '@prisma/client';
 
 export class ItemCartelaSenaDto {
@@ -46,7 +46,8 @@ export class CreateVendaSenaDto {
 
   @ApiProperty({
     type: [ItemCartelaSenaDto],
-    description: 'Lista de cartelas a comprar. Use junto com cartelas individuais.',
+    description:
+      'Lista de cartelas a comprar. Use junto com cartelas individuais.',
   })
   @IsArray()
   @ValidateNested({ each: true })
@@ -92,4 +93,16 @@ export class CreateVendaSenaDto {
   @IsOptional()
   @IsUUID('4')
   distribuidorId?: string;
+
+  @ApiPropertyOptional({
+    example: 'cfda6bc8-665d-4735-a217-3f51775d431c',
+    description:
+      'ID do usuário vendedor/distribuidor recebido pela URL da loja (?seller_id=...).',
+  })
+  @Transform(({ value }: { value: unknown }): unknown =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  @IsOptional()
+  @IsUUID('4')
+  seller_id?: string;
 }

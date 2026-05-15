@@ -7,5 +7,6 @@ import { S3UploadModule } from '../../common/s3/s3-upload.module';
   imports: [S3UploadModule],
   controllers: [QrcodeController],
   providers: [QrcodeService],
+  exports: [QrcodeService],
 })
 export class QrcodeModule {}

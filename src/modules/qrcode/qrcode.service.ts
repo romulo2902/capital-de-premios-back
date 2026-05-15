@@ -9,6 +9,20 @@ interface QrcodeGerado {
   qrcodeUrl: string;
 }
 
+interface GerarQrcodeOptions {
+  force?: boolean;
+}
+
+interface AtualizacaoQrcodeSellersResultado {
+  vendedoresAtualizados: number;
+  distribuidoresAtualizados: number;
+  erros: Array<{
+    tipo: 'VENDEDOR' | 'DISTRIBUIDOR';
+    id: string;
+    motivo: string;
+  }>;
+}
+
 @Injectable()
 export class QrcodeService {
   private readonly logger = new Logger(QrcodeService.name);
@@ -19,11 +33,16 @@ export class QrcodeService {
     private readonly s3UploadService: S3UploadService,
   ) {}
 
-  async gerarQrcodeVendedor(id: string): Promise<QrcodeGerado> {
+  async gerarQrcodeVendedor(
+    id: string,
+    options: GerarQrcodeOptions = {},
+  ): Promise<QrcodeGerado> {
     const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
 
-    if (vendedor.qrcode) {
+    const link = this.criarLinkLoja(vendedor.usuarioId);
+
+    if (!options.force && vendedor.qrcode && vendedor.link === link) {
       const existingBuffer = await this.obterBufferPorUrl(vendedor.qrcode);
       if (existingBuffer) {
         this.logger.log(`QR Code reutilizado para vendedor ${id}`);
@@ -33,12 +52,6 @@ export class QrcodeService {
         };
       }
     }
-
-    const appUrl = this.config.get<string>(
-      'FRONTEND_LOJA_URL',
-      'http://localhost:3001',
-    );
-    const link = vendedor.link ?? `${appUrl}?ref=${vendedor.codigo}`;
 
     const buffer = await qrcode.toBuffer(link, {
       type: 'png',
@@ -56,6 +69,7 @@ export class QrcodeService {
     await this.prisma.vendedor.update({
       where: { id },
       data: {
+        link,
         qrcode: qrcodeUrl,
       },
     });
@@ -68,7 +82,9 @@ export class QrcodeService {
     const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
 
-    if (vendedor.qrcode) {
+    const link = this.criarLinkLoja(vendedor.usuarioId);
+
+    if (vendedor.qrcode && vendedor.link === link) {
       return {
         message: 'QR Code do vendedor disponível com sucesso',
         data: {
@@ -88,14 +104,19 @@ export class QrcodeService {
     };
   }
 
-  async gerarQrcodeDistribuidor(id: string): Promise<QrcodeGerado> {
+  async gerarQrcodeDistribuidor(
+    id: string,
+    options: GerarQrcodeOptions = {},
+  ): Promise<QrcodeGerado> {
     const distribuidor = await this.prisma.distribuidor.findUnique({
       where: { id },
     });
     if (!distribuidor)
       throw new NotFoundException('Distribuidor não encontrado');
 
-    if (distribuidor.qrcode) {
+    const link = this.criarLinkLoja(distribuidor.usuarioId);
+
+    if (!options.force && distribuidor.qrcode && distribuidor.link === link) {
       const existingBuffer = await this.obterBufferPorUrl(distribuidor.qrcode);
       if (existingBuffer) {
         this.logger.log(`QR Code reutilizado para distribuidor ${id}`);
@@ -105,12 +126,6 @@ export class QrcodeService {
         };
       }
     }
-
-    const appUrl = this.config.get<string>(
-      'FRONTEND_LOJA_URL',
-      'http://localhost:3001',
-    );
-    const link = distribuidor.link ?? `${appUrl}?dist=${id}`;
 
     const buffer = await qrcode.toBuffer(link, {
       type: 'png',
@@ -128,6 +143,7 @@ export class QrcodeService {
     await this.prisma.distribuidor.update({
       where: { id },
       data: {
+        link,
         qrcode: qrcodeUrl,
       },
     });
@@ -143,7 +159,9 @@ export class QrcodeService {
     if (!distribuidor)
       throw new NotFoundException('Distribuidor não encontrado');
 
-    if (distribuidor.qrcode) {
+    const link = this.criarLinkLoja(distribuidor.usuarioId);
+
+    if (distribuidor.qrcode && distribuidor.link === link) {
       return {
         message: 'QR Code do distribuidor disponível com sucesso',
         data: {
@@ -161,6 +179,64 @@ export class QrcodeService {
         reused: false,
       },
     };
+  }
+
+  async atualizarLinksEQrcodesSellers(): Promise<AtualizacaoQrcodeSellersResultado> {
+    const resultado: AtualizacaoQrcodeSellersResultado = {
+      vendedoresAtualizados: 0,
+      distribuidoresAtualizados: 0,
+      erros: [],
+    };
+
+    const [vendedores, distribuidores] = await Promise.all([
+      this.prisma.vendedor.findMany({ select: { id: true } }),
+      this.prisma.distribuidor.findMany({ select: { id: true } }),
+    ]);
+
+    for (const vendedor of vendedores) {
+      try {
+        await this.gerarQrcodeVendedor(vendedor.id, { force: true });
+        resultado.vendedoresAtualizados += 1;
+      } catch (error) {
+        resultado.erros.push({
+          tipo: 'VENDEDOR',
+          id: vendedor.id,
+          motivo: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    for (const distribuidor of distribuidores) {
+      try {
+        await this.gerarQrcodeDistribuidor(distribuidor.id, { force: true });
+        resultado.distribuidoresAtualizados += 1;
+      } catch (error) {
+        resultado.erros.push({
+          tipo: 'DISTRIBUIDOR',
+          id: distribuidor.id,
+          motivo: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    this.logger.log(
+      `Backfill de QR Codes finalizado: ${resultado.vendedoresAtualizados} vendedor(es), ${resultado.distribuidoresAtualizados} distribuidor(es), ${resultado.erros.length} erro(s)`,
+    );
+
+    return resultado;
+  }
+
+  criarLinkLoja(sellerId: string): string {
+    const baseUrl = (
+      this.config.get<string>('URL_LOJA_CLIENTE')?.trim() ||
+      this.config.get<string>('FRONTEND_LOJA_URL')?.trim() ||
+      'http://localhost:3001'
+    ).replace(/\/+$/, '');
+
+    const url = new URL(baseUrl);
+    url.searchParams.set('seller_id', sellerId);
+
+    return url.toString();
   }
 
   private async obterBufferPorUrl(qrcodeUrl: string): Promise<Buffer | null> {

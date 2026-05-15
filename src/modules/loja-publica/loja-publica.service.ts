@@ -20,6 +20,7 @@ import {
   Prisma,
   TipoCartela,
   EdicaoCombo,
+  Perfil,
 } from '@prisma/client';
 import { ConteudoService } from '../conteudo/conteudo.service';
 import {
@@ -58,6 +59,11 @@ export interface OpcaoCompraEdicao {
     rangeInicio: string;
     rangeFinal: string;
   }>;
+}
+
+interface SellerOrigemResolvida {
+  vendedorId: string | null;
+  distribuidorId: string | null;
 }
 
 @Injectable()
@@ -245,6 +251,7 @@ export class LojaPublicaService {
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
     const emailNormalizado = dto.email?.trim() || null;
+    const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
     let cliente = await this.prisma.cliente.findUnique({
       where: { cpf: cpfLimpo },
     });
@@ -257,6 +264,8 @@ export class LojaPublicaService {
           telefone: dto.telefone,
           email: emailNormalizado,
           dataNascimento: dbDate && !isNaN(dbDate.getTime()) ? dbDate : null,
+          vendedorId: sellerOrigem.vendedorId,
+          distribuidorId: sellerOrigem.distribuidorId,
         },
       });
     }
@@ -265,6 +274,8 @@ export class LojaPublicaService {
       data: {
         edicaoId: edicao.id,
         clienteId: cliente.id,
+        vendedorId: sellerOrigem.vendedorId,
+        distribuidorId: sellerOrigem.distribuidorId,
         quantidade: dto.quantidadeCartelas,
         tipoCartela: tipoCartelaSelecionada,
         total: new Prisma.Decimal(total.toFixed(2)),
@@ -1077,6 +1088,56 @@ export class LojaPublicaService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
+  }
+
+  private async resolverSellerOrigem(
+    sellerId?: string,
+  ): Promise<SellerOrigemResolvida> {
+    if (!sellerId) {
+      return { vendedorId: null, distribuidorId: null };
+    }
+
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: sellerId },
+      select: { id: true, perfil: true },
+    });
+
+    if (!usuario) {
+      throw new NotFoundException('Seller não encontrado');
+    }
+
+    if (usuario.perfil === Perfil.VENDEDOR) {
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { usuarioId: usuario.id },
+        select: { id: true, distribuidorId: true },
+      });
+
+      if (!vendedor) {
+        throw new NotFoundException('Vendedor não encontrado');
+      }
+
+      return {
+        vendedorId: vendedor.id,
+        distribuidorId: vendedor.distribuidorId,
+      };
+    }
+
+    if (usuario.perfil === Perfil.DISTRIBUIDOR) {
+      const distribuidor = await this.prisma.distribuidor.findUnique({
+        where: { usuarioId: usuario.id },
+        select: { id: true },
+      });
+
+      if (!distribuidor) {
+        throw new NotFoundException('Distribuidor não encontrado');
+      }
+
+      return { vendedorId: null, distribuidorId: distribuidor.id };
+    }
+
+    throw new BadRequestException(
+      'seller_id deve pertencer a um vendedor ou distribuidor',
+    );
   }
 
   private isCartelaUnitaria(tipoCartela: TipoCartela): boolean {
