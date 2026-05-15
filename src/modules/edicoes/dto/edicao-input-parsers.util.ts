@@ -57,6 +57,18 @@ function isDetalheAvulso(value: unknown): value is Record<string, unknown> {
 function normalizarDetalhesAgrupados(
   parsedValue: unknown,
 ): Array<Record<string, unknown>> | unknown {
+  // Caso especial: Swagger ou usuários podem enviar o objeto agrupado dentro de um array de um único item
+  // devido à tipagem do campo ser um array no DTO.
+  if (
+    Array.isArray(parsedValue) &&
+    parsedValue.length === 1 &&
+    parsedValue[0] &&
+    typeof parsedValue[0] === 'object' &&
+    !isDetalheAvulso(parsedValue[0])
+  ) {
+    return normalizarDetalhesAgrupados(parsedValue[0]);
+  }
+
   if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue)) {
     return parsedValue;
   }

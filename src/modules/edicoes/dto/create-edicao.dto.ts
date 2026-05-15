@@ -210,7 +210,7 @@ export class CreateEdicaoDto {
   @ApiPropertyOptional({
     example: 'data:image/png;base64,...',
     description:
-      'Conteúdo da imagem principal da edição em base64. Se enviado, prevalece sobre o arquivo multipart.',
+      'Conteúdo da imagem principal da edição em base64 (incluindo o prefixo data:image).',
   })
   @IsOptional()
   @IsString()

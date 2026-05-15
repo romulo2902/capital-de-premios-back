@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConsumes,
   ApiOperation,
   ApiQuery,
   ApiTags,
@@ -33,6 +34,7 @@ export class EdicoesController {
   constructor(private readonly edicoesService: EdicoesService) {}
 
   @Post()
+  @ApiConsumes('application/json')
   @ApiOperation({
     summary: 'Criar edição com matriz, combos e prêmios detalhados (ADMIN)',
     description:
@@ -66,6 +68,7 @@ export class EdicoesController {
   }
 
   @Patch(':id')
+  @ApiConsumes('application/json')
   @ApiOperation({
     summary: 'Atualizar edição, combos e prêmios detalhados (ADMIN)',
     description:
