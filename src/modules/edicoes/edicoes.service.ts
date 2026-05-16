@@ -92,6 +92,7 @@ export class EdicoesService {
       ? this.parseDateTime(dto.dataEncerramento, 'dataEncerramento')
       : dataSorteio;
     this.validarDatas(dataEncerramento, dataSorteio);
+    this.validarDataEncerramentoFutura(dataEncerramento);
 
     const { rangeInicio, rangeFinal } = this.calcularResumoDosRanges(detalhes);
     const imagemUrl = await this.resolverImagemUrl(
@@ -194,6 +195,7 @@ export class EdicoesService {
           ...edicaoSerializada,
           isAtual: contextoTimeline.edicaoAtualId === item.id,
           isAnterior:
+            this.isStatusEdicaoAnterior(item.status) &&
             contextoTimeline.dataSorteioAtual !== null &&
             item.dataSorteio.getTime() <
               contextoTimeline.dataSorteioAtual.getTime(),
@@ -418,6 +420,7 @@ export class EdicoesService {
     }
 
     await this.validarEstoqueProntoParaAtivacao(edicao);
+    this.validarDataEncerramentoFutura(edicao.dataEncerramento);
     await this.validarEdicaoEmOperacaoUnica(StatusEdicao.ATIVA, id);
 
     const atualizada = await this.prisma.edicao.update({
@@ -672,6 +675,20 @@ export class EdicoesService {
         'dataEncerramento deve ser anterior à data do sorteio',
       );
     }
+  }
+
+  private validarDataEncerramentoFutura(dataEncerramento: Date): void {
+    if (dataEncerramento.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        'dataEncerramento deve estar no futuro para criar ou ativar a edição',
+      );
+    }
+  }
+
+  private isStatusEdicaoAnterior(status: StatusEdicao): boolean {
+    return (
+      status === StatusEdicao.ENCERRADA || status === StatusEdicao.FINALIZADA
+    );
   }
 
   private parseDateTime(value: string, fieldLabel: string): Date {

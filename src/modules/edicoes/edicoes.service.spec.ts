@@ -111,6 +111,11 @@ describe('EdicoesService', () => {
         dataSorteio: new Date('2026-05-30T13:20:00.000Z'),
       }),
       criarEdicaoMock({
+        id: 'edicao-104',
+        numero: 'ABC-2026-004',
+        dataSorteio: new Date('2026-05-26T13:20:00.000Z'),
+      }),
+      criarEdicaoMock({
         id: 'edicao-102',
         numero: 'ABC-2026-002',
         status: StatusEdicao.ATIVA,
@@ -158,6 +163,12 @@ describe('EdicoesService', () => {
           isProxima: false,
         }),
         expect.objectContaining({
+          id: 'edicao-104',
+          isAtual: false,
+          isAnterior: false,
+          isProxima: false,
+        }),
+        expect.objectContaining({
           id: 'edicao-101',
           isAtual: false,
           isAnterior: true,
@@ -189,8 +200,8 @@ describe('EdicoesService', () => {
     const edicao = {
       id: 'edicao-1',
       numero: 125,
-      dataSorteio: new Date('2026-03-27T13:20:00.000Z'),
-      dataEncerramento: new Date('2026-03-27T12:59:00.000Z'),
+      dataSorteio: new Date('2099-03-27T13:20:00.000Z'),
+      dataEncerramento: new Date('2099-03-27T12:59:00.000Z'),
       valorCartela: new Prisma.Decimal('10.00'),
       qtdNumerosCartela: 15,
       rangeInicio: BigInt(1000000),
@@ -271,8 +282,8 @@ describe('EdicoesService', () => {
 
     const result = await service.create({
       numero: 125,
-      dataSorteio: '2026-03-27T10:20',
-      dataEncerramento: '2026-03-27T09:59',
+      dataSorteio: '2099-03-27T10:20',
+      dataEncerramento: '2099-03-27T09:59',
       valorCartela: '10.00',
       raspadinha: false,
       imagemBase64: 'data:image/png;base64,Y2FwYQ==',
@@ -328,6 +339,39 @@ describe('EdicoesService', () => {
     });
     expect(result.data.imagemUrl).toBe(edicao.imagemUrl);
     expect(result.data.premios[0].imagemUrl).toBe(edicao.premios[0].imagemUrl);
+  });
+
+  it('create should reject when dataEncerramento is already past', async () => {
+    await expect(
+      service.create({
+        numero: 126,
+        dataSorteio: '2000-03-27T10:20',
+        dataEncerramento: '2000-03-27T09:59',
+        valorCartela: '10.00',
+        raspadinha: false,
+        detalhes: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            rangeInicio: '1000000',
+            rangeFinal: '1000000',
+            quantidadeSetores: 1,
+          },
+        ],
+        combos: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            preco: '10.00',
+          },
+        ],
+        premios: [
+          {
+            descricao: '1º Prêmio',
+            valor: '1000.00',
+          },
+        ],
+      }),
+    ).rejects.toThrow('dataEncerramento deve estar no futuro');
   });
 
   function criarEdicaoMock(
@@ -406,8 +450,8 @@ describe('EdicoesService', () => {
     await expect(
       service.create({
         numero: 126,
-        dataSorteio: '2026-03-27T10:20',
-        dataEncerramento: '2026-03-27T09:59',
+        dataSorteio: '2099-03-27T10:20',
+        dataEncerramento: '2099-03-27T09:59',
         valorCartela: '10.00',
         raspadinha: false,
         detalhes: [
