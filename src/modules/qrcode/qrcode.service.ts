@@ -40,7 +40,7 @@ export class QrcodeService {
     const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
 
-    const link = this.criarLinkLoja(vendedor.usuarioId);
+    const link = this.criarLinkLoja(vendedor.usuarioId, vendedor.nome);
 
     if (!options.force && vendedor.qrcode && vendedor.link === link) {
       const existingBuffer = await this.obterBufferPorUrl(vendedor.qrcode);
@@ -82,7 +82,7 @@ export class QrcodeService {
     const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
 
-    const link = this.criarLinkLoja(vendedor.usuarioId);
+    const link = this.criarLinkLoja(vendedor.usuarioId, vendedor.nome);
 
     if (vendedor.qrcode && vendedor.link === link) {
       return {
@@ -114,7 +114,7 @@ export class QrcodeService {
     if (!distribuidor)
       throw new NotFoundException('Distribuidor não encontrado');
 
-    const link = this.criarLinkLoja(distribuidor.usuarioId);
+    const link = this.criarLinkLoja(distribuidor.usuarioId, distribuidor.nome);
 
     if (!options.force && distribuidor.qrcode && distribuidor.link === link) {
       const existingBuffer = await this.obterBufferPorUrl(distribuidor.qrcode);
@@ -159,7 +159,7 @@ export class QrcodeService {
     if (!distribuidor)
       throw new NotFoundException('Distribuidor não encontrado');
 
-    const link = this.criarLinkLoja(distribuidor.usuarioId);
+    const link = this.criarLinkLoja(distribuidor.usuarioId, distribuidor.nome);
 
     if (distribuidor.qrcode && distribuidor.link === link) {
       return {
@@ -226,7 +226,7 @@ export class QrcodeService {
     return resultado;
   }
 
-  criarLinkLoja(sellerId: string): string {
+  criarLinkLoja(sellerId: string, sellerName: string): string {
     const baseUrl = (
       this.config.get<string>('URL_LOJA_CLIENTE')?.trim() ||
       this.config.get<string>('FRONTEND_LOJA_URL')?.trim() ||
@@ -235,6 +235,7 @@ export class QrcodeService {
 
     const url = new URL(baseUrl);
     url.searchParams.set('seller_id', sellerId);
+    url.searchParams.set('seller_name', sellerName);
 
     return url.toString();
   }

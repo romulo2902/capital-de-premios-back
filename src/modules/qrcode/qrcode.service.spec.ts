@@ -64,6 +64,7 @@ describe('QrcodeService', () => {
       id: 'vend-1',
       usuarioId: 'cfda6bc8-665d-4735-a217-3f51775d431c',
       codigo: 123,
+      nome: 'João Vendedor',
       link: null,
       qrcode: null,
     });
@@ -80,7 +81,7 @@ describe('QrcodeService', () => {
     const result = await service.gerarQrcodeVendedor('vend-1');
 
     expect(qrcode.toBuffer).toHaveBeenCalledWith(
-      'https://loja.capitalpremios.com.br/?seller_id=cfda6bc8-665d-4735-a217-3f51775d431c',
+      'https://loja.capitalpremios.com.br/?seller_id=cfda6bc8-665d-4735-a217-3f51775d431c&seller_name=Jo%C3%A3o+Vendedor',
       expect.any(Object),
     );
     expect(mockS3UploadService.uploadPublicObject).toHaveBeenCalledWith({
@@ -91,7 +92,7 @@ describe('QrcodeService', () => {
     expect(mockPrisma.vendedor.update).toHaveBeenCalledWith({
       where: { id: 'vend-1' },
       data: {
-        link: 'https://loja.capitalpremios.com.br/?seller_id=cfda6bc8-665d-4735-a217-3f51775d431c',
+        link: 'https://loja.capitalpremios.com.br/?seller_id=cfda6bc8-665d-4735-a217-3f51775d431c&seller_name=Jo%C3%A3o+Vendedor',
         qrcode:
           'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-1/qrcode.png',
       },
@@ -107,7 +108,8 @@ describe('QrcodeService', () => {
       id: 'vend-2',
       usuarioId: 'd7ee8b71-0574-4795-bfbb-114ff941aa70',
       codigo: 456,
-      link: 'https://loja.capitalpremios.com.br/?seller_id=d7ee8b71-0574-4795-bfbb-114ff941aa70',
+      nome: 'Maria Vendedora',
+      link: 'https://loja.capitalpremios.com.br/?seller_id=d7ee8b71-0574-4795-bfbb-114ff941aa70&seller_name=Maria+Vendedora',
       qrcode:
         'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-2/qrcode.png',
     });
