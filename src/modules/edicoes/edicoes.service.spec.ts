@@ -325,6 +325,7 @@ describe('EdicoesService', () => {
           imagemUrl: edicao.imagemUrl,
           qtdNumerosCartela: 15,
           qtdPremios: 1,
+          status: StatusEdicao.RASCUNHO,
         }),
       }),
     );
@@ -339,6 +340,7 @@ describe('EdicoesService', () => {
     });
     expect(result.data.imagemUrl).toBe(edicao.imagemUrl);
     expect(result.data.premios[0].imagemUrl).toBe(edicao.premios[0].imagemUrl);
+    expect(result.data.status).toBe(StatusEdicao.RASCUNHO);
   });
 
   it('create should reject when dataEncerramento is already past', async () => {
@@ -380,6 +382,7 @@ describe('EdicoesService', () => {
       numero: string;
       status: StatusEdicao;
       dataSorteio: Date;
+      dataEncerramento: Date;
       imagemUrl: string | null;
     }> = {},
   ) {
@@ -388,7 +391,8 @@ describe('EdicoesService', () => {
       numero: overrides.numero ?? '125',
       dataSorteio:
         overrides.dataSorteio ?? new Date('2026-03-27T13:20:00.000Z'),
-      dataEncerramento: new Date('2026-03-27T12:59:00.000Z'),
+      dataEncerramento:
+        overrides.dataEncerramento ?? new Date('2026-03-27T12:59:00.000Z'),
       valorCartela: new Prisma.Decimal('10.00'),
       qtdNumerosCartela: 15,
       rangeInicio: BigInt(1000000),
@@ -483,6 +487,42 @@ describe('EdicoesService', () => {
         ],
       }),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it('ativar should ignore ENCERRADA edicoes when checking operation conflict', async () => {
+    const edicao = criarEdicaoMock({
+      id: 'edicao-rascunho',
+      numero: 'ED-126-RASCUNHO',
+      dataSorteio: new Date('2099-05-30T13:20:00.000Z'),
+      dataEncerramento: new Date('2099-05-29T13:20:00.000Z'),
+    });
+    const atualizada = {
+      ...edicao,
+      status: StatusEdicao.ATIVA,
+    };
+
+    mockPrisma.edicao.findUnique.mockResolvedValue(edicao);
+    mockPrisma.matrizRange.count.mockResolvedValue(1000000);
+    mockPrisma.edicao.findFirst.mockResolvedValue(null);
+    mockPrisma.edicao.update.mockResolvedValue(atualizada);
+
+    const result = await service.ativar('edicao-rascunho');
+
+    expect(mockPrisma.edicao.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: [StatusEdicao.ATIVA, StatusEdicao.SORTEANDO] },
+          NOT: { id: 'edicao-rascunho' },
+        }),
+      }),
+    );
+    expect(mockPrisma.edicao.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'edicao-rascunho' },
+        data: { status: StatusEdicao.ATIVA },
+      }),
+    );
+    expect(result.data.status).toBe(StatusEdicao.ATIVA);
   });
 
   it('remove should delete edicao in cascade when status is RASCUNHO', async () => {

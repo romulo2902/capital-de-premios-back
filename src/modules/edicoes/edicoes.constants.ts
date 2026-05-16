@@ -14,7 +14,6 @@ export const EDICAO_INCLUDE = {
 
 export const STATUSS_EDICAO_EM_OPERACAO: StatusEdicao[] = [
   StatusEdicao.ATIVA,
-  StatusEdicao.ENCERRADA,
   StatusEdicao.SORTEANDO,
 ];
 
