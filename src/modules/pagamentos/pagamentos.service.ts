@@ -30,6 +30,17 @@ type PagBankNotificationLookupResult = {
   format: 'json' | 'xml';
 };
 
+type ConfirmacaoN8nPayload = {
+  pedidoId: string;
+  transacaoId: string | null;
+  nome: string;
+  telefone: string | null;
+  cpf: string;
+  valor: string;
+  dataHora: string;
+  status: 'APROVADO';
+};
+
 @Injectable()
 export class PagamentosService {
   private readonly logger = new Logger(PagamentosService.name);
@@ -144,6 +155,7 @@ export class PagamentosService {
           pagbankPayment: eventoPagamento.payload,
           confirmadoEm: new Date().toISOString(),
         });
+        await this.notificarConfirmacaoPagamentoN8n(venda.id, identificador);
         resultados.push({ gatewayId: identificador, status: 'CONFIRMADA' });
         this.logger.log(
           `Pagamento confirmado via webhook PagBank para venda ${venda.id}`,
@@ -411,6 +423,84 @@ export class PagamentosService {
         return 'CANCELED';
       default:
         return undefined;
+    }
+  }
+
+  private async notificarConfirmacaoPagamentoN8n(
+    vendaId: string,
+    identificadorWebhook: string,
+  ): Promise<void> {
+    const webhookUrl = this.config
+      .get<string>('WHATSAPP_CONFIRMACAO_PAGAMENTO_URL', '')
+      .trim();
+
+    if (!webhookUrl) {
+      this.logger.log(
+        'WHATSAPP_CONFIRMACAO_PAGAMENTO_URL não configurada; notificação ao n8n ignorada.',
+      );
+      return;
+    }
+
+    const venda = await this.prisma.venda.findUnique({
+      where: { id: vendaId },
+      select: {
+        id: true,
+        gatewayId: true,
+        total: true,
+        createdAt: true,
+        cliente: {
+          select: {
+            nome: true,
+            telefone: true,
+            cpf: true,
+          },
+        },
+      },
+    });
+
+    if (!venda) {
+      this.logger.warn(
+        `Não foi possível notificar o n8n: venda ${vendaId} não encontrada.`,
+      );
+      return;
+    }
+
+    const payload: ConfirmacaoN8nPayload = {
+      pedidoId: venda.id,
+      transacaoId: venda.gatewayId ?? identificadorWebhook,
+      nome: venda.cliente.nome,
+      telefone: venda.cliente.telefone ?? null,
+      cpf: venda.cliente.cpf,
+      valor: venda.total.toString(),
+      dataHora: new Date().toISOString(),
+      status: 'APROVADO',
+    };
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const responseBody = await response.text();
+        throw new Error(
+          `n8n retornou ${response.status}: ${responseBody || 'sem corpo'}`,
+        );
+      }
+
+      this.logger.log(
+        `Confirmação da venda ${vendaId} enviada ao n8n com sucesso.`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Falha ao notificar o n8n para a venda ${vendaId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
