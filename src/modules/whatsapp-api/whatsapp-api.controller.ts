@@ -294,6 +294,16 @@ retornando o código Copia-e-Cola e a URL do QR Code para o bot enviar ao client
 3. Chama o gateway PagBank (PIX)
 4. Retorna os dados do PIX
 
+**Compra unitária e combo:**
+- Se \`quantidadeCartelas = 1\`, a compra é unitária.
+- Se \`quantidadeCartelas > 1\`, a compra é tratada como combo.
+- Se \`quantidadeCartelas\` for omitida, a API assume \`1\`.
+
+**Correlação do pedido no bot/CRM:**
+- O campo \`pedidoId\` é o identificador único interno da compra e deve ser armazenado.
+- Esse mesmo \`pedidoId\` será enviado depois no POST automático de confirmação de pagamento.
+- O bot pode usar \`pedidoId\` como chave principal para atualizar o status local do pedido.
+
 **⚠️ Se o PIX falhar (gateway indisponível):** A API retorna erro HTTP 502 com mensagem
 humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
 
@@ -306,14 +316,16 @@ humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
     description: 'Pedido criado e PIX gerado com sucesso.',
     schema: {
       example: {
-        statusCode: 200,
+        statusCode: 201,
         message: 'Pedido criado com sucesso. Aguardando pagamento PIX.',
         data: {
           pedidoId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
           status: 'PENDENTE',
           total: '10.00',
           totalFormatado: 'R$ 10,00',
-          quantidade: 1,
+          quantidade: 6,
+          quantidadeCombos: 1,
+          quantidadeCartelasPorCombo: 6,
           quantidadeCartelas: 6,
           tipoCompra: 'COMBO',
           valorUnitarioCartela: '10.00',
@@ -633,8 +645,24 @@ Endpoint para receber notificações de pagamento confirmado do PagBank.
 
 **Comportamento:**
 - Ao receber \`CHARGE.PAID\`, o pedido é confirmado, os bilhetes são gerados e as comissões são calculadas.
+- Após confirmar internamente o pedido, a API faz um POST para a URL configurada em \`WHATSAPP_CONFIRMACAO_PAGAMENTO_URL\`.
+- Esse POST externo envia os dados necessários para o bot/CRM atualizar o pedido localmente.
 - Eventos com status diferente de \`PAID\` são ignorados.
 - Idempotente: pedidos já confirmados são ignorados sem erro.
+
+**Payload enviado ao bot/CRM via \`WHATSAPP_CONFIRMACAO_PAGAMENTO_URL\`:**
+\`\`\`json
+{
+  "pedidoId": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+  "transacaoId": "ORDE_59D7AA29-A5BF-4288-9588-1A132EAFB472",
+  "nome": "João da Silva",
+  "telefone": "61999999999",
+  "cpf": "12345678900",
+  "valor": "10.00",
+  "dataHora": "2026-05-18T15:42:10.000Z",
+  "status": "APROVADO"
+}
+\`\`\`
     `.trim(),
   })
   @ApiResponse({

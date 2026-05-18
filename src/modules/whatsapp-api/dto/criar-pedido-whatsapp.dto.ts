@@ -45,7 +45,8 @@ export class CriarPedidoWhatsappDto {
 
   @ApiProperty({
     example: 1,
-    description: 'Quantidade de combos a comprar (mínimo 1).',
+    description:
+      'Quantidade de itens a comprar. Para compra unitária, representa a quantidade de cartelas simples. Para combo, representa a quantidade de combos.',
     minimum: 1,
   })
   @Type(() => Number)
@@ -59,9 +60,9 @@ export class CriarPedidoWhatsappDto {
   tipoCartela?: TipoCartela;
 
   @ApiPropertyOptional({
-    example: 6,
+    example: 1,
     description:
-      'Quantidade de cartelas do combo (inteiro de 1 a 12). Se omitida, assume 1.',
+      'Quantidade de cartelas por item (inteiro de 1 a 12). Informe 1 para compra unitária. Se omitida, assume 1.',
     minimum: 1,
     maximum: 12,
   })
@@ -75,7 +76,7 @@ export class CriarPedidoWhatsappDto {
   @ApiPropertyOptional({
     type: [ComboSelecionadoWhatsappDto],
     description:
-      'Combos específicos escolhidos pelo cliente (opcional). ' +
+      'Combos específicos escolhidos pelo cliente (opcional, use apenas quando quantidadeCartelas for maior que 1). ' +
       'Obtidos em POST /whatsapp/campanhas/:id/cotas/preview. ' +
       'Se omitido, o sistema seleciona automaticamente os melhores combos disponíveis.',
   })

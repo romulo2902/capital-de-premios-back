@@ -13,7 +13,8 @@ import { Type } from 'class-transformer';
 export class PreviewCotasWhatsappDto {
   @ApiPropertyOptional({
     example: 1,
-    description: 'Quantidade de combos a pré-visualizar (default: 1).',
+    description:
+      'Quantidade de opções a pré-visualizar. Para compra unitária, representa cartelas simples; para combo, representa combos.',
     minimum: 1,
   })
   @Type(() => Number)
@@ -28,9 +29,9 @@ export class PreviewCotasWhatsappDto {
   tipoCartela?: TipoCartela;
 
   @ApiPropertyOptional({
-    example: 6,
+    example: 1,
     description:
-      'Quantidade de cartelas do combo (inteiro de 1 a 12). Se omitida, assume 1.',
+      'Quantidade de cartelas por opção (inteiro de 1 a 12). Informe 1 para compra unitária. Se omitida, assume 1.',
     minimum: 1,
     maximum: 12,
   })
