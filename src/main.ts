@@ -14,6 +14,17 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { RequestContextInterceptor } from './common/interceptors/request-context.interceptor';
 import { runWithRequestContext } from './common/request-context/request-context.util';
 
+function parseCorsOrigins(value?: string): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+}
+
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
@@ -32,6 +43,20 @@ async function bootstrap(): Promise<void> {
   const frontendAdminUrl = config.get<string>(
     'FRONTEND_ADMIN_URL',
     'http://localhost:3002',
+  );
+  const frontendAllowedOrigins = parseCorsOrigins(
+    config.get<string>('FRONTEND_ALLOWED_ORIGINS'),
+  );
+  const corsOrigins = Array.from(
+    new Set(
+      [
+        ...frontendAllowedOrigins,
+        frontendLojaUrl,
+        frontendAdminUrl,
+        'http://localhost:3001',
+        'http://localhost:3002',
+      ].filter((origin): origin is string => Boolean(origin?.trim())),
+    ),
   );
 
   app.use(
@@ -61,11 +86,23 @@ async function bootstrap(): Promise<void> {
   });
 
   app.enableCors({
-    origin: [frontendLojaUrl, frontendAdminUrl],
+    origin: (origin, callback) => {
+      if (!origin || corsOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      logger.warn(`CORS bloqueado para origem não autorizada: ${origin}`);
+      return callback(
+        new Error(`Origem ${origin} não autorizada pelo CORS`),
+        false,
+      );
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
+
+  logger.log(`CORS habilitado para origens: ${corsOrigins.join(', ')}`);
 
   app.useBodyParser('json', { limit: '50mb' });
   app.useBodyParser('urlencoded', { limit: '50mb', extended: true });

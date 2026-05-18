@@ -111,6 +111,6 @@ ADMIN
 - `helmet` — headers de segurança HTTP
 - `@nestjs/throttler` — rate limiting configurável (THROTTLE_TTL/THROTTLE_LIMIT)
 - `compression` — compressão gzip
-- CORS restrito a FRONTEND_LOJA_URL e FRONTEND_ADMIN_URL
+- CORS restrito a `FRONTEND_LOJA_URL`, `FRONTEND_ADMIN_URL` e origens extras em `FRONTEND_ALLOWED_ORIGINS`
 - Swagger protegido por Basic Auth em produção
 - JWT com access token curto (15m) + refresh token longo (7d)
