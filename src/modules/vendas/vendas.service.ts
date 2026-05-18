@@ -1094,6 +1094,10 @@ export class VendasService {
       );
     }
 
+    if (value instanceof Date) {
+      return value;
+    }
+
     if (!value || typeof value !== 'object') {
       return value;
     }
@@ -1154,6 +1158,10 @@ export class VendasService {
       return value.map((item) =>
         this.adicionarValoresFormatadosNaResposta(item),
       );
+    }
+
+    if (value instanceof Date) {
+      return value;
     }
 
     if (!value || typeof value !== 'object') {
