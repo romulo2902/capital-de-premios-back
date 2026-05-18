@@ -121,7 +121,7 @@ export class PagBankPixGateway implements PaymentGateway {
       reference_id: input.vendaId,
       customer: {
         name: input.nomePagador,
-        ...(input.emailPagador ? { email: input.emailPagador } : {}),
+        email: input.emailPagador || 'cliente.sem.email@capitaldepremios.com.br',
         tax_id: input.cpfPagador.replace(/\D/g, ''),
         ...(telefone ? { phones: [telefone] } : {}),
       },

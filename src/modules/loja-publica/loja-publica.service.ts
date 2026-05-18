@@ -384,9 +384,12 @@ export class LojaPublicaService {
         urlPagamento: cobranca.urlPagamento,
       };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(
-        `Erro ao criar cobrança PIX para venda ${venda.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `Erro ao criar cobrança PIX para venda ${venda.id}: ${errorMessage}`,
       );
+      // Para podermos visualizar o erro no retorno da API
+      dadosPagamento = { erro: errorMessage };
     }
 
     return {
