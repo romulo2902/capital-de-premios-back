@@ -8,7 +8,7 @@ import {
   ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { LojaPublicaService } from './loja-publica.service';
 import { ComprarLojaDto } from './dto/comprar-loja.dto';
@@ -36,9 +36,9 @@ export class LojaPublicaController {
 
   @Get('edicoes/:edicaoId/cartelas')
   @ApiOperation({
-    summary:
-      'Listar cartelas disponíveis para seleção visual',
-    description: 'Retorna cartelas paginadas e filtradas por setor (indiceRange).',
+    summary: 'Listar cartelas disponíveis para seleção visual',
+    description:
+      'Retorna cartelas paginadas e filtradas por setor (indiceRange).',
   })
   listarCartelasDisponiveis(
     @Param('edicaoId', ParseUUIDPipe) edicaoId: string,
@@ -49,6 +49,19 @@ export class LojaPublicaController {
 
   @Post('comprar')
   @ApiOperation({ summary: 'Realizar pedido de compra / Checkout (Público)' })
+  @ApiResponse({
+    status: 502,
+    description:
+      'Não foi possível gerar o PIX. O frontend deve bloquear o avanço do pedido.',
+    schema: {
+      example: {
+        statusCode: 502,
+        message:
+          'Não conseguimos gerar o PIX agora. Tente novamente em alguns instantes.',
+        data: null,
+      },
+    },
+  })
   comprar(@Body() dto: ComprarLojaDto) {
     return this.lojaService.comprar(dto);
   }

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  BadGatewayException,
   Logger,
   HttpException,
   HttpStatus,
@@ -384,12 +385,32 @@ export class LojaPublicaService {
         urlPagamento: cobranca.urlPagamento,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Erro ao criar cobrança PIX para venda ${venda.id}: ${errorMessage}`,
       );
-      // Para podermos visualizar o erro no retorno da API
-      dadosPagamento = { erro: errorMessage };
+      const gatewayPayloadAtual =
+        venda.gatewayPayload &&
+        typeof venda.gatewayPayload === 'object' &&
+        !Array.isArray(venda.gatewayPayload)
+          ? (venda.gatewayPayload as Record<string, unknown>)
+          : {};
+
+      await this.prisma.venda.update({
+        where: { id: venda.id },
+        data: {
+          status: StatusVenda.RECUSADO,
+          gatewayPayload: {
+            ...gatewayPayloadAtual,
+            erroPagamento: errorMessage,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      throw new BadGatewayException(
+        'Não conseguimos gerar o PIX agora. Tente novamente em alguns instantes.',
+      );
     }
 
     return {

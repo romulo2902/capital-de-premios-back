@@ -294,8 +294,8 @@ retornando o código Copia-e-Cola e a URL do QR Code para o bot enviar ao client
 3. Chama o gateway PagBank (PIX)
 4. Retorna os dados do PIX
 
-**⚠️ Se o PIX falhar (gateway indisponível):** O pedido é criado com status PENDENTE mas sem
-dados de PIX. O bot deve informar ao cliente e sugerir tentar novamente.
+**⚠️ Se o PIX falhar (gateway indisponível):** A API retorna erro HTTP 502 com mensagem
+humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
 
 **Autenticação:** Requer \`Authorization: Bearer {accessToken}\` obtido em \`POST /whatsapp/auth\`.
     `.trim(),
@@ -337,6 +337,19 @@ dados de PIX. O bot deve informar ao cliente e sugerir tentar novamente.
   })
   @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
   @ApiResponse({ status: 404, description: 'Campanha não encontrada.' })
+  @ApiResponse({
+    status: 502,
+    description:
+      'Não foi possível gerar o PIX. O bot deve informar o cliente para tentar novamente.',
+    schema: {
+      example: {
+        statusCode: 502,
+        message:
+          'Não conseguimos gerar o PIX agora. Tente novamente em alguns instantes.',
+        data: null,
+      },
+    },
+  })
   criarPedido(
     @Body() dto: CriarPedidoWhatsappDto,
     @CurrentUser() user: RequestUser,
