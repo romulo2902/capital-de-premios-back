@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { VendasService } from '../vendas/vendas.service';
 import { DistributedLockService } from '../../common/redis/distributed-lock.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('PagamentosService', () => {
   let service: PagamentosService;
@@ -46,9 +47,16 @@ describe('PagamentosService', () => {
       providers: [
         PagamentosService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('') },
+        },
         { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
         { provide: VendasService, useValue: mockVendasService },
-        { provide: DistributedLockService, useValue: mockDistributedLockService },
+        {
+          provide: DistributedLockService,
+          useValue: mockDistributedLockService,
+        },
       ],
     }).compile();
 
@@ -96,6 +104,59 @@ describe('PagamentosService', () => {
 
       expect(result.data![0].status).toBe('JA_PROCESSADA');
       expect(mockVendasService.confirmarPagamento).not.toHaveBeenCalled();
+    });
+
+    it('should process order payload resolved from legacy notification xml', async () => {
+      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        headers: {
+          get: jest.fn().mockReturnValue('application/xml'),
+        },
+        text: jest
+          .fn()
+          .mockResolvedValue(
+            '<transaction><code>ORDE_123</code><reference>venda-1</reference><status>3</status></transaction>',
+          ),
+      } as unknown as Response);
+
+      const configGet = jest.fn((key: string) => {
+        if (key === 'PAGBANK_NOTIFICATION_EMAIL') return 'test@example.com';
+        if (key === 'PAGBANK_NOTIFICATION_TOKEN') return 'token-123';
+        return '';
+      });
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PagamentosService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: ConfigService, useValue: { get: configGet } },
+          {
+            provide: PaymentGatewayFactory,
+            useValue: mockPaymentGatewayFactory,
+          },
+          { provide: VendasService, useValue: mockVendasService },
+          {
+            provide: DistributedLockService,
+            useValue: mockDistributedLockService,
+          },
+        ],
+      }).compile();
+
+      service = module.get<PagamentosService>(PagamentosService);
+      mockPrisma.venda.findFirst.mockResolvedValue({
+        id: 'venda-1',
+        status: 'PENDENTE',
+      });
+      mockVendasService.confirmarPagamento.mockResolvedValue({});
+
+      const result = await service.processarWebhookPix({
+        notificationCode: 'abc',
+        notificationType: 'transaction',
+      });
+
+      expect(result.data![0].status).toBe('CONFIRMADA');
+      expect(fetchMock).toHaveBeenCalled();
+      fetchMock.mockRestore();
     });
   });
 

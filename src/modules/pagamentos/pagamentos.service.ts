@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma, StatusVenda } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
@@ -24,12 +25,18 @@ type EventoPagamentoPagBank = {
   payload: Record<string, unknown>;
 };
 
+type PagBankNotificationLookupResult = {
+  body: Record<string, unknown>;
+  format: 'json' | 'xml';
+};
+
 @Injectable()
 export class PagamentosService {
   private readonly logger = new Logger(PagamentosService.name);
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
     private readonly vendasService: VendasService,
     private readonly distributedLock: DistributedLockService,
@@ -63,8 +70,9 @@ export class PagamentosService {
       return { message: 'Webhook recebido (sem dados)' };
     }
 
-    const evento = body['event'] as string | undefined;
-    const eventosPagamento = this.extrairEventosPagamento(body);
+    const bodyResolvido = await this.resolverBodyWebhookPagBank(body);
+    const evento = bodyResolvido['event'] as string | undefined;
+    const eventosPagamento = this.extrairEventosPagamento(bodyResolvido);
 
     if (eventosPagamento.length === 0) {
       this.logger.warn(
@@ -156,6 +164,50 @@ export class PagamentosService {
       message: 'Webhook processado',
       data: resultados,
     };
+  }
+
+  private async resolverBodyWebhookPagBank(
+    body: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const notificationCode = this.lerString(body, 'notificationCode');
+    const notificationType = this.lerString(body, 'notificationType');
+
+    if (!notificationCode || notificationType !== 'transaction') {
+      return body;
+    }
+
+    const email = this.config
+      .get<string>('PAGBANK_NOTIFICATION_EMAIL', '')
+      .trim();
+    const token = this.config
+      .get<string>('PAGBANK_NOTIFICATION_TOKEN', '')
+      .trim();
+
+    if (!email || !token) {
+      this.logger.warn(
+        'Webhook PagBank com notificationCode recebido, mas PAGBANK_NOTIFICATION_EMAIL/TOKEN não estão configurados.',
+      );
+      return body;
+    }
+
+    try {
+      const notificacao = await this.consultarNotificacaoTransacaoPagBank(
+        notificationCode,
+        email,
+        token,
+      );
+      this.logger.log(
+        `Webhook PagBank resolvido via notificationCode ${notificationCode} (${notificacao.format})`,
+      );
+      return notificacao.body;
+    } catch (error) {
+      this.logger.error(
+        `Falha ao consultar notificationCode ${notificationCode}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return body;
+    }
   }
 
   private extrairEventosPagamento(
@@ -279,6 +331,87 @@ export class PagamentosService {
   ): string | undefined {
     const valor = objeto[chave];
     return typeof valor === 'string' && valor.trim() ? valor.trim() : undefined;
+  }
+
+  private async consultarNotificacaoTransacaoPagBank(
+    notificationCode: string,
+    email: string,
+    token: string,
+  ): Promise<PagBankNotificationLookupResult> {
+    const url = new URL(
+      `https://ws.pagseguro.uol.com.br/v3/transactions/notifications/${notificationCode}`,
+    );
+    url.searchParams.set('email', email);
+    url.searchParams.set('token', token);
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `PagBank retornou ${response.status} ao consultar notificationCode`,
+      );
+    }
+
+    const contentType = response.headers.get('content-type') ?? '';
+    const rawBody = await response.text();
+
+    if (contentType.includes('json')) {
+      return {
+        body: JSON.parse(rawBody) as Record<string, unknown>,
+        format: 'json',
+      };
+    }
+
+    return {
+      body: this.converterXmlNotificacaoEmObjeto(rawBody),
+      format: 'xml',
+    };
+  }
+
+  private converterXmlNotificacaoEmObjeto(
+    xml: string,
+  ): Record<string, unknown> {
+    const transactionCode = this.lerTagXml(xml, 'code');
+    const reference = this.lerTagXml(xml, 'reference');
+    const statusCodigo = this.lerTagXml(xml, 'status');
+
+    return {
+      id: transactionCode,
+      reference_id: reference,
+      status: this.mapearStatusTransacaoLegada(statusCodigo),
+      event:
+        this.mapearStatusTransacaoLegada(statusCodigo) === 'PAID'
+          ? 'CHARGE.PAID'
+          : undefined,
+      notificationXml: xml,
+    };
+  }
+
+  private lerTagXml(xml: string, tagName: string): string | undefined {
+    const regex = new RegExp(`<${tagName}>([^<]+)</${tagName}>`, 'i');
+    const match = xml.match(regex);
+    return match?.[1]?.trim();
+  }
+
+  private mapearStatusTransacaoLegada(status?: string): string | undefined {
+    switch (status) {
+      case '3':
+      case '4':
+        return 'PAID';
+      case '1':
+      case '2':
+        return 'WAITING';
+      case '5':
+      case '6':
+      case '7':
+        return 'CANCELED';
+      default:
+        return undefined;
+    }
   }
 
   // ─── CONSULTAR STATUS ─────────────────────────────────

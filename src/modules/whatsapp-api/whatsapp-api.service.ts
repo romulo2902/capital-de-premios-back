@@ -30,6 +30,7 @@ import {
   obterQuantidadeCartelas,
   obterTipoCartelaPorQuantidadeCartelas,
 } from '../edicoes/edicoes-range.util';
+import { mapearErroPagamento } from '../../common/errors/payment-error.util';
 
 export type TipoCompraWhatsapp = 'UNITARIO' | 'COMBO';
 
@@ -372,9 +373,11 @@ export class WhatsappApiService {
         },
       });
 
-      throw new BadGatewayException(
-        'Não conseguimos gerar o PIX agora. Tente novamente em alguns instantes.',
-      );
+      const erroPagamento = mapearErroPagamento(errorMessage);
+      throw new BadGatewayException({
+        message: erroPagamento.userMessage,
+        errorCode: erroPagamento.errorCode,
+      });
     }
 
     return {

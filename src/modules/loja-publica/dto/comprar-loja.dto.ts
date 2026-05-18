@@ -22,6 +22,7 @@ import {
 import { TipoCartela } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import { ComboSelecionadoLojaDto } from './combo-selecionado-loja.dto';
+import { IsCpfValido } from '../../../common/validators/cpf.validator';
 
 const emptyStringToUndefined = ({ value }: { value: unknown }): unknown => {
   if (typeof value !== 'string') {
@@ -73,6 +74,7 @@ export class ComprarLojaDto {
   @ApiProperty({ example: '12345678900', description: 'CPF do cliente' })
   @IsString()
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
+  @IsCpfValido({ message: 'CPF inválido' })
   cpf: string;
 
   @ApiProperty({ example: 'João da Silva', description: 'Nome do cliente' })

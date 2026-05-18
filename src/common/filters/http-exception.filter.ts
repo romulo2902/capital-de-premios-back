@@ -38,7 +38,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    const { status, message, data } = this.normalizeException(exception, request);
+    const { status, message, data } = this.normalizeException(
+      exception,
+      request,
+    );
+    const extras = this.extractHttpExceptionExtras(exception);
     const stack = this.shouldLogStack(exception, status)
       ? exception.stack
       : undefined;
@@ -52,6 +56,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode: status,
       message,
       data: data ?? null,
+      ...extras,
     });
   }
 
@@ -154,6 +159,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     return (response as Record<string, unknown>).data;
+  }
+
+  private extractHttpExceptionExtras(
+    exception: unknown,
+  ): Record<string, unknown> {
+    if (!(exception instanceof HttpException)) {
+      return {};
+    }
+
+    const response = exception.getResponse();
+    if (!response || typeof response !== 'object') {
+      return {};
+    }
+
+    const {
+      message: _message,
+      data: _data,
+      statusCode: _statusCode,
+      ...rest
+    } = response as Record<string, unknown>;
+
+    return rest;
   }
 
   private mapPrismaKnownRequestError(

@@ -39,6 +39,7 @@ import { CreateFaleConoscoDto } from './dto/create-fale-conosco.dto';
 import { getRequestContext } from '../../common/request-context/request-context.util';
 import { RedisService } from '../../common/redis/redis.service';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
+import { mapearErroPagamento } from '../../common/errors/payment-error.util';
 
 export type TipoCompraEdicao = 'UNITARIO' | 'COMBO';
 
@@ -408,9 +409,11 @@ export class LojaPublicaService {
         },
       });
 
-      throw new BadGatewayException(
-        'Não conseguimos gerar o PIX agora. Tente novamente em alguns instantes.',
-      );
+      const erroPagamento = mapearErroPagamento(errorMessage);
+      throw new BadGatewayException({
+        message: erroPagamento.userMessage,
+        errorCode: erroPagamento.errorCode,
+      });
     }
 
     return {

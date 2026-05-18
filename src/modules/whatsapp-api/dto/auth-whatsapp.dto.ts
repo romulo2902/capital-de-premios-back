@@ -8,6 +8,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { IsCpfValido } from '../../../common/validators/cpf.validator';
 
 const emptyStringToUndefined = ({ value }: { value: unknown }): unknown => {
   if (typeof value !== 'string') {
@@ -42,6 +43,7 @@ export class AuthWhatsappDto {
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, {
     message: 'CPF inválido. Informe 11 dígitos ou no formato 000.000.000-00',
   })
+  @IsCpfValido({ message: 'CPF inválido' })
   cpf: string;
 
   @ApiProperty({
