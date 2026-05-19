@@ -21,18 +21,30 @@ export class LoginLojaDto {
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
   cpf?: string;
 
-  @ApiPropertyOptional({ example: 'João Silva', description: 'Campo legado opcional. Ignorado neste fluxo.' })
+  @ApiPropertyOptional({ example: 'João Silva', description: 'Obrigatório no primeiro acesso se o CPF for novo.' })
   @IsOptional()
   @IsString()
   nome?: string;
 
-  @ApiPropertyOptional({ example: '(61) 99999-9999', description: 'Campo legado opcional. Ignorado neste fluxo.' })
+  @ApiPropertyOptional({ example: '(61) 99999-9999', description: 'Obrigatório no primeiro acesso se o CPF for novo.' })
   @IsOptional()
   @IsString()
   telefone?: string;
 
-  @ApiPropertyOptional({ example: 'joao@email.com', description: 'Campo legado opcional. Ignorado neste fluxo.' })
+  @ApiPropertyOptional({ example: 'joao@email.com', description: 'E-mail do cliente (opcional)' })
   @IsOptional()
   @IsString()
   email?: string;
+
+  @ApiPropertyOptional({
+    example: '1990-01-15',
+    description:
+      'Obrigatório no primeiro acesso ou quando o cliente ainda não possuir data de nascimento cadastrada. Formato YYYY-MM-DD.',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'dataNascimento deve estar no formato YYYY-MM-DD',
+  })
+  dataNascimento?: string;
 }

@@ -9,6 +9,10 @@ import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  parseEValidarDataNascimento,
+  validarMaioridade,
+} from '../../common/utils/data-nascimento.util';
 import { LoginDto } from './dto/login.dto';
 import { LoginLojaDto } from './dto/login-loja.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -49,7 +53,7 @@ export interface AuthTokens {
  * │                                                                │
  * │  POST /auth/loja    →  Painel Cliente (CPF, sem senha)         │
  * │                        Perfil: CLIENTE                         │
- * │                        Exige cliente já cadastrado.            │
+ * │                        Auto-cria cliente se não existir.       │
  * │                                                                │
  * │  POST /auth/refresh →  Renovação de token (todos os perfis)   │
  * │                                                                │
@@ -144,7 +148,8 @@ export class AuthService {
    * Login do painel cliente — `POST /auth/loja`
    *
    * Exclusivo para CLIENTE (CPF, sem senha).
-   * O cliente deve já estar cadastrado com data de nascimento válida.
+   * Se o cliente não existir, cria um registro temporário que será
+   * completado na primeira compra.
    */
   async loginLoja(
     dto: LoginLojaDto,
@@ -154,13 +159,41 @@ export class AuthService {
     }
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cliente = await this.prisma.cliente.findUnique({
+    let cliente = await this.prisma.cliente.findUnique({
       where: { cpf: cpfLimpo },
     });
     if (!cliente) {
-      throw new UnauthorizedException(
-        'CPF não cadastrado. Realize o cadastro do cliente com data de nascimento antes de acessar.',
-      );
+      if (!dto.nome || !dto.telefone || !dto.dataNascimento) {
+        throw new UnauthorizedException(
+          'CPF não cadastrado. Por favor, forneça nome, telefone e data de nascimento para realizar o primeiro acesso.',
+        );
+      }
+
+      const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
+
+      cliente = await this.prisma.cliente.create({
+        data: {
+          cpf: cpfLimpo,
+          nome: dto.nome,
+          telefone: dto.telefone,
+          email: dto.email || null,
+          dataNascimento,
+        },
+      });
+    } else if (!cliente.dataNascimento) {
+      if (!dto.dataNascimento) {
+        throw new UnauthorizedException(
+          'Cliente sem data de nascimento cadastrada. Informe a data de nascimento para acessar.',
+        );
+      }
+
+      const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
+      cliente = await this.prisma.cliente.update({
+        where: { id: cliente.id },
+        data: { dataNascimento },
+      });
+    } else {
+      validarMaioridade(cliente.dataNascimento);
     }
 
     const payload: JwtPayload = {

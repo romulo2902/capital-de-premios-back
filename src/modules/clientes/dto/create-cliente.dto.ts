@@ -53,13 +53,13 @@ export class CreateClienteDto {
   @IsString()
   telefone: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: '1960-02-01',
-    description: 'Data de nascimento no formato ISO 8601 (YYYY-MM-DD).',
+    description:
+      'Data de nascimento no formato ISO 8601 (YYYY-MM-DD). Obrigatória para validar maioridade.',
   })
-  @IsOptional()
   @IsISO8601()
-  dataNascimento?: string;
+  dataNascimento: string;
 
   @ApiPropertyOptional({
     example: '70673-306',

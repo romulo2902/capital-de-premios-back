@@ -148,10 +148,16 @@ export class VendasService {
       );
     }
 
-    // 2. Validar cliente por CPF
+    // 2. Buscar ou criar cliente por CPF
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cliente = await this.buscarClienteElegivel(
+    const cliente = await this.buscarOuCriarCliente(
       cpfLimpo,
+      dto.nome,
+      dto.telefone,
+      dto.dataNascimento,
+      dto.email,
+      dto.vendedorId,
+      dto.distribuidorId,
     );
 
     // 3. Validar vendedor e distribuidor se informados
@@ -1276,25 +1282,49 @@ export class VendasService {
     return normalizedValue ? normalizedValue : null;
   }
 
-  private async buscarClienteElegivel(cpf: string) {
+  private async buscarOuCriarCliente(
+    cpf: string,
+    nome: string,
+    telefone: string,
+    dataNascimentoInput: string,
+    email?: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ) {
+    const dataNascimento = parseEValidarDataNascimento(dataNascimentoInput);
     const existente = await this.prisma.cliente.findUnique({
       where: { cpf },
     });
 
-    if (!existente) {
-      throw new BadRequestException(
-        'Cliente não cadastrado. Cadastre o cliente com data de nascimento antes de concluir a compra.',
-      );
+    if (existente) {
+      if (!existente.dataNascimento) {
+        return this.prisma.cliente.update({
+          where: { id: existente.id },
+          data: { dataNascimento },
+        });
+      }
+
+      if (existente.dataNascimento) {
+        validarMaioridade(existente.dataNascimento);
+      }
+
+      return existente;
     }
 
-    if (!existente.dataNascimento) {
-      throw new BadRequestException(
-        'Cliente sem data de nascimento cadastrada. Atualize o cadastro antes de concluir a compra.',
-      );
-    }
+    const cliente = await this.prisma.cliente.create({
+      data: {
+        cpf,
+        nome,
+        telefone,
+        email: email?.trim() || null,
+        dataNascimento,
+        vendedorId: vendedorId ?? null,
+        distribuidorId: distribuidorId ?? null,
+      },
+    });
 
-    validarMaioridade(existente.dataNascimento);
-    return existente;
+    this.logger.log(`Cliente auto-criado: ${nome} (CPF: ${cpf})`);
+    return cliente;
   }
 
   private validarJanelaDeVenda(

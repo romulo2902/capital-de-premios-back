@@ -78,16 +78,15 @@ export class AuthWhatsappDto {
   @IsEmail({}, { message: 'E-mail inválido' })
   email?: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: '1990-01-15',
     description:
-      'Data de nascimento no formato YYYY-MM-DD (opcional). String vazia é ignorada.',
+      'Data de nascimento no formato YYYY-MM-DD. Obrigatória para validar maioridade.',
   })
   @Transform(emptyStringToUndefined)
-  @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'Data de nascimento deve estar no formato YYYY-MM-DD',
   })
-  dataNascimento?: string;
+  dataNascimento: string;
 }

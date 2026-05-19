@@ -23,7 +23,10 @@ import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway
 import { CreateVendaSenaDto } from './dto/create-venda-sena.dto';
 import { FiltroVendasSenaDto } from './dto/filtro-vendas-sena.dto';
 import type { RequestUser } from '../../auth/strategies/jwt.strategy';
-import { validarMaioridade } from '../../../common/utils/data-nascimento.util';
+import {
+  parseEValidarDataNascimento,
+  validarMaioridade,
+} from '../../../common/utils/data-nascimento.util';
 
 type PrismaTransactionClient = Prisma.TransactionClient;
 
@@ -93,9 +96,17 @@ export class VendasSenaService {
       comboSenaId = combo.id;
     }
 
-    // 4. Validar cliente
+    // 4. Buscar ou criar cliente
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cliente = await this.buscarClienteElegivel(cpfLimpo);
+    const cliente = await this.buscarOuCriarCliente(
+      cpfLimpo,
+      dto.nome,
+      dto.telefone,
+      dto.dataNascimento,
+      dto.email,
+      dto.vendedorId,
+      dto.distribuidorId,
+    );
 
     // 5. Validar vendedor / distribuidor
     if (dto.vendedorId) {
@@ -578,23 +589,44 @@ export class VendasSenaService {
     }
   }
 
-  private async buscarClienteElegivel(cpf: string) {
+  private async buscarOuCriarCliente(
+    cpf: string,
+    nome: string,
+    telefone: string,
+    dataNascimentoInput: string,
+    email?: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ) {
+    const dataNascimento = parseEValidarDataNascimento(dataNascimentoInput);
     const existente = await this.prisma.cliente.findUnique({ where: { cpf } });
 
-    if (!existente) {
-      throw new BadRequestException(
-        'Cliente não cadastrado. Cadastre o cliente com data de nascimento antes de concluir a compra.',
-      );
+    if (existente) {
+      if (!existente.dataNascimento) {
+        return this.prisma.cliente.update({
+          where: { cpf },
+          data: { dataNascimento },
+        });
+      }
+
+      if (existente.dataNascimento) {
+        validarMaioridade(existente.dataNascimento);
+      }
+
+      return existente;
     }
 
-    if (!existente.dataNascimento) {
-      throw new BadRequestException(
-        'Cliente sem data de nascimento cadastrada. Atualize o cadastro antes de concluir a compra.',
-      );
-    }
-
-    validarMaioridade(existente.dataNascimento);
-    return existente;
+    return this.prisma.cliente.create({
+      data: {
+        cpf,
+        nome,
+        telefone,
+        email: email ?? null,
+        dataNascimento,
+        vendedorId: vendedorId ?? null,
+        distribuidorId: distribuidorId ?? null,
+      },
+    });
   }
 
   private resolverTipoPagamento(

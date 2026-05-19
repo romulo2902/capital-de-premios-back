@@ -203,7 +203,27 @@ describe('AuthService', () => {
   // ─── POST /auth/loja — Painel Cliente ──────────────────────────
 
   describe('loginLoja() — painel cliente', () => {
-    it('deve exigir cliente previamente cadastrado', async () => {
+    it('deve criar cliente se não existir e retornar accessToken', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValue(null);
+      mockPrisma.cliente.create.mockResolvedValue({
+        id: 'c-1',
+        cpf: '12345678900',
+        nome: '',
+        telefone: '',
+      });
+
+      const result = await service.loginLoja({
+        cpf: '123.456.789-00',
+        nome: 'Cliente Teste',
+        telefone: '(11) 99999-9999',
+        dataNascimento: '1990-01-15',
+      });
+      expect(result.data).toHaveProperty('accessToken');
+      expect(result.data).toHaveProperty('perfil', 'CLIENTE');
+      expect(mockPrisma.cliente.create).toHaveBeenCalled();
+    });
+
+    it('deve exigir data de nascimento no primeiro acesso', async () => {
       mockPrisma.cliente.findUnique.mockResolvedValue(null);
 
       await expect(
@@ -213,8 +233,6 @@ describe('AuthService', () => {
           telefone: '(11) 99999-9999',
         }),
       ).rejects.toThrow(UnauthorizedException);
-
-      expect(mockPrisma.cliente.create).not.toHaveBeenCalled();
     });
 
     it('deve retornar token para cliente já existente', async () => {
@@ -223,6 +241,7 @@ describe('AuthService', () => {
         cpf: '98765432100',
         nome: 'Fulano',
         telefone: '11999999999',
+        dataNascimento: new Date('1990-01-15T00:00:00.000Z'),
       });
 
       const result = await service.loginLoja({ cpf: '987.654.321-00' });

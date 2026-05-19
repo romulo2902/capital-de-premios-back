@@ -51,7 +51,7 @@ export class AuthController {
     summary: 'Login do painel cliente (CLIENTE) — CPF, sem senha',
     description:
       'Autentica clientes pelo CPF. Se o cliente não existir, ' +
-      'cria um registro temporário que será completado na primeira compra.',
+      'cria um registro com nome, telefone e data de nascimento informados no primeiro acesso.',
   })
   loginLoja(@Body() dto: LoginLojaDto) {
     return this.authService.loginLoja(dto);

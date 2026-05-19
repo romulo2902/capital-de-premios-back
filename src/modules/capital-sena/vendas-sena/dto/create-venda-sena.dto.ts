@@ -83,6 +83,17 @@ export class CreateVendaSenaDto {
   @IsEmail()
   email?: string;
 
+  @ApiProperty({
+    example: '1985-04-11',
+    description:
+      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade.',
+  })
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'dataNascimento deve estar no formato YYYY-MM-DD',
+  })
+  dataNascimento: string;
+
   // Origem da venda
   @ApiPropertyOptional({ example: 'uuid-do-vendedor' })
   @IsOptional()
