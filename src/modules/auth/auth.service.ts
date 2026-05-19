@@ -49,7 +49,7 @@ export interface AuthTokens {
  * │                                                                │
  * │  POST /auth/loja    →  Painel Cliente (CPF, sem senha)         │
  * │                        Perfil: CLIENTE                         │
- * │                        Auto-cria cliente se não existir.       │
+ * │                        Exige cliente já cadastrado.            │
  * │                                                                │
  * │  POST /auth/refresh →  Renovação de token (todos os perfis)   │
  * │                                                                │
@@ -144,8 +144,7 @@ export class AuthService {
    * Login do painel cliente — `POST /auth/loja`
    *
    * Exclusivo para CLIENTE (CPF, sem senha).
-   * Se o cliente não existir, cria um registro temporário que será
-   * completado na primeira compra.
+   * O cliente deve já estar cadastrado com data de nascimento válida.
    */
   async loginLoja(
     dto: LoginLojaDto,
@@ -155,24 +154,13 @@ export class AuthService {
     }
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    let cliente = await this.prisma.cliente.findUnique({
+    const cliente = await this.prisma.cliente.findUnique({
       where: { cpf: cpfLimpo },
     });
     if (!cliente) {
-      if (!dto.nome || !dto.telefone) {
-        throw new UnauthorizedException(
-          'CPF não cadastrado. Por favor, forneça nome e telefone para realizar o primeiro acesso.',
-        );
-      }
-
-      cliente = await this.prisma.cliente.create({
-        data: {
-          cpf: cpfLimpo,
-          nome: dto.nome,
-          telefone: dto.telefone,
-          email: dto.email || null,
-        },
-      });
+      throw new UnauthorizedException(
+        'CPF não cadastrado. Realize o cadastro do cliente com data de nascimento antes de acessar.',
+      );
     }
 
     const payload: JwtPayload = {

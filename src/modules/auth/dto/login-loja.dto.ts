@@ -1,4 +1,4 @@
-import { IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
+import { IsOptional, IsString, Matches } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -21,17 +21,17 @@ export class LoginLojaDto {
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
   cpf?: string;
 
-  @ApiPropertyOptional({ example: 'João Silva', description: 'Obrigatório no primeiro acesso se o CPF for novo.' })
+  @ApiPropertyOptional({ example: 'João Silva', description: 'Campo legado opcional. Ignorado neste fluxo.' })
   @IsOptional()
   @IsString()
   nome?: string;
 
-  @ApiPropertyOptional({ example: '(61) 99999-9999', description: 'Obrigatório no primeiro acesso se o CPF for novo.' })
+  @ApiPropertyOptional({ example: '(61) 99999-9999', description: 'Campo legado opcional. Ignorado neste fluxo.' })
   @IsOptional()
   @IsString()
   telefone?: string;
 
-  @ApiPropertyOptional({ example: 'joao@email.com', description: 'E-mail do cliente (opcional)' })
+  @ApiPropertyOptional({ example: 'joao@email.com', description: 'Campo legado opcional. Ignorado neste fluxo.' })
   @IsOptional()
   @IsString()
   email?: string;

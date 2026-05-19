@@ -41,6 +41,10 @@ import {
 import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
 import { calcularQuantidadeCartelasDaVenda } from './vendas-quantidade.util';
 import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
+import {
+  parseEValidarDataNascimento,
+  validarMaioridade,
+} from '../../common/utils/data-nascimento.util';
 
 type DetalheVenda = Pick<
   EdicaoDetalhe,
@@ -144,15 +148,10 @@ export class VendasService {
       );
     }
 
-    // 2. Buscar ou criar cliente por CPF
+    // 2. Validar cliente por CPF
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cliente = await this.buscarOuCriarCliente(
+    const cliente = await this.buscarClienteElegivel(
       cpfLimpo,
-      dto.nome,
-      dto.telefone,
-      dto.email,
-      dto.vendedorId,
-      dto.distribuidorId,
     );
 
     // 3. Validar vendedor e distribuidor se informados
@@ -1036,7 +1035,9 @@ export class VendasService {
     if (dto.dataNascimento !== undefined) {
       const valorNormalizado = dto.dataNascimento.trim();
       data.dataNascimento = valorNormalizado
-        ? this.parseDataNascimento(valorNormalizado)
+        ? parseEValidarDataNascimento(valorNormalizado, {
+            allowBrazilianFormat: true,
+          })
         : null;
     }
 
@@ -1275,78 +1276,25 @@ export class VendasService {
     return normalizedValue ? normalizedValue : null;
   }
 
-  private parseDataNascimento(value: string): Date {
-    const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (isoMatch) {
-      return this.validarDataCalendario(
-        Number(isoMatch[1]),
-        Number(isoMatch[2]),
-        Number(isoMatch[3]),
-      );
-    }
-
-    const brMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
-    if (brMatch) {
-      return this.validarDataCalendario(
-        Number(brMatch[3]),
-        Number(brMatch[2]),
-        Number(brMatch[1]),
-      );
-    }
-
-    throw new BadRequestException(
-      'dataNascimento deve estar no formato DD/MM/YYYY ou YYYY-MM-DD',
-    );
-  }
-
-  private validarDataCalendario(
-    year: number,
-    month: number,
-    day: number,
-  ): Date {
-    const candidate = new Date(Date.UTC(year, month - 1, day));
-
-    if (
-      Number.isNaN(candidate.getTime()) ||
-      candidate.getUTCFullYear() !== year ||
-      candidate.getUTCMonth() !== month - 1 ||
-      candidate.getUTCDate() !== day
-    ) {
-      throw new BadRequestException('dataNascimento inválida');
-    }
-
-    return candidate;
-  }
-
-  private async buscarOuCriarCliente(
-    cpf: string,
-    nome: string,
-    telefone: string,
-    email?: string,
-    vendedorId?: string,
-    distribuidorId?: string,
-  ) {
+  private async buscarClienteElegivel(cpf: string) {
     const existente = await this.prisma.cliente.findUnique({
       where: { cpf },
     });
 
-    if (existente) {
-      return existente;
+    if (!existente) {
+      throw new BadRequestException(
+        'Cliente não cadastrado. Cadastre o cliente com data de nascimento antes de concluir a compra.',
+      );
     }
 
-    const cliente = await this.prisma.cliente.create({
-      data: {
-        cpf,
-        nome,
-        telefone,
-        email: email?.trim() || null,
-        vendedorId: vendedorId ?? null,
-        distribuidorId: distribuidorId ?? null,
-      },
-    });
+    if (!existente.dataNascimento) {
+      throw new BadRequestException(
+        'Cliente sem data de nascimento cadastrada. Atualize o cadastro antes de concluir a compra.',
+      );
+    }
 
-    this.logger.log(`Cliente auto-criado: ${nome} (CPF: ${cpf})`);
-    return cliente;
+    validarMaioridade(existente.dataNascimento);
+    return existente;
   }
 
   private validarJanelaDeVenda(

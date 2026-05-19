@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClientesService } from './clientes.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 
 describe('ClientesService', () => {
   let service: ClientesService;
@@ -71,6 +75,7 @@ describe('ClientesService', () => {
         cpf: '200.074.694-20',
         nome: 'Cliente Teste',
         telefone: '(84) 99999-9999',
+        dataNascimento: '1990-01-01',
       },
       {
         id: 'usuario-1',
@@ -105,6 +110,7 @@ describe('ClientesService', () => {
           cpf: '200.074.694-20',
           nome: 'Cliente Teste',
           telefone: '(84) 99999-9999',
+          dataNascimento: '1990-01-01',
           vendedorId: 'vendedor-externo',
         },
         {
@@ -117,6 +123,27 @@ describe('ClientesService', () => {
         },
       ),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('create should exigir data de nascimento', async () => {
+    mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+
+    await expect(
+      service.create(
+        {
+          cpf: '200.074.694-20',
+          nome: 'Cliente Teste',
+          telefone: '(84) 99999-9999',
+        },
+        {
+          id: 'usuario-1',
+          email: 'admin@test.com',
+          cpf: '12345678900',
+          perfil: 'ADMIN',
+          status: 'ATIVO',
+        },
+      ),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('update should normalize empty distribuidorId to null', async () => {

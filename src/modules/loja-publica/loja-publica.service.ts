@@ -40,6 +40,10 @@ import { getRequestContext } from '../../common/request-context/request-context.
 import { RedisService } from '../../common/redis/redis.service';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
 import { mapearErroPagamento } from '../../common/errors/payment-error.util';
+import {
+  parseEValidarDataNascimento,
+  validarMaioridade,
+} from '../../common/utils/data-nascimento.util';
 
 export type TipoCompraEdicao = 'UNITARIO' | 'COMBO';
 
@@ -253,23 +257,35 @@ export class LojaPublicaService {
 
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
     const emailNormalizado = dto.email?.trim() || null;
+    if (!dto.dataNascimento) {
+      throw new BadRequestException(
+        'dataNascimento é obrigatória para concluir a compra',
+      );
+    }
+    const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
     const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
     let cliente = await this.prisma.cliente.findUnique({
       where: { cpf: cpfLimpo },
     });
     if (!cliente) {
-      const dbDate = dto.dataNascimento ? new Date(dto.dataNascimento) : null;
       cliente = await this.prisma.cliente.create({
         data: {
           cpf: cpfLimpo,
           nome: dto.nome,
           telefone: dto.telefone,
           email: emailNormalizado,
-          dataNascimento: dbDate && !isNaN(dbDate.getTime()) ? dbDate : null,
+          dataNascimento,
           vendedorId: sellerOrigem.vendedorId,
           distribuidorId: sellerOrigem.distribuidorId,
         },
       });
+    } else if (!cliente.dataNascimento) {
+      cliente = await this.prisma.cliente.update({
+        where: { id: cliente.id },
+        data: { dataNascimento },
+      });
+    } else {
+      validarMaioridade(cliente.dataNascimento);
     }
 
     const venda = await this.prisma.venda.create({

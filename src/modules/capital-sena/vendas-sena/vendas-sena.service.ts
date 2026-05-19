@@ -23,6 +23,7 @@ import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway
 import { CreateVendaSenaDto } from './dto/create-venda-sena.dto';
 import { FiltroVendasSenaDto } from './dto/filtro-vendas-sena.dto';
 import type { RequestUser } from '../../auth/strategies/jwt.strategy';
+import { validarMaioridade } from '../../../common/utils/data-nascimento.util';
 
 type PrismaTransactionClient = Prisma.TransactionClient;
 
@@ -92,16 +93,9 @@ export class VendasSenaService {
       comboSenaId = combo.id;
     }
 
-    // 4. Buscar ou criar cliente
+    // 4. Validar cliente
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cliente = await this.buscarOuCriarCliente(
-      cpfLimpo,
-      dto.nome,
-      dto.telefone,
-      dto.email,
-      dto.vendedorId,
-      dto.distribuidorId,
-    );
+    const cliente = await this.buscarClienteElegivel(cpfLimpo);
 
     // 5. Validar vendedor / distribuidor
     if (dto.vendedorId) {
@@ -584,45 +578,23 @@ export class VendasSenaService {
     }
   }
 
-  private async buscarOuCriarCliente(
-    cpf: string,
-    nome: string,
-    telefone: string,
-    email?: string,
-    vendedorId?: string,
-    distribuidorId?: string,
-  ) {
+  private async buscarClienteElegivel(cpf: string) {
     const existente = await this.prisma.cliente.findUnique({ where: { cpf } });
-    if (existente) {
-      // Atualizar dados se necessário
-      if (
-        existente.nome !== nome ||
-        existente.telefone !== telefone ||
-        (email && existente.email !== email)
-      ) {
-        return this.prisma.cliente.update({
-          where: { cpf },
-          data: {
-            nome,
-            telefone,
-            ...(email ? { email } : {}),
-          },
-        });
-      }
-      return existente;
+
+    if (!existente) {
+      throw new BadRequestException(
+        'Cliente não cadastrado. Cadastre o cliente com data de nascimento antes de concluir a compra.',
+      );
     }
 
-    // Auto-cadastro na compra
-    return this.prisma.cliente.create({
-      data: {
-        cpf,
-        nome,
-        telefone,
-        email: email ?? null,
-        vendedorId: vendedorId ?? null,
-        distribuidorId: distribuidorId ?? null,
-      },
-    });
+    if (!existente.dataNascimento) {
+      throw new BadRequestException(
+        'Cliente sem data de nascimento cadastrada. Atualize o cadastro antes de concluir a compra.',
+      );
+    }
+
+    validarMaioridade(existente.dataNascimento);
+    return existente;
   }
 
   private resolverTipoPagamento(

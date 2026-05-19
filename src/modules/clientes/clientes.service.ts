@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -13,6 +14,7 @@ import {
   buildPaginatedResponse,
   normalizePagination,
 } from '../../common/utils/pagination.util';
+import { parseEValidarDataNascimento } from '../../common/utils/data-nascimento.util';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @Injectable()
@@ -177,6 +179,9 @@ export class ClientesService {
       where: { cpf: dto.cpf },
     });
     if (existing) throw new ConflictException('CPF já cadastrado');
+    if (!dto.dataNascimento) {
+      throw new BadRequestException('Data de nascimento é obrigatória');
+    }
 
     const { vendedorId, distribuidorId } =
       await this.resolverRelacionamentosParaCriacao(
@@ -190,9 +195,7 @@ export class ClientesService {
       cpf: dto.cpf,
       nome: dto.nome,
       telefone: dto.telefone,
-      dataNascimento: dto.dataNascimento
-        ? new Date(dto.dataNascimento)
-        : undefined,
+      dataNascimento: parseEValidarDataNascimento(dto.dataNascimento),
       cep: dto.cep,
       endereco: dto.endereco,
       numero: dto.numero,
@@ -306,7 +309,9 @@ export class ClientesService {
 
     const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };
     delete data.codigo;
-    if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
+    if (dto.dataNascimento) {
+      data.dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
+    }
 
     if (vendedorId !== undefined || distribuidorId !== undefined) {
       const finalVendedorId =

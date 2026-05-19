@@ -31,6 +31,10 @@ import {
   obterTipoCartelaPorQuantidadeCartelas,
 } from '../edicoes/edicoes-range.util';
 import { mapearErroPagamento } from '../../common/errors/payment-error.util';
+import {
+  parseEValidarDataNascimento,
+  validarMaioridade,
+} from '../../common/utils/data-nascimento.util';
 
 export type TipoCompraWhatsapp = 'UNITARIO' | 'COMBO';
 
@@ -69,35 +73,49 @@ export class WhatsappApiService {
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
     const telefoneLimpo = dto.telefone.replace(/\D/g, '');
     const emailNormalizado = dto.email?.trim() || null;
+    if (!dto.dataNascimento) {
+      throw new BadRequestException(
+        'dataNascimento é obrigatória para cadastro do cliente',
+      );
+    }
+    const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
 
     let cliente = await this.prisma.cliente.findUnique({
       where: { cpf: cpfLimpo },
     });
 
     if (!cliente) {
-      // Primeiro acesso — criar cliente
-      const dbDate = dto.dataNascimento ? new Date(dto.dataNascimento) : null;
       cliente = await this.prisma.cliente.create({
         data: {
           cpf: cpfLimpo,
           nome: dto.nome,
           telefone: telefoneLimpo,
           email: emailNormalizado,
-          dataNascimento: dbDate && !isNaN(dbDate.getTime()) ? dbDate : null,
+          dataNascimento,
         },
       });
       this.logger.log(`Novo cliente criado via WhatsApp API: CPF ${cpfLimpo}`);
     } else {
-      // Cliente existente — atualizar dados se necessário
+      if (cliente.dataNascimento) {
+        validarMaioridade(cliente.dataNascimento);
+      }
+
       await this.prisma.cliente.update({
         where: { id: cliente.id },
         data: {
           nome: dto.nome,
           telefone: telefoneLimpo,
           ...(emailNormalizado ? { email: emailNormalizado } : {}),
+          ...(cliente.dataNascimento ? {} : { dataNascimento }),
         },
       });
-      cliente = { ...cliente, nome: dto.nome, telefone: telefoneLimpo };
+      cliente = {
+        ...cliente,
+        nome: dto.nome,
+        telefone: telefoneLimpo,
+        email: emailNormalizado ?? cliente.email,
+        dataNascimento: cliente.dataNascimento ?? dataNascimento,
+      };
       this.logger.log(`Autenticação WhatsApp API: CPF ${cpfLimpo}`);
     }
 
