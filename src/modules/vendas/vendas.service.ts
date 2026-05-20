@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -591,9 +592,17 @@ export class VendasService {
 
   // ─── FIND ALL ──────────────────────────────────────────
 
-  async findAll(page = 1, limit = 20, filtros?: FiltroVendasDto) {
+  async findAll(
+    page = 1,
+    limit = 20,
+    filtros?: FiltroVendasDto,
+    user?: RequestUser,
+  ) {
     const pagination = normalizePagination(page, limit);
-    const where = this.buildWhereFromFiltros(filtros);
+    const where = this.mergeWhere(
+      this.buildWhereFromFiltros(filtros),
+      this.buildHierarchyWhere(user),
+    );
 
     const [data, total] = await Promise.all([
       this.prisma.venda.findMany({
@@ -620,8 +629,8 @@ export class VendasService {
 
   // ─── FIND ONE ──────────────────────────────────────────
 
-  async findOne(id: string) {
-    const venda = await this.buscarVendaComContextoEdicao(id);
+  async findOne(id: string, user?: RequestUser) {
+    const venda = await this.buscarVendaComContextoEdicao(id, user);
 
     return {
       message: 'Venda encontrada com sucesso',
@@ -629,8 +638,8 @@ export class VendasService {
     };
   }
 
-  async consultarStatus(id: string) {
-    const venda = await this.buscarVendaComContextoEdicao(id);
+  async consultarStatus(id: string, user?: RequestUser) {
+    const venda = await this.buscarVendaComContextoEdicao(id, user);
 
     return {
       message: 'Status da venda consultado com sucesso',
@@ -638,9 +647,9 @@ export class VendasService {
     };
   }
 
-  async update(id: string, dto: UpdateVendaDto) {
-    const venda = await this.prisma.venda.findUnique({
-      where: { id },
+  async update(id: string, dto: UpdateVendaDto, user?: RequestUser) {
+    const venda = await this.prisma.venda.findFirst({
+      where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
       select: {
         id: true,
         clienteId: true,
@@ -664,7 +673,7 @@ export class VendasService {
       data: clienteUpdateData,
     });
 
-    const vendaAtualizada = await this.buscarVendaComContextoEdicao(id);
+    const vendaAtualizada = await this.buscarVendaComContextoEdicao(id, user);
 
     this.logger.log(`Venda ${id} atualizada com sucesso`);
 
@@ -676,12 +685,30 @@ export class VendasService {
 
   // ─── FIND BY CLIENTE CPF ──────────────────────────────
 
-  async findByCliente(cpf: string, page = 1, limit = 20) {
+  async findByCliente(
+    cpf: string,
+    page = 1,
+    limit = 20,
+    user?: RequestUser,
+  ) {
     const cpfLimpo = cpf.replace(/\D/g, '');
     const pagination = normalizePagination(page, limit);
 
-    const cliente = await this.prisma.cliente.findUnique({
-      where: { cpf: cpfLimpo },
+    const clienteWhere: Prisma.ClienteWhereInput =
+      user?.perfil === 'DISTRIBUIDOR'
+        ? {
+            cpf: cpfLimpo,
+            distribuidorId: user.distribuidorId,
+          }
+        : user?.perfil === 'VENDEDOR'
+          ? {
+              cpf: cpfLimpo,
+              vendedorId: user.vendedorId,
+            }
+          : { cpf: cpfLimpo };
+
+    const cliente = await this.prisma.cliente.findFirst({
+      where: clienteWhere,
       select: { id: true },
     });
 
@@ -689,7 +716,10 @@ export class VendasService {
       throw new NotFoundException('Cliente não encontrado');
     }
 
-    const where = { clienteId: cliente.id };
+    const where = this.mergeWhere(
+      { clienteId: cliente.id },
+      this.buildHierarchyWhere(user),
+    );
 
     const [data, total] = await Promise.all([
       this.prisma.venda.findMany({
@@ -991,9 +1021,9 @@ export class VendasService {
     return { vendaAtualizada, bilhetesAlocados };
   }
 
-  private async buscarVendaComContextoEdicao(id: string) {
-    const venda = await this.prisma.venda.findUnique({
-      where: { id },
+  private async buscarVendaComContextoEdicao(id: string, user?: RequestUser) {
+    const venda = await this.prisma.venda.findFirst({
+      where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
       include: VENDA_INCLUDE_DETALHES,
     });
 
@@ -2138,6 +2168,51 @@ export class VendasService {
     }
 
     return where;
+  }
+
+  private buildHierarchyWhere(user?: RequestUser): Prisma.VendaWhereInput {
+    if (!user || user.perfil === 'ADMIN') {
+      return {};
+    }
+
+    if (user.perfil === 'DISTRIBUIDOR') {
+      if (!user.distribuidorId) {
+        throw new ForbiddenException(
+          'Usuário distribuidor sem vínculo válido para consultar vendas',
+        );
+      }
+
+      return { distribuidorId: user.distribuidorId };
+    }
+
+    if (user.perfil === 'VENDEDOR') {
+      if (!user.vendedorId) {
+        throw new ForbiddenException(
+          'Usuário vendedor sem vínculo válido para consultar vendas',
+        );
+      }
+
+      return { vendedorId: user.vendedorId };
+    }
+
+    return {};
+  }
+
+  private mergeWhere(
+    baseWhere: Prisma.VendaWhereInput,
+    scopeWhere: Prisma.VendaWhereInput,
+  ): Prisma.VendaWhereInput {
+    if (Object.keys(baseWhere).length === 0) {
+      return scopeWhere;
+    }
+
+    if (Object.keys(scopeWhere).length === 0) {
+      return baseWhere;
+    }
+
+    return {
+      AND: [baseWhere, scopeWhere],
+    };
   }
 
   private validarTransicaoStatus(

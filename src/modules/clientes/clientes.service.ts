@@ -34,6 +34,51 @@ export class ClientesService {
     return normalizedValue === '' ? null : normalizedValue;
   }
 
+  private buildHierarchyWhere(user?: RequestUser): Prisma.ClienteWhereInput {
+    if (!user || user.perfil === 'ADMIN') {
+      return {};
+    }
+
+    if (user.perfil === 'DISTRIBUIDOR') {
+      if (!user.distribuidorId) {
+        throw new ForbiddenException(
+          'Usuário distribuidor sem vínculo válido para consultar clientes',
+        );
+      }
+
+      return { distribuidorId: user.distribuidorId };
+    }
+
+    if (user.perfil === 'VENDEDOR') {
+      if (!user.vendedorId) {
+        throw new ForbiddenException(
+          'Usuário vendedor sem vínculo válido para consultar clientes',
+        );
+      }
+
+      return { vendedorId: user.vendedorId };
+    }
+
+    return {};
+  }
+
+  private mergeWhere(
+    baseWhere: Prisma.ClienteWhereInput,
+    scopeWhere: Prisma.ClienteWhereInput,
+  ): Prisma.ClienteWhereInput {
+    if (Object.keys(baseWhere).length === 0) {
+      return scopeWhere;
+    }
+
+    if (Object.keys(scopeWhere).length === 0) {
+      return baseWhere;
+    }
+
+    return {
+      AND: [baseWhere, scopeWhere],
+    };
+  }
+
   private async validateRelacionamentos(
     vendedorId: string | null | undefined,
     distribuidorId: string | null | undefined,
@@ -226,20 +271,26 @@ export class ClientesService {
     search?: string,
     vendedorId?: string,
     distribuidorId?: string,
+    user?: RequestUser,
   ) {
     const pagination = normalizePagination(page, limit);
-    const where: Record<string, unknown> = {};
+    const filtersWhere: Prisma.ClienteWhereInput = {};
 
-    if (vendedorId) where.vendedorId = vendedorId;
-    if (distribuidorId) where.distribuidorId = distribuidorId;
+    if (vendedorId) filtersWhere.vendedorId = vendedorId;
+    if (distribuidorId) filtersWhere.distribuidorId = distribuidorId;
     if (search) {
-      where.OR = [
+      filtersWhere.OR = [
         { nome: { contains: search, mode: 'insensitive' } },
         { cpf: { contains: search } },
         { telefone: { contains: search } },
         { email: { contains: search, mode: 'insensitive' } },
       ];
     }
+
+    const where = this.mergeWhere(
+      filtersWhere,
+      this.buildHierarchyWhere(user),
+    );
 
     const [data, total] = await Promise.all([
       this.prisma.cliente.findMany({
@@ -267,9 +318,9 @@ export class ClientesService {
     );
   }
 
-  async findOne(id: string) {
-    const cliente = await this.prisma.cliente.findUnique({
-      where: { id },
+  async findOne(id: string, user?: RequestUser) {
+    const cliente = await this.prisma.cliente.findFirst({
+      where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
       include: {
         vendedor: { select: { id: true, nome: true, codigo: true } },
         distribuidor: { select: { id: true, nome: true, codigo: true } },
@@ -280,20 +331,24 @@ export class ClientesService {
     return cliente;
   }
 
-  async findByCpf(cpf: string) {
-    const cliente = await this.prisma.cliente.findUnique({ where: { cpf } });
+  async findByCpf(cpf: string, user?: RequestUser) {
+    const cliente = await this.prisma.cliente.findFirst({
+      where: this.mergeWhere({ cpf }, this.buildHierarchyWhere(user)),
+    });
     if (!cliente) throw new NotFoundException('Cliente não encontrado');
     return cliente;
   }
 
-  async findByCodigo(codigo: number) {
-    const cliente = await this.prisma.cliente.findUnique({ where: { codigo } });
+  async findByCodigo(codigo: number, user?: RequestUser) {
+    const cliente = await this.prisma.cliente.findFirst({
+      where: this.mergeWhere({ codigo }, this.buildHierarchyWhere(user)),
+    });
     if (!cliente) throw new NotFoundException('Cliente não encontrado');
     return cliente;
   }
 
-  async update(id: string, dto: UpdateClienteDto) {
-    const clienteAtual = await this.findOne(id);
+  async update(id: string, dto: UpdateClienteDto, user?: RequestUser) {
+    const clienteAtual = await this.findOne(id, user);
 
     if (dto.cpf) {
       const conflict = await this.prisma.cliente.findFirst({

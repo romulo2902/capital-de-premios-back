@@ -15,6 +15,7 @@ import {
 import { VendasService } from './vendas.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
+import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
 
 describe('VendasService', () => {
   let service: VendasService;
@@ -27,6 +28,10 @@ describe('VendasService', () => {
 
   const mockPaymentGatewayFactory = {
     getGateway: jest.fn().mockReturnValue(mockGateway),
+  };
+
+  const mockConfiguracaoComissaoService = {
+    obterConfiguracaoAtiva: jest.fn(),
   };
 
   const mockPrisma = {
@@ -45,6 +50,7 @@ describe('VendasService', () => {
     },
     cliente: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
     },
     vendedor: {
@@ -74,6 +80,10 @@ describe('VendasService', () => {
         VendasService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
+        {
+          provide: ConfiguracaoComissaoService,
+          useValue: mockConfiguracaoComissaoService,
+        },
       ],
     }).compile();
 
@@ -161,6 +171,31 @@ describe('VendasService', () => {
         }),
       );
     });
+
+    it('should limitar vendas ao distribuidor autenticado', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([]);
+      mockPrisma.venda.count.mockResolvedValue(0);
+
+      await service.findAll(
+        1,
+        20,
+        undefined,
+        {
+          id: 'usuario-dist',
+          email: 'dist@test.com',
+          cpf: '12345678900',
+          perfil: 'DISTRIBUIDOR',
+          status: 'ATIVO',
+          distribuidorId: 'distribuidor-1',
+        },
+      );
+
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { distribuidorId: 'distribuidor-1' },
+        }),
+      );
+    });
   });
 
   // ─── findOne ──────────────────────────────────────────
@@ -173,7 +208,7 @@ describe('VendasService', () => {
         total: new Prisma.Decimal('60.00'),
       };
 
-      mockPrisma.venda.findUnique.mockResolvedValue(vendaMock);
+      mockPrisma.venda.findFirst.mockResolvedValue(vendaMock);
 
       const result = await service.findOne('venda-1');
       expect(result.data.id).toBe('venda-1');
@@ -181,10 +216,33 @@ describe('VendasService', () => {
     });
 
     it('should throw NotFoundException if venda does not exist', async () => {
-      mockPrisma.venda.findUnique.mockResolvedValue(null);
+      mockPrisma.venda.findFirst.mockResolvedValue(null);
 
       await expect(service.findOne('inexistente')).rejects.toThrow(
         NotFoundException,
+      );
+    });
+
+    it('should filtrar venda pelo vendedor autenticado', async () => {
+      mockPrisma.venda.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.findOne('venda-1', {
+          id: 'usuario-vendedor',
+          email: 'vend@test.com',
+          cpf: '12345678900',
+          perfil: 'VENDEDOR',
+          status: 'ATIVO',
+          vendedorId: 'vendedor-1',
+        }),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockPrisma.venda.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [{ id: 'venda-1' }, { vendedorId: 'vendedor-1' }],
+          },
+        }),
       );
     });
   });

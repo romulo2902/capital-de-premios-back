@@ -102,8 +102,11 @@ export class VendasController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
-  findAll(@Query() filtros: FiltroVendasDto) {
-    return this.vendasService.findAll(filtros.page, filtros.limit, filtros);
+  findAll(
+    @Query() filtros: FiltroVendasDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendasService.findAll(filtros.page, filtros.limit, filtros, user);
   }
 
   @Get('cliente/:cpf')
@@ -114,26 +117,34 @@ export class VendasController {
   findByCliente(
     @Param('cpf') cpf: string,
     @Query() pagination: PaginationQueryDto,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.vendasService.findByCliente(
       cpf,
       pagination.page,
       pagination.limit,
+      user,
     );
   }
 
   @Get(':id/status')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({ summary: 'Consultar status atual da venda' })
-  consultarStatus(@Param('id', ParseUUIDPipe) id: string) {
-    return this.vendasService.consultarStatus(id);
+  consultarStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendasService.consultarStatus(id, user);
   }
 
   @Get(':id')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({ summary: 'Detalhes de uma venda (com bilhetes)' })
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.vendasService.findOne(id);
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendasService.findOne(id, user);
   }
 
   @Patch(':id')
@@ -144,8 +155,9 @@ export class VendasController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateVendaDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.vendasService.update(id, dto);
+    return this.vendasService.update(id, dto, user);
   }
 
   @Patch(':id/status')

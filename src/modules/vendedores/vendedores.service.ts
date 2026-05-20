@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -15,6 +16,7 @@ import {
   normalizePagination,
 } from '../../common/utils/pagination.util';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @Injectable()
 export class VendedoresService {
@@ -28,6 +30,41 @@ export class VendedoresService {
 
   private normalizarEmail(email: string): string {
     return email.trim().toLowerCase();
+  }
+
+  private buildHierarchyWhere(user?: RequestUser): Prisma.VendedorWhereInput {
+    if (!user || user.perfil === 'ADMIN') {
+      return {};
+    }
+
+    if (user.perfil === 'DISTRIBUIDOR') {
+      if (!user.distribuidorId) {
+        throw new ForbiddenException(
+          'Usuário distribuidor sem vínculo válido para consultar vendedores',
+        );
+      }
+
+      return { distribuidorId: user.distribuidorId };
+    }
+
+    return {};
+  }
+
+  private mergeWhere(
+    baseWhere: Prisma.VendedorWhereInput,
+    scopeWhere: Prisma.VendedorWhereInput,
+  ): Prisma.VendedorWhereInput {
+    if (Object.keys(baseWhere).length === 0) {
+      return scopeWhere;
+    }
+
+    if (Object.keys(scopeWhere).length === 0) {
+      return baseWhere;
+    }
+
+    return {
+      AND: [baseWhere, scopeWhere],
+    };
   }
 
   private async validarCpfDisponivel(
@@ -141,18 +178,24 @@ export class VendedoresService {
     limit = 20,
     search?: string,
     distribuidorId?: string,
+    user?: RequestUser,
   ) {
     const pagination = normalizePagination(page, limit);
-    const where: Record<string, unknown> = {};
+    const filtersWhere: Prisma.VendedorWhereInput = {};
 
-    if (distribuidorId) where.distribuidorId = distribuidorId;
+    if (distribuidorId) filtersWhere.distribuidorId = distribuidorId;
     if (search) {
-      where.OR = [
+      filtersWhere.OR = [
         { nome: { contains: search, mode: 'insensitive' } },
         { cpf: { contains: search } },
         { email: { contains: search, mode: 'insensitive' } },
       ];
     }
+
+    const where = this.mergeWhere(
+      filtersWhere,
+      this.buildHierarchyWhere(user),
+    );
 
     const [data, total] = await Promise.all([
       this.prisma.vendedor.findMany({
@@ -180,9 +223,9 @@ export class VendedoresService {
     );
   }
 
-  async findOne(id: string) {
-    const vendedor = await this.prisma.vendedor.findUnique({
-      where: { id },
+  async findOne(id: string, user?: RequestUser) {
+    const vendedor = await this.prisma.vendedor.findFirst({
+      where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
       include: {
         distribuidor: { select: { id: true, nome: true, codigo: true } },
         _count: { select: { clientes: true, vendas: true } },
@@ -192,9 +235,9 @@ export class VendedoresService {
     return vendedor;
   }
 
-  async findByCodigo(codigo: number) {
-    const vendedor = await this.prisma.vendedor.findUnique({
-      where: { codigo },
+  async findByCodigo(codigo: number, user?: RequestUser) {
+    const vendedor = await this.prisma.vendedor.findFirst({
+      where: this.mergeWhere({ codigo }, this.buildHierarchyWhere(user)),
     });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
     return vendedor;

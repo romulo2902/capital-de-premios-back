@@ -63,35 +63,45 @@ export class ClientesController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'vendedorId', required: false, type: String })
   @ApiQuery({ name: 'distribuidorId', required: false, type: String })
-  findAll(@Query() filtros: FiltroClientesDto) {
+  findAll(
+    @Query() filtros: FiltroClientesDto,
+    @CurrentUser() user: RequestUser,
+  ) {
     return this.clientesService.findAll(
       filtros.page,
       filtros.limit,
       filtros.search,
       filtros.vendedorId,
       filtros.distribuidorId,
+      user,
     );
   }
 
   @Get(':id')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({ summary: 'Buscar cliente por ID' })
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.clientesService.findOne(id);
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.clientesService.findOne(id, user);
   }
 
   @Get('codigo/:codigo')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({ summary: 'Buscar cliente por código sequencial' })
-  findByCodigo(@Param('codigo', ParseIntPipe) codigo: number) {
-    return this.clientesService.findByCodigo(codigo);
+  findByCodigo(
+    @Param('codigo', ParseIntPipe) codigo: number,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.clientesService.findByCodigo(codigo, user);
   }
 
   @Get('cpf/:cpf')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({ summary: 'Buscar cliente por CPF' })
-  findByCpf(@Param('cpf') cpf: string) {
-    return this.clientesService.findByCpf(cpf);
+  findByCpf(@Param('cpf') cpf: string, @CurrentUser() user: RequestUser) {
+    return this.clientesService.findByCpf(cpf, user);
   }
 
   @Patch(':id')
@@ -100,8 +110,9 @@ export class ClientesController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateClienteDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.clientesService.update(id, dto);
+    return this.clientesService.update(id, dto, user);
   }
 
   @Delete(':id')

@@ -58,6 +58,33 @@ describe('ClientesService', () => {
     });
   });
 
+  it('findAll should limitar clientes ao vendedor autenticado', async () => {
+    mockPrisma.cliente.findMany.mockResolvedValue([]);
+    mockPrisma.cliente.count.mockResolvedValue(0);
+
+    await service.findAll(
+      1,
+      20,
+      undefined,
+      undefined,
+      undefined,
+      {
+        id: 'usuario-vendedor',
+        email: 'vend@test.com',
+        cpf: '12345678900',
+        perfil: 'VENDEDOR',
+        status: 'ATIVO',
+        vendedorId: 'vendedor-1',
+      },
+    );
+
+    expect(mockPrisma.cliente.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { vendedorId: 'vendedor-1' },
+      }),
+    );
+  });
+
   it('create should vincular cliente ao vendedor autenticado', async () => {
     mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
     mockPrisma.vendedor.findUnique.mockResolvedValueOnce({
@@ -147,7 +174,7 @@ describe('ClientesService', () => {
   });
 
   it('update should normalize empty distribuidorId to null', async () => {
-    mockPrisma.cliente.findUnique.mockResolvedValueOnce({
+    mockPrisma.cliente.findFirst.mockResolvedValueOnce({
       id: 'cliente-1',
       nome: 'Cliente Teste',
       vendedorId: 'vendedor-1',
@@ -181,7 +208,7 @@ describe('ClientesService', () => {
   });
 
   it('update should manter vendedor e distribuidor quando ambos sao informados', async () => {
-    mockPrisma.cliente.findUnique.mockResolvedValueOnce({
+    mockPrisma.cliente.findFirst.mockResolvedValueOnce({
       id: 'cliente-2',
       nome: 'Cliente Teste 2',
       vendedorId: null,
@@ -219,7 +246,7 @@ describe('ClientesService', () => {
   });
 
   it('update should reject vendedor vinculado a outro distribuidor', async () => {
-    mockPrisma.cliente.findUnique.mockResolvedValueOnce({
+    mockPrisma.cliente.findFirst.mockResolvedValueOnce({
       id: 'cliente-3',
       nome: 'Cliente Teste 3',
       vendedorId: null,
@@ -241,5 +268,28 @@ describe('ClientesService', () => {
         distribuidorId: 'distribuidor-incorreto',
       }),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it('findOne should nao retornar cliente fora do distribuidor autenticado', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.findOne('cliente-1', {
+        id: 'usuario-dist',
+        email: 'dist@test.com',
+        cpf: '12345678900',
+        perfil: 'DISTRIBUIDOR',
+        status: 'ATIVO',
+        distribuidorId: 'distribuidor-1',
+      }),
+    ).rejects.toThrow('Cliente não encontrado');
+
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          AND: [{ id: 'cliente-1' }, { distribuidorId: 'distribuidor-1' }],
+        },
+      }),
+    );
   });
 });

@@ -60,6 +60,26 @@ describe('VendedoresService', () => {
     });
   });
 
+  it('findAll should limitar vendedores ao distribuidor autenticado', async () => {
+    mockPrisma.vendedor.findMany.mockResolvedValue([]);
+    mockPrisma.vendedor.count.mockResolvedValue(0);
+
+    await service.findAll(1, 20, undefined, undefined, {
+      id: 'usuario-dist',
+      email: 'dist@test.com',
+      cpf: '12345678900',
+      perfil: 'DISTRIBUIDOR',
+      status: 'ATIVO',
+      distribuidorId: 'distribuidor-1',
+    });
+
+    expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { distribuidorId: 'distribuidor-1' },
+      }),
+    );
+  });
+
   it('create should normalize cpf and email before persisting', async () => {
     mockPrisma.vendedor.findFirst.mockResolvedValue(null);
     mockPrisma.usuario.findFirst.mockResolvedValue(null);

@@ -20,11 +20,13 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { VendedoresService } from './vendedores.service';
 import { CreateVendedorDto } from './dto/create-vendedor.dto';
 import { UpdateVendedorDto } from './dto/update-vendedor.dto';
 import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
 import { FiltroVendedoresDto } from './dto/filtro-vendedores.dto';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @ApiTags('Admin / Vendedores')
 @ApiBearerAuth()
@@ -41,18 +43,22 @@ export class VendedoresController {
   }
 
   @Get()
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'DISTRIBUIDOR')
   @ApiOperation({ summary: 'Listar vendedores' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'distribuidorId', required: false, type: String })
-  findAll(@Query() filtros: FiltroVendedoresDto) {
+  findAll(
+    @Query() filtros: FiltroVendedoresDto,
+    @CurrentUser() user: RequestUser,
+  ) {
     return this.vendedoresService.findAll(
       filtros.page,
       filtros.limit,
       filtros.search,
       filtros.distribuidorId,
+      user,
     );
   }
 
@@ -76,17 +82,23 @@ export class VendedoresController {
   }
 
   @Get(':id')
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Buscar vendedor por ID (ADMIN)' })
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.vendedoresService.findOne(id);
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({ summary: 'Buscar vendedor por ID' })
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendedoresService.findOne(id, user);
   }
 
   @Get('codigo/:codigo')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'DISTRIBUIDOR')
   @ApiOperation({ summary: 'Buscar vendedor por código sequencial' })
-  findByCodigo(@Param('codigo', ParseIntPipe) codigo: number) {
-    return this.vendedoresService.findByCodigo(codigo);
+  findByCodigo(
+    @Param('codigo', ParseIntPipe) codigo: number,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendedoresService.findByCodigo(codigo, user);
   }
 
   @Patch(':id')
