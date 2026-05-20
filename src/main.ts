@@ -14,6 +14,10 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { RequestContextInterceptor } from './common/interceptors/request-context.interceptor';
 import { runWithRequestContext } from './common/request-context/request-context.util';
 
+function normalizeOrigin(origin: string): string {
+  return origin.trim().replace(/\/+$/, '');
+}
+
 function parseCorsOrigins(value?: string): string[] {
   if (!value) {
     return [];
@@ -21,7 +25,7 @@ function parseCorsOrigins(value?: string): string[] {
 
   return value
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => normalizeOrigin(origin))
     .filter((origin) => origin.length > 0);
 }
 
@@ -31,6 +35,7 @@ async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
 
   app.enableShutdownHooks();
+  app.set('trust proxy', true);
 
   const host = config.get<string>('HOST', '0.0.0.0');
   const port = config.get<number>('PORT', 3000);
@@ -55,7 +60,9 @@ async function bootstrap(): Promise<void> {
         frontendAdminUrl,
         'http://localhost:3001',
         'http://localhost:3002',
-      ].filter((origin): origin is string => Boolean(origin?.trim())),
+      ]
+        .filter((origin): origin is string => Boolean(origin?.trim()))
+        .map((origin) => normalizeOrigin(origin)),
     ),
   );
 
@@ -85,21 +92,46 @@ async function bootstrap(): Promise<void> {
     );
   });
 
-  app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin || corsOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+  app.enableCors((request, callback) => {
+    const originHeader = request.header('origin');
 
-      logger.warn(`CORS bloqueado para origem não autorizada: ${origin}`);
-      return callback(
-        new Error(`Origem ${origin} não autorizada pelo CORS`),
-        false,
-      );
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
+    if (!originHeader) {
+      return callback(null, {
+        origin: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+        credentials: true,
+      });
+    }
+
+    const requestOrigin = normalizeOrigin(originHeader);
+    const forwardedProto = request.header('x-forwarded-proto');
+    const protocol = forwardedProto?.split(',')[0]?.trim() || request.protocol;
+    const host = request.header('x-forwarded-host') || request.get('host');
+    const currentHostOrigin = host
+      ? normalizeOrigin(`${protocol}://${host}`)
+      : undefined;
+
+    const isAllowedConfiguredOrigin = corsOrigins.includes(requestOrigin);
+    const isSameHostOrigin =
+      currentHostOrigin !== undefined && requestOrigin === currentHostOrigin;
+
+    if (isAllowedConfiguredOrigin || isSameHostOrigin) {
+      return callback(null, {
+        origin: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+        credentials: true,
+      });
+    }
+
+    logger.warn(`CORS bloqueado para origem não autorizada: ${requestOrigin}`);
+    return callback(null, {
+      origin: false,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      credentials: true,
+    });
   });
 
   logger.log(`CORS habilitado para origens: ${corsOrigins.join(', ')}`);
