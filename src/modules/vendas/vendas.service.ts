@@ -252,10 +252,13 @@ export class VendasService {
       this.logger.log(
         `Venda manual ${resultadoManual.vendaAtualizada.id} criada e aprovada — ${quantidadeCartelasCompra} cartela(s) — R$ ${total.toFixed(2)}`,
       );
+      const vendaManualComDistribuidor = await this.anexarDistribuidorNaVenda(
+        resultadoManual.vendaAtualizada,
+      );
 
       return {
         message: 'Venda criada com sucesso',
-        data: this.serializarVendaParaResposta(resultadoManual.vendaAtualizada),
+        data: this.serializarVendaParaResposta(vendaManualComDistribuidor),
       };
     }
 
@@ -360,11 +363,13 @@ export class VendasService {
     if (!vendaCompleta) {
       throw new NotFoundException('Venda não encontrada após criação');
     }
+    const vendaCompletaComDistribuidor =
+      await this.anexarDistribuidorNaVenda(vendaCompleta);
 
     return {
       message: 'Venda criada com sucesso',
       data: {
-        ...this.serializarVendaParaResposta(vendaCompleta),
+        ...this.serializarVendaParaResposta(vendaCompletaComDistribuidor),
         pagamento: dadosPagamento,
       },
     };
@@ -621,9 +626,12 @@ export class VendasService {
       }),
       this.prisma.venda.count({ where }),
     ]);
+    const vendasComDistribuidor = await this.anexarDistribuidorNasVendas(data);
 
     return buildPaginatedResponse(
-      data.map((venda) => this.serializarVendaParaResposta(venda)),
+      vendasComDistribuidor.map((venda) =>
+        this.serializarVendaParaResposta(venda),
+      ),
       total,
       pagination.page,
       pagination.limit,
@@ -638,19 +646,21 @@ export class VendasService {
 
   async findOne(id: string, user?: RequestUser) {
     const venda = await this.buscarVendaComContextoEdicao(id, user);
+    const vendaComDistribuidor = await this.anexarDistribuidorNaVenda(venda);
 
     return {
       message: 'Venda encontrada com sucesso',
-      data: this.serializarVendaParaResposta(venda),
+      data: this.serializarVendaParaResposta(vendaComDistribuidor),
     };
   }
 
   async consultarStatus(id: string, user?: RequestUser) {
     const venda = await this.buscarVendaComContextoEdicao(id, user);
+    const vendaComDistribuidor = await this.anexarDistribuidorNaVenda(venda);
 
     return {
       message: 'Status da venda consultado com sucesso',
-      data: this.serializarVendaParaResposta(venda),
+      data: this.serializarVendaParaResposta(vendaComDistribuidor),
     };
   }
 
@@ -681,12 +691,14 @@ export class VendasService {
     });
 
     const vendaAtualizada = await this.buscarVendaComContextoEdicao(id, user);
+    const vendaAtualizadaComDistribuidor =
+      await this.anexarDistribuidorNaVenda(vendaAtualizada);
 
     this.logger.log(`Venda ${id} atualizada com sucesso`);
 
     return {
       message: 'Venda atualizada com sucesso',
-      data: this.serializarVendaParaResposta(vendaAtualizada),
+      data: this.serializarVendaParaResposta(vendaAtualizadaComDistribuidor),
     };
   }
 
@@ -738,9 +750,12 @@ export class VendasService {
       }),
       this.prisma.venda.count({ where }),
     ]);
+    const vendasComDistribuidor = await this.anexarDistribuidorNasVendas(data);
 
     return buildPaginatedResponse(
-      data.map((venda) => this.serializarVendaParaResposta(venda)),
+      vendasComDistribuidor.map((venda) =>
+        this.serializarVendaParaResposta(venda),
+      ),
       total,
       pagination.page,
       pagination.limit,
@@ -782,10 +797,13 @@ export class VendasService {
     this.logger.log(
       `Pagamento confirmado para venda ${vendaId} — ${resultado.bilhetesAlocados} bilhetes alocados`,
     );
+    const vendaComDistribuidor = await this.anexarDistribuidorNaVenda(
+      resultado.vendaAtualizada,
+    );
 
     return {
       message: 'Pagamento confirmado com sucesso',
-      data: this.serializarVendaParaResposta(resultado.vendaAtualizada),
+      data: this.serializarVendaParaResposta(vendaComDistribuidor),
     };
   }
 
@@ -863,10 +881,12 @@ export class VendasService {
       where: { id },
       include: VENDA_INCLUDE,
     });
+    const vendaAtualizadaComDistribuidor =
+      await this.anexarDistribuidorNaVenda(vendaAtualizada);
 
     return {
       message: 'Venda cancelada com sucesso',
-      data: this.serializarVendaParaResposta(vendaAtualizada),
+      data: this.serializarVendaParaResposta(vendaAtualizadaComDistribuidor),
     };
   }
 
@@ -900,12 +920,14 @@ export class VendasService {
       data: { status: dto.status },
       include: VENDA_INCLUDE,
     });
+    const vendaAtualizadaComDistribuidor =
+      await this.anexarDistribuidorNaVenda(vendaAtualizada);
 
     this.logger.log(`Status da venda ${id} alterado para ${dto.status}`);
 
     return {
       message: 'Status da venda atualizado com sucesso',
-      data: this.serializarVendaParaResposta(vendaAtualizada),
+      data: this.serializarVendaParaResposta(vendaAtualizadaComDistribuidor),
     };
   }
 
@@ -1062,6 +1084,126 @@ export class VendasService {
     };
   }
 
+  private async anexarDistribuidorNaVenda<T>(venda: T): Promise<T> {
+    if (!venda || typeof venda !== 'object') {
+      return venda;
+    }
+
+    const registro = venda as Record<string, unknown>;
+
+    if (Object.prototype.hasOwnProperty.call(registro, 'distribuidor')) {
+      return venda;
+    }
+
+    const distribuidorId =
+      typeof registro.distribuidorId === 'string'
+        ? registro.distribuidorId
+        : null;
+
+    if (!distribuidorId) {
+      return {
+        ...registro,
+        distribuidor: null,
+      } as T;
+    }
+
+    const distribuidor = await this.prisma.distribuidor.findUnique({
+      where: { id: distribuidorId },
+      select: {
+        id: true,
+        codigo: true,
+        nome: true,
+        email: true,
+        telefone: true,
+      },
+    });
+
+    return {
+      ...registro,
+      distribuidor,
+    } as T;
+  }
+
+  private async anexarDistribuidorNasVendas<T>(vendas: T[]): Promise<T[]> {
+    if (vendas.length === 0) {
+      return vendas;
+    }
+
+    const ids = Array.from(
+      new Set(
+        vendas
+          .map((venda) => {
+            if (!venda || typeof venda !== 'object') {
+              return null;
+            }
+
+            const registro = venda as Record<string, unknown>;
+            return typeof registro.distribuidorId === 'string' &&
+              !Object.prototype.hasOwnProperty.call(registro, 'distribuidor')
+              ? registro.distribuidorId
+              : null;
+          })
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+
+    if (ids.length === 0) {
+      return vendas.map((venda) => {
+        if (!venda || typeof venda !== 'object') {
+          return venda;
+        }
+
+        const registro = venda as Record<string, unknown>;
+        if (Object.prototype.hasOwnProperty.call(registro, 'distribuidor')) {
+          return venda;
+        }
+
+        return {
+          ...registro,
+          distribuidor: null,
+        } as T;
+      });
+    }
+
+    const distribuidores = await this.prisma.distribuidor.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        codigo: true,
+        nome: true,
+        email: true,
+        telefone: true,
+      },
+    });
+
+    const distribuidoresPorId = new Map(
+      distribuidores.map((distribuidor) => [distribuidor.id, distribuidor]),
+    );
+
+    return vendas.map((venda) => {
+      if (!venda || typeof venda !== 'object') {
+        return venda;
+      }
+
+      const registro = venda as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(registro, 'distribuidor')) {
+        return venda;
+      }
+
+      const distribuidorId =
+        typeof registro.distribuidorId === 'string'
+          ? registro.distribuidorId
+          : null;
+
+      return {
+        ...registro,
+        distribuidor: distribuidorId
+          ? distribuidoresPorId.get(distribuidorId) ?? null
+          : null,
+      } as T;
+    });
+  }
+
   private normalizarDadosClienteParaEdicao(
     dto: UpdateVendaDto,
   ): Prisma.ClienteUpdateInput {
@@ -1177,7 +1319,12 @@ export class VendasService {
         ? ((registroNormalizado._count as Record<string, unknown>)
             .bilhetes as number)
         : null;
-    const quantidadeBilhetes = bilhetes?.length ?? countBilhetes ?? null;
+    const quantidadeBilhetes =
+      bilhetes && bilhetes.length > 0
+        ? bilhetes.length
+        : countBilhetes && countBilhetes > 0
+          ? countBilhetes
+          : null;
     const quantidadeCartelasPorCombo =
       this.obterQuantidadeCartelasDaVenda(tipoCartela);
     const quantidadeCartelas = calcularQuantidadeCartelasDaVenda({
