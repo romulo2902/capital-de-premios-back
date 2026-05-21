@@ -40,7 +40,7 @@ export class QrcodeService {
     const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
 
-    const link = this.criarLinkLoja(vendedor.usuarioId, vendedor.nome);
+    const link = this.criarLinkLoja(vendedor.id, vendedor.nome);
 
     if (!options.force && vendedor.qrcode && vendedor.link === link) {
       const existingBuffer = await this.obterBufferPorUrl(vendedor.qrcode);
@@ -82,7 +82,7 @@ export class QrcodeService {
     const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
 
-    const link = this.criarLinkLoja(vendedor.usuarioId, vendedor.nome);
+    const link = this.criarLinkLoja(vendedor.id, vendedor.nome);
 
     if (vendedor.qrcode && vendedor.link === link) {
       return {
@@ -114,7 +114,7 @@ export class QrcodeService {
     if (!distribuidor)
       throw new NotFoundException('Distribuidor não encontrado');
 
-    const link = this.criarLinkLoja(distribuidor.usuarioId, distribuidor.nome);
+    const link = this.criarLinkLoja(distribuidor.id, distribuidor.nome);
 
     if (!options.force && distribuidor.qrcode && distribuidor.link === link) {
       const existingBuffer = await this.obterBufferPorUrl(distribuidor.qrcode);
@@ -159,7 +159,7 @@ export class QrcodeService {
     if (!distribuidor)
       throw new NotFoundException('Distribuidor não encontrado');
 
-    const link = this.criarLinkLoja(distribuidor.usuarioId, distribuidor.nome);
+    const link = this.criarLinkLoja(distribuidor.id, distribuidor.nome);
 
     if (distribuidor.qrcode && distribuidor.link === link) {
       return {

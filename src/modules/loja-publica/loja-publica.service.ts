@@ -274,6 +274,11 @@ export class LojaPublicaService {
     }
     const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
     const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
+    this.logger.log(
+      `Checkout loja seller_id=${dto.seller_id ?? 'N/A'} -> vendedorId=${
+        sellerOrigem.vendedorId ?? 'null'
+      } distribuidorId=${sellerOrigem.distribuidorId ?? 'null'}`,
+    );
     const relacionamentoCliente = this.buildRelacionamentoClienteMaisRecente(
       dto.seller_id,
       sellerOrigem,
@@ -333,6 +338,11 @@ export class LojaPublicaService {
           : Prisma.JsonNull,
       },
     });
+    this.logger.log(
+      `Venda pública criada ${venda.id} com vendedorId=${
+        sellerOrigem.vendedorId ?? 'null'
+      } distribuidorId=${sellerOrigem.distribuidorId ?? 'null'}`,
+    );
 
     const mockPagamentoAprovado = this.isMockPagamentoAprovado();
 
