@@ -92,6 +92,36 @@ describe('PagamentosService', () => {
       );
     });
 
+    it('should find PIX order by charge metadata when reference_id is absent', async () => {
+      mockPrisma.venda.findFirst.mockResolvedValue({
+        id: 'venda-1',
+        status: 'PENDENTE',
+      });
+      mockVendasService.confirmarPagamento.mockResolvedValue({});
+
+      const result = await service.processarWebhookPix({
+        event: 'CHARGE.PAID',
+        charges: [
+          {
+            id: 'CHAR_123',
+            status: 'PAID',
+            metadata: { ps_order_id: 'ORDE_123' },
+          },
+        ],
+      });
+
+      expect(result.data![0].status).toBe('CONFIRMADA');
+      expect(mockPrisma.venda.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([
+              { gatewayId: { in: ['CHAR_123', 'ORDE_123', 'CHAR_123'] } },
+            ]),
+          }),
+        }),
+      );
+    });
+
     it('should skip already processed vendas', async () => {
       mockPrisma.venda.findFirst.mockResolvedValue({
         id: 'venda-1',

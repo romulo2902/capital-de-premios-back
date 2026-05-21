@@ -1651,6 +1651,7 @@ export class VendasService {
       }
 
       const gruposDisponiveis: MatrizDisponivel[][] = [];
+      const numerosReservadosAEvitar: string[] = [];
       let indiceDetalheAtual = 0;
 
       for (let i = 0; i < venda.quantidade; i++) {
@@ -1660,9 +1661,17 @@ export class VendasService {
           venda.edicaoId,
           [detalheAtual],
           1,
-          { strict: true },
+          {
+            strict: true,
+            numerosReservadosAEvitar,
+          },
         );
         gruposDisponiveis.push(...res);
+        res
+          .flat()
+          .forEach((linha) =>
+            numerosReservadosAEvitar.push(linha.numero.toString()),
+          );
         indiceDetalheAtual = (indiceDetalheAtual + 1) % detalhesOrigem.length;
       }
       matrizDisponiveis = gruposDisponiveis.flat();

@@ -229,6 +229,11 @@ export class PagamentosService {
     if (charges.length > 0) {
       return charges.flatMap((charge) => {
         const identificador = this.lerString(charge, 'id');
+        const metadata = this.objeto(charge['metadata']) ?? {};
+        const orderId =
+          this.lerString(metadata, 'ps_order_id') ??
+          this.lerString(charge, 'order_id');
+
         return identificador
           ? [
               {
@@ -236,6 +241,7 @@ export class PagamentosService {
                 status: this.lerString(charge, 'status'),
                 referenceId: this.lerString(charge, 'reference_id'),
                 chargeId: identificador,
+                orderId,
                 payload: charge,
               },
             ]
