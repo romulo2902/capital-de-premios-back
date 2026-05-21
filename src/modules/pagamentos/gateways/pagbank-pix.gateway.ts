@@ -115,6 +115,9 @@ export class PagBankPixGateway implements PaymentGateway {
     const expiracao = new Date(
       Date.now() + (input.expiracaoSegundos ?? 1800) * 1000,
     ).toISOString();
+    const quantidadeItens = Math.max(1, input.quantidadeItens ?? 1);
+    const valorUnitarioCentavos =
+      input.valorUnitarioCentavos ?? input.valorCentavos;
 
     const telefone = this.normalizarTelefone(input.telefonePagador);
     const body: PagBankOrderRequest = {
@@ -129,8 +132,8 @@ export class PagBankPixGateway implements PaymentGateway {
         {
           reference_id: input.vendaId,
           name: input.descricao,
-          quantity: 1,
-          unit_amount: input.valorCentavos,
+          quantity: quantidadeItens,
+          unit_amount: valorUnitarioCentavos,
         },
       ],
       qr_codes: [

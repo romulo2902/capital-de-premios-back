@@ -334,6 +334,8 @@ export class WhatsappApiService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
+        quantidadeItens: dto.quantidade,
+        valorUnitarioCentavos: Math.round(valorSelecionado * 100),
         descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
         cpfPagador: cliente.cpf,
         nomePagador: cliente.nome,

@@ -97,6 +97,9 @@ export class PagBankCartaoGateway implements PaymentGateway {
 
     const token = await this.obterToken();
     const parcelas = input.installments ?? 1;
+    const quantidadeItens = Math.max(1, input.quantidadeItens ?? 1);
+    const valorUnitarioCentavos =
+      input.valorUnitarioCentavos ?? input.valorCentavos;
 
     const body = {
       reference_id: input.vendaId,
@@ -107,8 +110,8 @@ export class PagBankCartaoGateway implements PaymentGateway {
       items: [
         {
           name: input.descricao,
-          quantity: 1,
-          unit_amount: input.valorCentavos,
+          quantity: quantidadeItens,
+          unit_amount: valorUnitarioCentavos,
         },
       ],
       charges: [

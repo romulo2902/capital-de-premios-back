@@ -81,6 +81,11 @@ interface ConfiguracaoVendaResolvida {
   quantidadeCartelas: number;
 }
 
+interface RelacionamentoClienteMaisRecente {
+  vendedorId?: string | null;
+  distribuidorId?: string | null;
+}
+
 @Injectable()
 export class VendasService {
   private readonly logger = new Logger(VendasService.name);
@@ -301,6 +306,8 @@ export class VendasService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
+        quantidadeItens: dto.quantidadeCartelas,
+        valorUnitarioCentavos: Math.round(valorCartela * 100),
         descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
@@ -1322,6 +1329,11 @@ export class VendasService {
     distribuidorId?: string,
   ) {
     const dataNascimento = parseEValidarDataNascimento(dataNascimentoInput);
+    const relacionamentoMaisRecente =
+      await this.resolverRelacionamentoMaisRecenteDoCliente(
+        vendedorId,
+        distribuidorId,
+      );
     const existente = await this.prisma.cliente.findUnique({
       where: { cpf },
     });
@@ -1330,12 +1342,22 @@ export class VendasService {
       if (!existente.dataNascimento) {
         return this.prisma.cliente.update({
           where: { id: existente.id },
-          data: { dataNascimento },
+          data: {
+            dataNascimento,
+            ...relacionamentoMaisRecente,
+          },
         });
       }
 
       if (existente.dataNascimento) {
         validarMaioridade(existente.dataNascimento);
+      }
+
+      if (Object.keys(relacionamentoMaisRecente).length > 0) {
+        return this.prisma.cliente.update({
+          where: { id: existente.id },
+          data: relacionamentoMaisRecente,
+        });
       }
 
       return existente;
@@ -1348,13 +1370,39 @@ export class VendasService {
         telefone,
         email: email?.trim() || null,
         dataNascimento,
-        vendedorId: vendedorId ?? null,
-        distribuidorId: distribuidorId ?? null,
+        vendedorId: relacionamentoMaisRecente.vendedorId ?? null,
+        distribuidorId: relacionamentoMaisRecente.distribuidorId ?? null,
       },
     });
 
     this.logger.log(`Cliente auto-criado: ${nome} (CPF: ${cpf})`);
     return cliente;
+  }
+
+  private async resolverRelacionamentoMaisRecenteDoCliente(
+    vendedorId?: string,
+    distribuidorId?: string,
+  ): Promise<RelacionamentoClienteMaisRecente> {
+    if (vendedorId) {
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { id: vendedorId },
+        select: { distribuidorId: true },
+      });
+
+      return {
+        vendedorId,
+        distribuidorId: distribuidorId ?? vendedor?.distribuidorId ?? null,
+      };
+    }
+
+    if (distribuidorId) {
+      return {
+        vendedorId: null,
+        distribuidorId,
+      };
+    }
+
+    return {};
   }
 
   private validarJanelaDeVenda(

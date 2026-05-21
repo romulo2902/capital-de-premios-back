@@ -72,6 +72,16 @@ interface SellerOrigemResolvida {
   distribuidorId: string | null;
 }
 
+interface EntidadeSellerIdentificada {
+  vendedorId: string | null;
+  distribuidorId: string | null;
+}
+
+interface AtualizacaoRelacionamentoCliente {
+  vendedorId?: string | null;
+  distribuidorId?: string | null;
+}
+
 @Injectable()
 export class LojaPublicaService {
   private readonly logger = new Logger(LojaPublicaService.name);
@@ -264,6 +274,10 @@ export class LojaPublicaService {
     }
     const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
     const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
+    const relacionamentoCliente = this.buildRelacionamentoClienteMaisRecente(
+      dto.seller_id,
+      sellerOrigem,
+    );
     let cliente = await this.prisma.cliente.findUnique({
       where: { cpf: cpfLimpo },
     });
@@ -275,17 +289,27 @@ export class LojaPublicaService {
           telefone: dto.telefone,
           email: emailNormalizado,
           dataNascimento,
-          vendedorId: sellerOrigem.vendedorId,
-          distribuidorId: sellerOrigem.distribuidorId,
+          vendedorId: relacionamentoCliente.vendedorId ?? null,
+          distribuidorId: relacionamentoCliente.distribuidorId ?? null,
         },
       });
     } else if (!cliente.dataNascimento) {
       cliente = await this.prisma.cliente.update({
         where: { id: cliente.id },
-        data: { dataNascimento },
+        data: {
+          dataNascimento,
+          ...relacionamentoCliente,
+        },
       });
     } else {
       validarMaioridade(cliente.dataNascimento);
+
+      if (Object.keys(relacionamentoCliente).length > 0) {
+        cliente = await this.prisma.cliente.update({
+          where: { id: cliente.id },
+          data: relacionamentoCliente,
+        });
+      }
     }
 
     const venda = await this.prisma.venda.create({
@@ -378,6 +402,8 @@ export class LojaPublicaService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
+        quantidadeItens: dto.quantidadeCartelas,
+        valorUnitarioCentavos: Math.round(valorSelecionado * 100),
         descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidadeCartelas} iten(s)`,
         cpfPagador: cpfLimpo,
         nomePagador: dto.nome,
@@ -1145,42 +1171,97 @@ export class LojaPublicaService {
       select: { id: true, perfil: true },
     });
 
-    if (!usuario) {
-      throw new NotFoundException('Seller não encontrado');
+    if (usuario?.perfil === Perfil.VENDEDOR) {
+      return this.resolverSellerPorUsuarioVendedor(usuario.id);
     }
 
-    if (usuario.perfil === Perfil.VENDEDOR) {
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { usuarioId: usuario.id },
-        select: { id: true, distribuidorId: true },
-      });
+    if (usuario?.perfil === Perfil.DISTRIBUIDOR) {
+      return this.resolverSellerPorUsuarioDistribuidor(usuario.id);
+    }
 
-      if (!vendedor) {
-        throw new NotFoundException('Vendedor não encontrado');
-      }
+    const sellerPorEntidade = await this.resolverSellerPorEntidadeDireta(
+      sellerId,
+    );
 
+    if (sellerPorEntidade) {
+      return sellerPorEntidade;
+    }
+
+    throw new NotFoundException('Seller não encontrado');
+  }
+
+  private async resolverSellerPorUsuarioVendedor(
+    usuarioId: string,
+  ): Promise<SellerOrigemResolvida> {
+    const vendedor = await this.prisma.vendedor.findUnique({
+      where: { usuarioId },
+      select: { id: true, distribuidorId: true },
+    });
+
+    if (!vendedor) {
+      throw new NotFoundException('Vendedor não encontrado');
+    }
+
+    return {
+      vendedorId: vendedor.id,
+      distribuidorId: vendedor.distribuidorId,
+    };
+  }
+
+  private async resolverSellerPorUsuarioDistribuidor(
+    usuarioId: string,
+  ): Promise<SellerOrigemResolvida> {
+    const distribuidor = await this.prisma.distribuidor.findUnique({
+      where: { usuarioId },
+      select: { id: true },
+    });
+
+    if (!distribuidor) {
+      throw new NotFoundException('Distribuidor não encontrado');
+    }
+
+    return { vendedorId: null, distribuidorId: distribuidor.id };
+  }
+
+  private async resolverSellerPorEntidadeDireta(
+    sellerId: string,
+  ): Promise<EntidadeSellerIdentificada | null> {
+    const vendedor = await this.prisma.vendedor.findUnique({
+      where: { id: sellerId },
+      select: { id: true, distribuidorId: true },
+    });
+
+    if (vendedor) {
       return {
         vendedorId: vendedor.id,
         distribuidorId: vendedor.distribuidorId,
       };
     }
 
-    if (usuario.perfil === Perfil.DISTRIBUIDOR) {
-      const distribuidor = await this.prisma.distribuidor.findUnique({
-        where: { usuarioId: usuario.id },
-        select: { id: true },
-      });
+    const distribuidor = await this.prisma.distribuidor.findUnique({
+      where: { id: sellerId },
+      select: { id: true },
+    });
 
-      if (!distribuidor) {
-        throw new NotFoundException('Distribuidor não encontrado');
-      }
-
+    if (distribuidor) {
       return { vendedorId: null, distribuidorId: distribuidor.id };
     }
 
-    throw new BadRequestException(
-      'seller_id deve pertencer a um vendedor ou distribuidor',
-    );
+    return null;
+  }
+
+  private buildRelacionamentoClienteMaisRecente(
+    sellerId: string | undefined,
+    sellerOrigem: SellerOrigemResolvida,
+  ): AtualizacaoRelacionamentoCliente {
+    if (!sellerId) {
+      return {};
+    }
+
+    return {
+      vendedorId: sellerOrigem.vendedorId,
+      distribuidorId: sellerOrigem.distribuidorId,
+    };
   }
 
   private isCartelaUnitaria(tipoCartela: TipoCartela): boolean {

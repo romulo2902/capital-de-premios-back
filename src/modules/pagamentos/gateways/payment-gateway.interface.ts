@@ -12,6 +12,12 @@ export interface CriarCobrancaInput {
   /** Valor em centavos (inteiro) */
   valorCentavos: number;
 
+  /** Quantidade de itens da cobrança (default: 1) */
+  quantidadeItens?: number;
+
+  /** Valor unitário de cada item em centavos (default: valorCentavos) */
+  valorUnitarioCentavos?: number;
+
   /** Descrição exibida na cobrança */
   descricao: string;
 
