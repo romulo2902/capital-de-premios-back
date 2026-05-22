@@ -30,6 +30,7 @@ import { UpdateVendaDto } from './dto/update-venda.dto';
 import { FiltroVendasDto } from './dto/filtro-vendas.dto';
 import {
   VENDA_INCLUDE,
+  VENDA_INCLUDE_LISTAGEM_ADMIN,
   VENDA_INCLUDE_DETALHES,
   PIX_EXPIRACAO_SEGUNDOS,
 } from './vendas.constants';
@@ -615,6 +616,8 @@ export class VendasService {
       this.buildWhereFromFiltros(filtros),
       this.buildHierarchyWhere(user),
     );
+    const include =
+      user?.perfil === 'ADMIN' ? VENDA_INCLUDE_LISTAGEM_ADMIN : VENDA_INCLUDE;
 
     const [data, total] = await Promise.all([
       this.prisma.venda.findMany({
@@ -622,7 +625,7 @@ export class VendasService {
         skip: pagination.skip,
         take: pagination.limit,
         orderBy: { createdAt: 'desc' },
-        include: VENDA_INCLUDE,
+        include,
       }),
       this.prisma.venda.count({ where }),
     ]);

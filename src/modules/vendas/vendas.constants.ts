@@ -84,5 +84,20 @@ export const VENDA_INCLUDE_DETALHES = {
   },
 } satisfies Prisma.VendaInclude;
 
+/**
+ * Include da listagem administrativa com cartelas/bilhetes vendidos por compra.
+ */
+export const VENDA_INCLUDE_LISTAGEM_ADMIN = {
+  ...VENDA_INCLUDE,
+  bilhetes: {
+    select: {
+      id: true,
+      numero: true,
+      sequenciaBolas: true,
+    },
+    orderBy: { numero: 'asc' as const },
+  },
+} satisfies Prisma.VendaInclude;
+
 /** Tempo de expiração padrão do PIX em segundos (30 minutos) */
 export const PIX_EXPIRACAO_SEGUNDOS = 1800;

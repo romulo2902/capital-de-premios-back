@@ -130,6 +130,66 @@ describe('VendasService', () => {
       );
     });
 
+    it('should include bilhetes na listagem para admin', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([]);
+      mockPrisma.venda.count.mockResolvedValue(0);
+
+      await service.findAll(
+        1,
+        20,
+        undefined,
+        {
+          id: 'usuario-admin',
+          email: 'admin@test.com',
+          cpf: '12345678900',
+          perfil: 'ADMIN',
+          status: 'ATIVO',
+        },
+      );
+
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            bilhetes: {
+              select: {
+                id: true,
+                numero: true,
+                sequenciaBolas: true,
+              },
+              orderBy: { numero: 'asc' },
+            },
+          }),
+        }),
+      );
+    });
+
+    it('should not include bilhetes na listagem para vendedor', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([]);
+      mockPrisma.venda.count.mockResolvedValue(0);
+
+      await service.findAll(
+        1,
+        20,
+        undefined,
+        {
+          id: 'usuario-vendedor',
+          email: 'vend@test.com',
+          cpf: '12345678900',
+          perfil: 'VENDEDOR',
+          status: 'ATIVO',
+          vendedorId: 'vendedor-1',
+        },
+      );
+
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          include: expect.objectContaining({
+            bilhetes: expect.anything(),
+          }),
+        }),
+      );
+    });
+
     it('should serialize Prisma Decimal fields in response data', async () => {
       mockPrisma.venda.findMany.mockResolvedValue([
         {
