@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import {
+  Perfil,
   Prisma,
   StatusVenda,
   StatusComissao,
@@ -115,6 +116,62 @@ export class DashboardService {
     });
 
     return this.aggregateTimeline(vendas);
+  }
+
+  async getEdicoesDisponiveis(user: RequestUser) {
+    this.logger.log(
+      `Buscando edições disponíveis no dashboard para perfil ${user.perfil}`,
+    );
+
+    if (user.perfil === Perfil.DISTRIBUIDOR) {
+      const edicoes = await this.prisma.edicao.findMany({
+        where: {
+          vendas: {
+            some: {
+              status: StatusVenda.APROVADO,
+              distribuidorId: user.distribuidorId,
+            },
+          },
+        },
+        orderBy: [{ dataSorteio: 'desc' }, { numero: 'desc' }],
+        select: {
+          id: true,
+          numero: true,
+          status: true,
+          dataSorteio: true,
+          dataEncerramento: true,
+        },
+      });
+
+      return edicoes.map((edicao) => this.mapEdicaoFiltro(edicao));
+    }
+
+    if (user.perfil !== Perfil.VENDEDOR) {
+      throw new ForbiddenException(
+        'Perfil sem acesso às edições do dashboard',
+      );
+    }
+
+    const edicoes = await this.prisma.edicao.findMany({
+      where: {
+        vendas: {
+          some: {
+            status: StatusVenda.APROVADO,
+            vendedorId: user.vendedorId,
+          },
+        },
+      },
+      orderBy: [{ dataSorteio: 'desc' }, { numero: 'desc' }],
+      select: {
+        id: true,
+        numero: true,
+        status: true,
+        dataSorteio: true,
+        dataEncerramento: true,
+      },
+    });
+
+    return edicoes.map((edicao) => this.mapEdicaoFiltro(edicao));
   }
 
   // ─── DISTRIBUIDOR DASHBOARD ──────────────────────────────────────
@@ -467,6 +524,23 @@ export class DashboardService {
     return { 
       resumo: { totalAcumuladoRS: Number(totalAcumuladoR$.toFixed(2)), totalCartelasAcumulado },
       timeline 
+    };
+  }
+
+  private mapEdicaoFiltro(edicao: {
+    id: string;
+    numero: string;
+    status: string;
+    dataSorteio: Date;
+    dataEncerramento: Date;
+  }) {
+    return {
+      id: edicao.id,
+      numero: edicao.numero,
+      nome: `Edição ${String(edicao.numero).padStart(3, '0')}`,
+      status: edicao.status,
+      dataSorteio: edicao.dataSorteio,
+      dataEncerramento: edicao.dataEncerramento,
     };
   }
 }

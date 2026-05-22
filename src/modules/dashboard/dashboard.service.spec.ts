@@ -130,6 +130,64 @@ describe('DashboardService', () => {
     });
   });
 
+  describe('getEdicoesDisponiveis', () => {
+    it('should return minimal edicao contract for distribuidor', async () => {
+      mockPrisma.edicao.findMany.mockResolvedValue([
+        {
+          id: 'ed-1',
+          numero: '1',
+          status: 'ATIVA',
+          dataSorteio: new Date('2026-05-10T00:00:00Z'),
+          dataEncerramento: new Date('2026-05-09T00:00:00Z'),
+        },
+      ]);
+
+      const res = await service.getEdicoesDisponiveis({
+        perfil: 'DISTRIBUIDOR',
+        distribuidorId: 'dist-1',
+      } as RequestUser);
+
+      expect(res).toEqual([
+        {
+          id: 'ed-1',
+          numero: '1',
+          nome: 'Edição 001',
+          status: 'ATIVA',
+          dataSorteio: new Date('2026-05-10T00:00:00Z'),
+          dataEncerramento: new Date('2026-05-09T00:00:00Z'),
+        },
+      ]);
+    });
+
+    it('should return minimal edicao contract for vendedor', async () => {
+      mockPrisma.edicao.findMany.mockResolvedValue([
+        {
+          id: 'ed-2',
+          numero: '12',
+          status: 'ENCERRADA',
+          dataSorteio: new Date('2026-04-20T00:00:00Z'),
+          dataEncerramento: new Date('2026-04-19T00:00:00Z'),
+        },
+      ]);
+
+      const res = await service.getEdicoesDisponiveis({
+        perfil: 'VENDEDOR',
+        vendedorId: 'vend-1',
+      } as RequestUser);
+
+      expect(res).toEqual([
+        {
+          id: 'ed-2',
+          numero: '12',
+          nome: 'Edição 012',
+          status: 'ENCERRADA',
+          dataSorteio: new Date('2026-04-20T00:00:00Z'),
+          dataEncerramento: new Date('2026-04-19T00:00:00Z'),
+        },
+      ]);
+    });
+  });
+
   // ─── TIMELINE ─────────────────────────────────────────────────────
 
   describe('Timeline functions (Admin, Distribuidor, Vendedor)', () => {

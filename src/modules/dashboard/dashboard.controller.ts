@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { DashboardFilterDto } from './dto/filtro-dashboard.dto';
+import { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @ApiBearerAuth()
 @ApiTags('Admin / Dashboard')
@@ -38,6 +39,17 @@ export class DashboardController {
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   getAdminAnaliseTimeline(@Query() filtros: DashboardFilterDto) {
     return this.dashboardService.getAdminAnaliseTimeline(filtros);
+  }
+
+  @Get('edicoes')
+  @Roles('DISTRIBUIDOR', 'VENDEDOR')
+  @ApiOperation({
+    summary: 'Listar edições disponíveis para filtro do dashboard',
+    description:
+      'Retorna somente id, número, nome, status e datas das edições com vendas aprovadas vinculadas ao usuário autenticado.',
+  })
+  getEdicoesDisponiveis(@Req() req: { user: RequestUser }) {
+    return this.dashboardService.getEdicoesDisponiveis(req.user);
   }
 
   // ─── DISTRIBUIDOR ──────────────────────────────────────────
