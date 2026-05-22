@@ -13,6 +13,8 @@ describe('DashboardService', () => {
     distribuidor: { count: jest.fn() },
     edicao: { findMany: jest.fn() },
     venda: { findMany: jest.fn() },
+    comissao: { findMany: jest.fn() },
+    comissaoDistribuidor: { findMany: jest.fn() },
   };
 
   beforeEach(async () => {
@@ -181,6 +183,43 @@ describe('DashboardService', () => {
       );
     });
 
+    it('Distribuidor comissoes returns total de vendas e total de comissao com filtro', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([
+        { total: new Prisma.Decimal(150) },
+        { total: new Prisma.Decimal(50) },
+      ]);
+      mockPrisma.comissaoDistribuidor.findMany.mockResolvedValue([
+        { valor: new Prisma.Decimal(12) },
+        { valor: new Prisma.Decimal(8) },
+      ]);
+      const user = { distribuidorId: 'dist-1' } as RequestUser;
+
+      const res = await service.getDistribuidorComissoes(user, {
+        edicaoIds: ['edicao-1'],
+      });
+
+      expect(res).toEqual({
+        totalVendasValor: 200,
+        totalComissao: 20,
+      });
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'APROVADO',
+          distribuidorId: 'dist-1',
+          edicaoId: { in: ['edicao-1'] },
+        },
+        select: { total: true },
+      });
+      expect(mockPrisma.comissaoDistribuidor.findMany).toHaveBeenCalledWith({
+        where: {
+          distribuidorId: 'dist-1',
+          status: 'PENDENTE',
+          venda: { edicaoId: { in: ['edicao-1'] } },
+        },
+        select: { valor: true },
+      });
+    });
+
     it('Distribuidor vendas por vendedor applies edicao filter when provided', async () => {
       mockPrisma.vendedor.findMany.mockResolvedValue([
         {
@@ -306,11 +345,21 @@ describe('DashboardService', () => {
 
     it('Vendedor total clientes keeps full count when no filter is provided', async () => {
       mockPrisma.cliente.count.mockResolvedValue(5);
+      mockPrisma.venda.findMany.mockResolvedValue([
+        { total: new Prisma.Decimal(100) },
+      ]);
+      mockPrisma.comissao.findMany.mockResolvedValue([
+        { valor: new Prisma.Decimal(15) },
+      ]);
       const user = { vendedorId: 'vend-1' } as RequestUser;
 
       const res = await service.getVendedorTotalClientes(user, {});
 
-      expect(res).toEqual({ totalClientes: 5 });
+      expect(res).toEqual({
+        totalClientes: 5,
+        totalVendasValor: 100,
+        totalComissao: 15,
+      });
       expect(mockPrisma.cliente.count).toHaveBeenCalledWith({
         where: { vendedorId: 'vend-1' },
       });
@@ -318,13 +367,24 @@ describe('DashboardService', () => {
 
     it('Vendedor total clientes filters by edicaoIds when provided', async () => {
       mockPrisma.cliente.count.mockResolvedValue(2);
+      mockPrisma.venda.findMany.mockResolvedValue([
+        { total: new Prisma.Decimal(80) },
+        { total: new Prisma.Decimal(20) },
+      ]);
+      mockPrisma.comissao.findMany.mockResolvedValue([
+        { valor: new Prisma.Decimal(10) },
+      ]);
       const user = { vendedorId: 'vend-1' } as RequestUser;
 
       const res = await service.getVendedorTotalClientes(user, {
         edicaoIds: ['edicao-1'],
       });
 
-      expect(res).toEqual({ totalClientes: 2 });
+      expect(res).toEqual({
+        totalClientes: 2,
+        totalVendasValor: 100,
+        totalComissao: 10,
+      });
       expect(mockPrisma.cliente.count).toHaveBeenCalledWith({
         where: {
           vendedorId: 'vend-1',
@@ -336,6 +396,14 @@ describe('DashboardService', () => {
             },
           },
         },
+      });
+      expect(mockPrisma.comissao.findMany).toHaveBeenCalledWith({
+        where: {
+          vendedorId: 'vend-1',
+          status: 'PENDENTE',
+          venda: { edicaoId: { in: ['edicao-1'] } },
+        },
+        select: { valor: true },
       });
     });
   });

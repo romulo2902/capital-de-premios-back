@@ -226,39 +226,34 @@ export class DashboardService {
 
   async getDistribuidorComissoes(user: RequestUser, filtros: DashboardFilterDto) {
     this.logger.log(`Buscando comissões para Distribuidor ${user.distribuidorId}`);
-    
-    // A comissão real livre do distribuidor fica armazenada em ComissaoDistribuidor
-    const where: Prisma.ComissaoDistribuidorWhereInput = {
-      distribuidorId: user.distribuidorId,
-      status: StatusComissao.PENDENTE, // Ou considerar pagos também, dependendo da tela, mas geralmente "total" inclui todos. Vamos não limitar status se for tela de dashboard geral.
+    const [vendas, comissoes] = await Promise.all([
+      this.prisma.venda.findMany({
+        where: {
+          ...this.buildTimelineWhere(filtros),
+          distribuidorId: user.distribuidorId,
+        },
+        select: { total: true },
+      }),
+      this.prisma.comissaoDistribuidor.findMany({
+        where: this.buildDistribuidorComissaoWhere(user, filtros),
+        select: { valor: true },
+      }),
+    ]);
+
+    const totalVendasValor = vendas.reduce(
+      (acc, venda) => acc + Number(venda.total),
+      0,
+    );
+    const totalComissao = comissoes.reduce(
+      (acc: number, comissao: { valor: Prisma.Decimal }) =>
+        acc + Number(comissao.valor),
+      0,
+    );
+
+    return {
+      totalVendasValor: Number(totalVendasValor.toFixed(2)),
+      totalComissao: Number(totalComissao.toFixed(2)),
     };
-
-    if (filtros.edicaoIds) {
-      const ids = filtros.edicaoIds;
-      if (ids.length > 0) {
-        where.venda = { edicaoId: { in: ids } };
-      }
-    }
-
-    if (filtros.dataInicio || filtros.dataFim) {
-      where.createdAt = {};
-      if (filtros.dataInicio) {
-        where.createdAt.gte = new Date(filtros.dataInicio);
-      }
-      if (filtros.dataFim) {
-        const dataFim = new Date(filtros.dataFim);
-        dataFim.setHours(23, 59, 59, 999);
-        where.createdAt.lte = dataFim;
-      }
-    }
-
-    const comissoes = await this.prisma.comissaoDistribuidor.findMany({
-      where,
-      select: { valor: true },
-    });
-
-    const totalVendasValor = comissoes.reduce((acc: number, c: { valor: Prisma.Decimal }) => acc + Number(c.valor), 0);
-    return { totalVendasValor };
   }
 
   // ─── VENDEDOR DASHBOARD ──────────────────────────────────────────
@@ -287,21 +282,48 @@ export class DashboardService {
       Boolean(filtros.dataInicio) ||
       Boolean(filtros.dataFim);
 
-    const totalClientes = await this.prisma.cliente.count({
-      where: possuiFiltros
-        ? {
-            vendedorId: user.vendedorId,
-            vendas: {
-              some: {
-                ...this.buildTimelineWhere(filtros),
-                vendedorId: user.vendedorId,
+    const [totalClientes, vendas, comissoes] = await Promise.all([
+      this.prisma.cliente.count({
+        where: possuiFiltros
+          ? {
+              vendedorId: user.vendedorId,
+              vendas: {
+                some: {
+                  ...this.buildTimelineWhere(filtros),
+                  vendedorId: user.vendedorId,
+                },
               },
-            },
-          }
-        : { vendedorId: user.vendedorId },
-    });
+            }
+          : { vendedorId: user.vendedorId },
+      }),
+      this.prisma.venda.findMany({
+        where: {
+          ...this.buildTimelineWhere(filtros),
+          vendedorId: user.vendedorId,
+        },
+        select: { total: true },
+      }),
+      this.prisma.comissao.findMany({
+        where: this.buildVendedorComissaoWhere(user, filtros),
+        select: { valor: true },
+      }),
+    ]);
 
-    return { totalClientes };
+    const totalVendasValor = vendas.reduce(
+      (acc, venda) => acc + Number(venda.total),
+      0,
+    );
+    const totalComissao = comissoes.reduce(
+      (acc: number, comissao: { valor: Prisma.Decimal }) =>
+        acc + Number(comissao.valor),
+      0,
+    );
+
+    return {
+      totalClientes,
+      totalVendasValor: Number(totalVendasValor.toFixed(2)),
+      totalComissao: Number(totalComissao.toFixed(2)),
+    };
   }
 
   // ─── HELPERS ───────────────────────────────────────────────────
@@ -340,6 +362,62 @@ export class DashboardService {
       const ids = filtros.edicaoIds;
       if (ids.length > 0) {
         where.edicaoId = { in: ids };
+      }
+    }
+
+    return where;
+  }
+
+  private buildDistribuidorComissaoWhere(
+    user: RequestUser,
+    filtros: DashboardFilterDto,
+  ): Prisma.ComissaoDistribuidorWhereInput {
+    const where: Prisma.ComissaoDistribuidorWhereInput = {
+      distribuidorId: user.distribuidorId,
+      status: StatusComissao.PENDENTE,
+    };
+
+    if (filtros.edicaoIds?.length) {
+      where.venda = { edicaoId: { in: filtros.edicaoIds } };
+    }
+
+    if (filtros.dataInicio || filtros.dataFim) {
+      where.createdAt = {};
+      if (filtros.dataInicio) {
+        where.createdAt.gte = new Date(filtros.dataInicio);
+      }
+      if (filtros.dataFim) {
+        const dataFim = new Date(filtros.dataFim);
+        dataFim.setHours(23, 59, 59, 999);
+        where.createdAt.lte = dataFim;
+      }
+    }
+
+    return where;
+  }
+
+  private buildVendedorComissaoWhere(
+    user: RequestUser,
+    filtros: DashboardFilterDto,
+  ): Prisma.ComissaoWhereInput {
+    const where: Prisma.ComissaoWhereInput = {
+      vendedorId: user.vendedorId,
+      status: StatusComissao.PENDENTE,
+    };
+
+    if (filtros.edicaoIds?.length) {
+      where.venda = { edicaoId: { in: filtros.edicaoIds } };
+    }
+
+    if (filtros.dataInicio || filtros.dataFim) {
+      where.createdAt = {};
+      if (filtros.dataInicio) {
+        where.createdAt.gte = new Date(filtros.dataInicio);
+      }
+      if (filtros.dataFim) {
+        const dataFim = new Date(filtros.dataFim);
+        dataFim.setHours(23, 59, 59, 999);
+        where.createdAt.lte = dataFim;
       }
     }
 
