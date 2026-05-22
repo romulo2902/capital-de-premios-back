@@ -58,15 +58,33 @@ export class DashboardController {
   @Get('distribuidor/vendas-por-vendedor')
   @Roles('DISTRIBUIDOR')
   @ApiOperation({ summary: 'Quantidade total em valor/cartelas por vendedor da equipe' })
-  getDistribuidorVendasPorVendedor(@Req() req: any) {
-    return this.dashboardService.getDistribuidorVendasPorVendedor(req.user);
+  @ApiQuery({ name: 'edicaoIds', required: false, type: String })
+  @ApiQuery({ name: 'dataInicio', required: false, type: String })
+  @ApiQuery({ name: 'dataFim', required: false, type: String })
+  getDistribuidorVendasPorVendedor(
+    @Req() req: any,
+    @Query() filtros: DashboardFilterDto,
+  ) {
+    return this.dashboardService.getDistribuidorVendasPorVendedor(
+      req.user,
+      filtros,
+    );
   }
 
   @Get('distribuidor/clientes-por-vendedor')
   @Roles('DISTRIBUIDOR')
   @ApiOperation({ summary: 'Total de clientes captados organizados por vendedor' })
-  getDistribuidorClientesPorVendedor(@Req() req: any) {
-    return this.dashboardService.getDistribuidorClientesPorVendedor(req.user);
+  @ApiQuery({ name: 'edicaoIds', required: false, type: String })
+  @ApiQuery({ name: 'dataInicio', required: false, type: String })
+  @ApiQuery({ name: 'dataFim', required: false, type: String })
+  getDistribuidorClientesPorVendedor(
+    @Req() req: any,
+    @Query() filtros: DashboardFilterDto,
+  ) {
+    return this.dashboardService.getDistribuidorClientesPorVendedor(
+      req.user,
+      filtros,
+    );
   }
 
   @Get('distribuidor/comissoes')
@@ -100,7 +118,10 @@ export class DashboardController {
   @Get('vendedor/clientes')
   @Roles('VENDEDOR')
   @ApiOperation({ summary: 'Total de clientes deste vendedor' })
-  getVendedorTotalClientes(@Req() req: any) {
-    return this.dashboardService.getVendedorTotalClientes(req.user);
+  @ApiQuery({ name: 'edicaoIds', required: false, type: String })
+  @ApiQuery({ name: 'dataInicio', required: false, type: String })
+  @ApiQuery({ name: 'dataFim', required: false, type: String })
+  getVendedorTotalClientes(@Req() req: any, @Query() filtros: DashboardFilterDto) {
+    return this.dashboardService.getVendedorTotalClientes(req.user, filtros);
   }
 }

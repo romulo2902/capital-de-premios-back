@@ -181,6 +181,116 @@ describe('DashboardService', () => {
       );
     });
 
+    it('Distribuidor vendas por vendedor applies edicao filter when provided', async () => {
+      mockPrisma.vendedor.findMany.mockResolvedValue([
+        {
+          id: 'vend-1',
+          nome: 'Carlos',
+          vendas: [{ total: new Prisma.Decimal(80), quantidade: 2 }],
+        },
+      ]);
+      const user = { distribuidorId: 'dist-1' } as RequestUser;
+
+      const res = await service.getDistribuidorVendasPorVendedor(user, {
+        edicaoIds: ['edicao-1'],
+      });
+
+      expect(res).toEqual([
+        {
+          vendedorId: 'vend-1',
+          nome: 'Carlos',
+          quantidadeVendas: 2,
+          totalFaturamento: 80,
+        },
+      ]);
+      expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { distribuidorId: 'dist-1' },
+          select: expect.objectContaining({
+            vendas: {
+              where: {
+                status: 'APROVADO',
+                edicaoId: { in: ['edicao-1'] },
+              },
+              select: { total: true, quantidade: true, tipoCartela: true },
+            },
+          }),
+        }),
+      );
+    });
+
+    it('Distribuidor clientes por vendedor keeps assigned-count when no filter is provided', async () => {
+      mockPrisma.vendedor.findMany.mockResolvedValue([
+        {
+          id: 'vend-1',
+          nome: 'Carlos',
+          _count: { clientes: 4 },
+        },
+      ]);
+      const user = { distribuidorId: 'dist-1' } as RequestUser;
+
+      const res = await service.getDistribuidorClientesPorVendedor(user, {});
+
+      expect(res).toEqual([
+        {
+          vendedorId: 'vend-1',
+          nome: 'Carlos',
+          totalClientes: 4,
+        },
+      ]);
+      expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: {
+            id: true,
+            nome: true,
+            _count: { select: { clientes: true } },
+          },
+        }),
+      );
+    });
+
+    it('Distribuidor clientes por vendedor counts unique buyers in filtered period/edition', async () => {
+      mockPrisma.vendedor.findMany.mockResolvedValue([
+        {
+          id: 'vend-1',
+          nome: 'Carlos',
+          vendas: [
+            { clienteId: 'cliente-1' },
+            { clienteId: 'cliente-1' },
+            { clienteId: 'cliente-2' },
+          ],
+        },
+      ]);
+      const user = { distribuidorId: 'dist-1' } as RequestUser;
+
+      const res = await service.getDistribuidorClientesPorVendedor(user, {
+        edicaoIds: ['edicao-1'],
+      });
+
+      expect(res).toEqual([
+        {
+          vendedorId: 'vend-1',
+          nome: 'Carlos',
+          totalClientes: 2,
+        },
+      ]);
+      expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: {
+            id: true,
+            nome: true,
+            vendas: {
+              where: {
+                status: 'APROVADO',
+                edicaoId: { in: ['edicao-1'] },
+              },
+              select: { clienteId: true },
+            },
+          },
+        }),
+      );
+    });
+
     it('Vendedor timeline filters by vendedorId', async () => {
       mockPrisma.venda.findMany.mockResolvedValue(mockVendas);
       const user = { vendedorId: 'vend-1' } as RequestUser;
@@ -192,6 +302,41 @@ describe('DashboardService', () => {
           where: expect.objectContaining({ vendedorId: 'vend-1' })
         })
       );
+    });
+
+    it('Vendedor total clientes keeps full count when no filter is provided', async () => {
+      mockPrisma.cliente.count.mockResolvedValue(5);
+      const user = { vendedorId: 'vend-1' } as RequestUser;
+
+      const res = await service.getVendedorTotalClientes(user, {});
+
+      expect(res).toEqual({ totalClientes: 5 });
+      expect(mockPrisma.cliente.count).toHaveBeenCalledWith({
+        where: { vendedorId: 'vend-1' },
+      });
+    });
+
+    it('Vendedor total clientes filters by edicaoIds when provided', async () => {
+      mockPrisma.cliente.count.mockResolvedValue(2);
+      const user = { vendedorId: 'vend-1' } as RequestUser;
+
+      const res = await service.getVendedorTotalClientes(user, {
+        edicaoIds: ['edicao-1'],
+      });
+
+      expect(res).toEqual({ totalClientes: 2 });
+      expect(mockPrisma.cliente.count).toHaveBeenCalledWith({
+        where: {
+          vendedorId: 'vend-1',
+          vendas: {
+            some: {
+              status: 'APROVADO',
+              vendedorId: 'vend-1',
+              edicaoId: { in: ['edicao-1'] },
+            },
+          },
+        },
+      });
     });
   });
 });
