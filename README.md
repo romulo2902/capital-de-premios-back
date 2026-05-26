@@ -275,6 +275,13 @@ npm run docker:up
 
 1. Atualize o codigo e configure o arquivo de ambiente correto (`.env.homolog` ou `.env.production`).
 
+   Em Docker Compose, o servico `api` le o arquivo `.env`. Na VPS, copie ou sincronize o
+   ambiente escolhido antes de subir:
+
+```bash
+cp .env.production .env
+```
+
 2. Rebuild da imagem:
 
 ```bash
@@ -298,6 +305,59 @@ Observacoes:
 - O container da API executa `npx prisma migrate deploy` no startup antes de subir o Nest.
 - Se precisar rodar migration manualmente: `docker compose exec api npx prisma migrate deploy`.
 - Se estiver usando Postgres/Redis locais no host, mantenha `network_mode: host` e URLs apontando para `localhost`.
+
+## Dominio da API na VPS
+
+Para usar o dominio do backend em producao via Nginx, deixe a API ouvindo apenas no loopback da VPS e altere as URLs publicas no `.env.production`:
+
+```env
+NODE_ENV=production
+HOST=127.0.0.1
+PORT=3000
+REQUEST_BODY_LIMIT=50mb
+APP_URL=https://api2.capitaldepremios.com.br
+PAGBANK_NOTIFICATION_URL=https://api2.capitaldepremios.com.br/api/pagamentos/webhook/pix
+FRONTEND_LOJA_URL=https://loja.capitaldepremios.com.br
+URL_LOJA_CLIENTE=https://loja.capitaldepremios.com.br
+FRONTEND_ADMIN_URL=https://admin.capitaldepremios.com.br
+FRONTEND_ALLOWED_ORIGINS=https://capitaldepremios.com.br,https://www.capitaldepremios.com.br
+```
+
+Se o frontend ainda estiver em outro dominio ou IP, inclua essa origem em `FRONTEND_ALLOWED_ORIGINS`; caso contrario o CORS vai bloquear as chamadas.
+
+Antes de instalar o proxy HTTPS pela primeira vez, emita o certificado:
+
+```bash
+sudo systemctl stop nginx
+sudo certbot certonly --standalone -d api2.capitaldepremios.com.br
+sudo systemctl start nginx
+```
+
+O Nginx deve ser configurado fora da aplicacao, em `/etc/nginx/sites-available` e `/etc/nginx/sites-enabled`. O arquivo `deploy/nginx/capital-premios-api.conf` e apenas um modelo versionado para copiar na VPS:
+
+```bash
+sudo mkdir -p /var/www/certbot
+sudo cp deploy/nginx/capital-premios-api.conf /etc/nginx/sites-available/capital-premios-api
+sudo ln -sf /etc/nginx/sites-available/capital-premios-api /etc/nginx/sites-enabled/capital-premios-api
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Depois de apontar o DNS para o IP da VPS, valide:
+
+```bash
+curl https://api2.capitaldepremios.com.br/api/health
+```
+
+Recomendado no firewall da VPS: liberar apenas SSH, HTTP e HTTPS para fora. A porta `3000` deve ficar fechada externamente.
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw deny 3000/tcp
+sudo ufw enable
+```
 
 ## Credenciais do seed
 

@@ -41,25 +41,28 @@ async function bootstrap(): Promise<void> {
   const port = config.get<number>('PORT', 3000);
   const nodeEnv = config.get<string>('NODE_ENV', 'development');
   const isProduction = nodeEnv === 'production';
+  const requestBodyLimit = config.get<string>('REQUEST_BODY_LIMIT', '50mb');
   const frontendLojaUrl = config.get<string>(
     'FRONTEND_LOJA_URL',
-    'http://localhost:3001',
+    isProduction ? '' : 'http://localhost:3001',
   );
   const frontendAdminUrl = config.get<string>(
     'FRONTEND_ADMIN_URL',
-    'http://localhost:3002',
+    isProduction ? '' : 'http://localhost:3002',
   );
   const frontendAllowedOrigins = parseCorsOrigins(
     config.get<string>('FRONTEND_ALLOWED_ORIGINS'),
   );
+  const developmentCorsOrigins = isProduction
+    ? []
+    : ['http://localhost:3001', 'http://localhost:3002'];
   const corsOrigins = Array.from(
     new Set(
       [
         ...frontendAllowedOrigins,
         frontendLojaUrl,
         frontendAdminUrl,
-        'http://localhost:3001',
-        'http://localhost:3002',
+        ...developmentCorsOrigins,
       ]
         .filter((origin): origin is string => Boolean(origin?.trim()))
         .map((origin) => normalizeOrigin(origin)),
@@ -75,6 +78,7 @@ async function bootstrap(): Promise<void> {
       crossOriginResourcePolicy: isProduction ? undefined : false,
     }),
   );
+  app.disable('x-powered-by');
   app.use(compression());
   app.use((request: Request, _response: Response, next: NextFunction) => {
     runWithRequestContext(
@@ -136,8 +140,8 @@ async function bootstrap(): Promise<void> {
 
   logger.log(`CORS habilitado para origens: ${corsOrigins.join(', ')}`);
 
-  app.useBodyParser('json', { limit: '50mb' });
-  app.useBodyParser('urlencoded', { limit: '50mb', extended: true });
+  app.useBodyParser('json', { limit: requestBodyLimit });
+  app.useBodyParser('urlencoded', { limit: requestBodyLimit, extended: true });
 
   app.useGlobalPipes(
     new ValidationPipe({
