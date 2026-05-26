@@ -317,9 +317,9 @@ PORT=3000
 REQUEST_BODY_LIMIT=50mb
 APP_URL=https://api2.capitaldepremios.com.br
 PAGBANK_NOTIFICATION_URL=https://api2.capitaldepremios.com.br/api/pagamentos/webhook/pix
-FRONTEND_LOJA_URL=https://loja.capitaldepremios.com.br
-URL_LOJA_CLIENTE=https://loja.capitaldepremios.com.br
-FRONTEND_ADMIN_URL=https://admin.capitaldepremios.com.br
+FRONTEND_LOJA_URL=https://vendas.capitaldepremios.com.br
+URL_LOJA_CLIENTE=https://vendas.capitaldepremios.com.br
+FRONTEND_ADMIN_URL=https://admincdp.capitaldepremios.com.br
 FRONTEND_ALLOWED_ORIGINS=https://capitaldepremios.com.br,https://www.capitaldepremios.com.br
 ```
 
