@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { StatusVenda, TipoCartela } from '@prisma/client';
+import { OrigemParticipacao, StatusVenda, TipoCartela } from '@prisma/client';
 import type { Response } from 'express';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
@@ -753,16 +753,18 @@ export class RelatoriosService {
       const precoPorBilhete = Number(venda.total) / venda.quantidade;
       const precoFormatado = precoPorBilhete.toFixed(2);
 
-      const cpf = (cliente.cpf ?? '').replace(/\D/g, '');
+      const numeroBilhete = this.formatarNumeroCdp(bilhete.numero);
+      const cpf = this.formatarCampoNumericoCdp(cliente.cpf, 11);
       const telefone = (cliente.telefone ?? '').replace(/\D/g, '');
       const ddd = telefone.substring(0, 2);
-      const cep = (cliente.cep ?? '').replace(/\D/g, '');
+      const cep = this.formatarCampoNumericoCdp(cliente.cep, 8);
       const uf = (cliente.estado ?? '').toUpperCase().trim();
       const cidade = removerAcentos(cliente.cidade ?? '').trim();
       const email = cliente.email ?? '';
+      const origemAquisicao = this.resolverOrigemAquisicaoCdp(venda);
 
       linhas.push(
-        `D3;${bilhete.numero};${precoFormatado};${cpf};${cliente.nome};;M;${email};${ddd};${telefone};${uf};${cep};${cidade};;;;Adquirido pelo App;V;N;`,
+        `D3;${numeroBilhete};${precoFormatado};${cpf};${cliente.nome};;M;${email};${ddd};${telefone};${uf};${cep};${cidade};;;;${origemAquisicao};V;N;`,
       );
     }
 
@@ -779,7 +781,12 @@ export class RelatoriosService {
     const ranges = [...rangesMap.values()].sort((a, b) =>
       a.inicio < b.inicio ? -1 : a.inicio > b.inicio ? 1 : 0,
     );
-    const rangesStr = ranges.map((r) => `${r.inicio};${r.fim}`).join(';');
+    const rangesStr = ranges
+      .map(
+        (r) =>
+          `${this.formatarNumeroCdp(r.inicio)};${this.formatarNumeroCdp(r.fim)}`,
+      )
+      .join(';');
 
     linhas.push(`T;${bilhetes.length};${rangesStr};`);
 
@@ -893,10 +900,7 @@ export class RelatoriosService {
     aplicarFiltroPeriodoCadastroUtil(where, dataInicio, dataFim);
   }
 
-  private parseDataRelatorio(
-    value: string,
-    boundary: 'inicio' | 'fim',
-  ): Date {
+  private parseDataRelatorio(value: string, boundary: 'inicio' | 'fim'): Date {
     return parseDataRelatorioUtil(value, boundary);
   }
 
@@ -1145,6 +1149,45 @@ export class RelatoriosService {
     value: bigint | number | string | null | undefined,
   ): string {
     return formatarNumeroAleatorioUtil(value);
+  }
+
+  private formatarNumeroCdp(value: bigint | number | string): string {
+    return value.toString().padStart(7, '0');
+  }
+
+  private formatarCampoNumericoCdp(
+    value: string | null | undefined,
+    tamanho: number,
+  ): string {
+    const digits = (value ?? '').replace(/\D/g, '');
+    return digits ? digits.padStart(tamanho, '0') : '';
+  }
+
+  private resolverOrigemAquisicaoCdp(venda: {
+    origemParticipacao: OrigemParticipacao;
+    gatewayPayload?: unknown;
+  }): string {
+    if (this.gatewayPayloadTemOrigem(venda.gatewayPayload, 'WHATSAPP')) {
+      return 'Adquirido pelo WhatsApp';
+    }
+
+    if (venda.origemParticipacao === OrigemParticipacao.POS) {
+      return 'Adquirido pelo POS';
+    }
+
+    return 'Adquirido pela Web';
+  }
+
+  private gatewayPayloadTemOrigem(
+    gatewayPayload: unknown,
+    origem: string,
+  ): boolean {
+    return (
+      !!gatewayPayload &&
+      typeof gatewayPayload === 'object' &&
+      !Array.isArray(gatewayPayload) &&
+      (gatewayPayload as Record<string, unknown>).origem === origem
+    );
   }
 
   private aplicarFormatoTextoColunas(

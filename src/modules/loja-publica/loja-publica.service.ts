@@ -329,13 +329,16 @@ export class LojaPublicaService {
         status: StatusVenda.PENDENTE,
         origemParticipacao: OrigemParticipacao.DIGITAL,
         tipoPagamento: TipoPagamento.PIX,
-        gatewayPayload: dto.cartelasSelecionadas
-          ? ({
-              combosSelecionados: dto.cartelasSelecionadas.map((numero) => ({
-                numeroBase: numero,
-              })),
-            } as unknown as Prisma.InputJsonValue)
-          : Prisma.JsonNull,
+        gatewayPayload: {
+          origem: 'WEB',
+          ...(dto.cartelasSelecionadas
+            ? {
+                combosSelecionados: dto.cartelasSelecionadas.map((numero) => ({
+                  numeroBase: numero,
+                })),
+              }
+            : {}),
+        } as Prisma.InputJsonValue,
       },
     });
     this.logger.log(
@@ -1189,9 +1192,8 @@ export class LojaPublicaService {
       return this.resolverSellerPorUsuarioDistribuidor(usuario.id);
     }
 
-    const sellerPorEntidade = await this.resolverSellerPorEntidadeDireta(
-      sellerId,
-    );
+    const sellerPorEntidade =
+      await this.resolverSellerPorEntidadeDireta(sellerId);
 
     if (sellerPorEntidade) {
       return sellerPorEntidade;

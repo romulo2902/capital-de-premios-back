@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
+import { OrigemParticipacao } from '@prisma/client';
 import { RelatoriosService } from './relatorios.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -20,6 +21,12 @@ describe('RelatoriosService', () => {
       findMany: jest.fn(),
     },
     cliente: {
+      findMany: jest.fn(),
+    },
+    edicao: {
+      findUniqueOrThrow: jest.fn(),
+    },
+    bilhete: {
       findMany: jest.fn(),
     },
   };
@@ -217,6 +224,107 @@ describe('RelatoriosService', () => {
         dataInicio: '01/03/2026',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('deve preservar zeros a esquerda no relatorio CDP', async () => {
+    mockPrisma.edicao.findUniqueOrThrow.mockResolvedValue({
+      id: 'edicao-1',
+      numero: 'ED-126-RASCUNHO',
+      detalhes: [
+        {
+          rangeInicio: 980000n,
+          rangeFinal: 983000n,
+        },
+      ],
+    });
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      {
+        numero: 980000n,
+        venda: {
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          gatewayPayload: { origem: 'WEB' },
+          quantidade: 1,
+          total: '15.00',
+          cliente: {
+            cpf: '6790319107',
+            nome: 'Jair Rodrigues',
+            telefone: '9292837492874',
+            cep: '1234567',
+            estado: 'GO',
+            cidade: 'Goiânia',
+            email: 'jair@gmail.com',
+          },
+        },
+      },
+      {
+        numero: 980001n,
+        venda: {
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          gatewayPayload: { origem: 'WHATSAPP' },
+          quantidade: 1,
+          total: '15.00',
+          cliente: {
+            cpf: '6790319107',
+            nome: 'Jair Rodrigues',
+            telefone: '9292837492874',
+            cep: '1234567',
+            estado: 'GO',
+            cidade: 'Goiânia',
+            email: 'jair@gmail.com',
+          },
+        },
+      },
+      {
+        numero: 980002n,
+        venda: {
+          origemParticipacao: OrigemParticipacao.POS,
+          gatewayPayload: null,
+          quantidade: 1,
+          total: '15.00',
+          cliente: {
+            cpf: '6790319107',
+            nome: 'Jair Rodrigues',
+            telefone: '9292837492874',
+            cep: '1234567',
+            estado: 'GO',
+            cidade: 'Goiânia',
+            email: 'jair@gmail.com',
+          },
+        },
+      },
+    ]);
+
+    const res = {
+      setHeader: jest.fn(),
+      send: jest.fn(),
+    };
+
+    await service.exportarRelatorioCDP(
+      res as never,
+      'edicao-1',
+      '2026-05-27',
+      '2026-05-27',
+    );
+
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'text/csv; charset=utf-8',
+    );
+    expect(res.send).toHaveBeenCalledWith(
+      expect.stringContaining('D3;0980000;15.00;06790319107;Jair Rodrigues'),
+    );
+    expect(res.send).toHaveBeenCalledWith(
+      expect.stringContaining('Adquirido pela Web;V;N;'),
+    );
+    expect(res.send).toHaveBeenCalledWith(
+      expect.stringContaining('Adquirido pelo WhatsApp;V;N;'),
+    );
+    expect(res.send).toHaveBeenCalledWith(
+      expect.stringContaining('Adquirido pelo POS;V;N;'),
+    );
+    expect(res.send).toHaveBeenCalledWith(
+      expect.stringContaining('T;3;0980000;0983000;'),
+    );
   });
 
   it('deve ordenar distribuidores pelo filtro do print', async () => {
