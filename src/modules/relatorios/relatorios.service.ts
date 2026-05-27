@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { TipoCartela } from '@prisma/client';
+import { StatusVenda, TipoCartela } from '@prisma/client';
 import type { Response } from 'express';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
@@ -697,6 +697,98 @@ export class RelatoriosService {
         ],
       },
     };
+  }
+
+  async exportarRelatorioCDP(
+    res: Response,
+    edicaoId: string,
+    dataInicio?: string,
+    dataFim?: string,
+  ): Promise<void> {
+    this.logger.log(`Gerando relatório CDP para edição ${edicaoId}`);
+
+    const edicao = await this.prisma.edicao.findUniqueOrThrow({
+      where: { id: edicaoId },
+      include: { detalhes: true },
+    });
+
+    const bilhetes = await this.prisma.bilhete.findMany({
+      where: {
+        edicaoId,
+        venda: { status: StatusVenda.APROVADO },
+      },
+      include: {
+        venda: {
+          include: { cliente: true },
+        },
+      },
+      orderBy: { numero: 'asc' },
+    });
+
+    const formatarDataCDP = (d: Date): string => {
+      const dia = String(d.getDate()).padStart(2, '0');
+      const mes = String(d.getMonth() + 1).padStart(2, '0');
+      return `${dia}/${mes}/${d.getFullYear()}`;
+    };
+
+    const hoje = new Date();
+    const dataInicioFmt = dataInicio
+      ? formatarDataCDP(new Date(dataInicio))
+      : formatarDataCDP(hoje);
+    const dataFimFmt = dataFim
+      ? formatarDataCDP(new Date(dataFim))
+      : formatarDataCDP(hoje);
+
+    const removerAcentos = (str: string): string =>
+      str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    const linhas: string[] = [];
+
+    linhas.push(`H;CAPDF;${dataInicioFmt};${dataFimFmt};${edicao.numero}`);
+
+    for (const bilhete of bilhetes) {
+      const { venda } = bilhete;
+      const { cliente } = venda;
+
+      const precoPorBilhete = Number(venda.total) / venda.quantidade;
+      const precoFormatado = precoPorBilhete.toFixed(2);
+
+      const cpf = (cliente.cpf ?? '').replace(/\D/g, '');
+      const telefone = (cliente.telefone ?? '').replace(/\D/g, '');
+      const ddd = telefone.substring(0, 2);
+      const cep = (cliente.cep ?? '').replace(/\D/g, '');
+      const uf = (cliente.estado ?? '').toUpperCase().trim();
+      const cidade = removerAcentos(cliente.cidade ?? '').trim();
+      const email = cliente.email ?? '';
+
+      linhas.push(
+        `D3;${bilhete.numero};${precoFormatado};${cpf};${cliente.nome};;M;${email};${ddd};${telefone};${uf};${cep};${cidade};;;;Adquirido pelo App;V;N;`,
+      );
+    }
+
+    const rangesMap = new Map<string, { inicio: bigint; fim: bigint }>();
+    for (const detalhe of edicao.detalhes) {
+      const key = String(detalhe.rangeInicio);
+      if (!rangesMap.has(key)) {
+        rangesMap.set(key, {
+          inicio: detalhe.rangeInicio,
+          fim: detalhe.rangeFinal,
+        });
+      }
+    }
+    const ranges = [...rangesMap.values()].sort((a, b) =>
+      a.inicio < b.inicio ? -1 : a.inicio > b.inicio ? 1 : 0,
+    );
+    const rangesStr = ranges.map((r) => `${r.inicio};${r.fim}`).join(';');
+
+    linhas.push(`T;${bilhetes.length};${rangesStr};`);
+
+    const conteudo = linhas.join('\r\n');
+    const nomeArquivo = `relatorio-cdp-${edicao.numero}-${Date.now()}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
+    res.send(conteudo);
   }
 
   private async buscarVendedoresRelatorio(

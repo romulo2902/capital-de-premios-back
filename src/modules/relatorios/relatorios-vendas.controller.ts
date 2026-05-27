@@ -46,4 +46,40 @@ export class RelatoriosVendasController {
       edicaoId,
     });
   }
+
+  @Get('cdp')
+  @ApiOperation({
+    summary:
+      'Exportar relatório CDP de vendas (arquivo CSV) por edição (ADMIN)',
+  })
+  @ApiQuery({
+    name: 'edicaoId',
+    required: true,
+    description: 'ID da edição',
+  })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description: 'Data início do período no cabeçalho (YYYY-MM-DD). Padrão: hoje.',
+    example: '2026-05-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description: 'Data fim do período no cabeçalho (YYYY-MM-DD). Padrão: hoje.',
+    example: '2026-05-31',
+  })
+  async exportarCDP(
+    @Res() res: Response,
+    @Query('edicaoId') edicaoId: string,
+    @Query('dataInicio') dataInicio?: string,
+    @Query('dataFim') dataFim?: string,
+  ) {
+    return this.relatoriosService.exportarRelatorioCDP(
+      res,
+      edicaoId,
+      dataInicio,
+      dataFim,
+    );
+  }
 }
