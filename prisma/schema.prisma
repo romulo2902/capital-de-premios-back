@@ -533,6 +533,7 @@ model VendaSena {
   total          Decimal
   status         StatusVendaSena @default(PENDENTE)
   tipoPagamento  TipoPagamento
+  origemParticipacao OrigemParticipacao @default(DIGITAL)
   gatewayId      String?
   gatewayPayload Json?
   createdAt      DateTime        @default(now())

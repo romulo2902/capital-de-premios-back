@@ -99,7 +99,11 @@ export class VendasService {
 
   // ─── CREATE ────────────────────────────────────────────
 
-  async create(dto: CreateVendaDto, user?: RequestUser) {
+  async create(
+    dto: CreateVendaDto,
+    user?: RequestUser,
+    options?: { skipGateway?: boolean },
+  ) {
     // 1. Validar edição
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: dto.edicaoId },
@@ -299,13 +303,17 @@ export class VendasService {
     );
 
     // 6. Criar cobrança no gateway de pagamento
+    //
+    // No canal POS o pagamento é processado externamente pela maquininha; a venda
+    // permanece PENDENTE e é confirmada depois via confirmarPagamento (skipGateway).
     let dadosPagamento: {
       pixCopiaECola?: string;
       qrCodeBase64?: string;
       urlPagamento?: string;
     } = {};
 
-    try {
+    if (!options?.skipGateway) {
+      try {
       const gateway = this.paymentGatewayFactory.getGateway(
         tipoPagamentoResolvido,
       );
@@ -355,6 +363,7 @@ export class VendasService {
       );
       // Venda fica como PENDENTE mesmo sem cobrança no gateway
       // O admin pode reprocessar ou cancelar manualmente
+      }
     }
 
     // 7. Retornar venda + dados de pagamento
@@ -2040,29 +2049,29 @@ export class VendasService {
     origemParticipacao: OrigemParticipacao,
     tipoCartela?: TipoCartela | null,
   ): ConfiguracaoVendaResolvida {
+    // POS reusa a configuração DIGITAL (não possui ranges/combos próprios).
+    const origemConfig = this.resolverOrigemDosRangesParaCombo(origemParticipacao);
+
     if (tipoCartela === TipoCartela.UMA_CHANCE) {
-      return this.resolverConfiguracaoUnitariaDaVenda(
-        detalhes,
-        origemParticipacao,
-      );
+      return this.resolverConfiguracaoUnitariaDaVenda(detalhes, origemConfig);
     }
 
     const combosDaOrigem = (combos ?? []).filter(
-      (combo) => combo.origemParticipacao === origemParticipacao,
+      (combo) => combo.origemParticipacao === origemConfig,
     );
 
     if (combosDaOrigem.length > 0) {
       return this.resolverConfiguracaoDaVendaPorCombos(
         detalhes,
         combosDaOrigem,
-        origemParticipacao,
+        origemConfig,
         tipoCartela,
       );
     }
 
     return this.resolverConfiguracaoDaVendaLegado(
       detalhes,
-      origemParticipacao,
+      origemConfig,
       tipoCartela,
     );
   }
@@ -2310,8 +2319,9 @@ export class VendasService {
   private resolverOrigemDosRangesParaCombo(
     origemParticipacao: OrigemParticipacao,
   ): OrigemParticipacao {
+    // POS não possui ranges próprios: as vendas POS usam a mesma configuração DIGITAL.
     if (origemParticipacao === OrigemParticipacao.POS) {
-      return OrigemParticipacao.FISICO;
+      return OrigemParticipacao.DIGITAL;
     }
 
     if (origemParticipacao === OrigemParticipacao.DIGITAL) {

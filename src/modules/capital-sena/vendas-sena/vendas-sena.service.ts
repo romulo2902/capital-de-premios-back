@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   ModoSelecaoSena,
+  OrigemParticipacao,
   Perfil,
   Prisma,
   StatusCartelaSena,
@@ -60,7 +61,11 @@ export class VendasSenaService {
 
   // ─── CREATE ────────────────────────────────────────────
 
-  async create(dto: CreateVendaSenaDto, user?: RequestUser) {
+  async create(
+    dto: CreateVendaSenaDto,
+    user?: RequestUser,
+    options?: { skipGateway?: boolean },
+  ) {
     // 1. Validar edição
     const edicao = await this.prisma.edicaoSena.findUnique({
       where: { id: dto.edicaoSenaId },
@@ -140,6 +145,8 @@ export class VendasSenaService {
 
     // 7. Calcular total
     const tipoPagamento = this.resolverTipoPagamento(dto.tipoPagamento, user);
+    const origemParticipacao =
+      dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
 
     const valorCombo = dto.comboSenaId
       ? (edicao.combos.find((c) => c.id === dto.comboSenaId)?.preco ?? null)
@@ -163,6 +170,7 @@ export class VendasSenaService {
             total: new Prisma.Decimal(total.toFixed(2)),
             status: StatusVendaSena.APROVADO,
             tipoPagamento,
+            origemParticipacao,
           },
         });
         const cartelasGeradas = await this.criarCartelasComSetimoNumero(
@@ -202,19 +210,24 @@ export class VendasSenaService {
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVendaSena.PENDENTE,
         tipoPagamento,
+        origemParticipacao,
         // Guardar cartelas no payload para criar após confirmação
         gatewayPayload: { cartelas } as unknown as Prisma.InputJsonValue,
       },
     });
 
     // 10. Criar cobrança no gateway
+    //
+    // No canal POS o pagamento é processado pela maquininha; a venda permanece
+    // PENDENTE e é confirmada depois via confirmarPagamento (skipGateway).
     let dadosPagamento: {
       pixCopiaECola?: string;
       qrCodeBase64?: string;
       urlPagamento?: string;
     } = {};
 
-    try {
+    if (!options?.skipGateway) {
+      try {
       const gateway = this.paymentGatewayFactory.getGateway(tipoPagamento);
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
@@ -249,10 +262,11 @@ export class VendasSenaService {
       };
 
       this.logger.log(`Cobrança Sena criada: gatewayId=${cobranca.gatewayId}`);
-    } catch (error) {
-      this.logger.error(
-        `Erro ao criar cobrança Sena para venda ${venda.id}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      } catch (error) {
+        this.logger.error(
+          `Erro ao criar cobrança Sena para venda ${venda.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
     const vendaCompleta = await this.prisma.vendaSena.findUnique({

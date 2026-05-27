@@ -30,6 +30,7 @@ import { RedisService } from './common/redis/redis.service';
 import { RedisThrottlerStorageService } from './common/throttler/redis-throttler-storage.service';
 import { WhatsappApiModule } from './modules/whatsapp-api/whatsapp-api.module';
 import { CapitalSenaModule } from './modules/capital-sena/capital-sena.module';
+import { PosModule } from './modules/pos/pos.module';
 import { ConfiguracaoComissaoModule } from './modules/configuracao-comissao/configuracao-comissao.module';
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
@@ -98,6 +99,7 @@ const envFilePathByEnvironment: Record<string, string[]> = {
     WhatsappApiModule,
     CapitalSenaModule,
     ConfiguracaoComissaoModule,
+    PosModule,
   ],
 })
 export class AppModule {}
