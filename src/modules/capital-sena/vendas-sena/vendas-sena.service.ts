@@ -64,7 +64,7 @@ export class VendasSenaService {
   async create(
     dto: CreateVendaSenaDto,
     user?: RequestUser,
-    options?: { skipGateway?: boolean },
+    options?: { skipGateway?: boolean; origemParticipacao?: OrigemParticipacao },
   ) {
     // 1. Validar edição
     const edicao = await this.prisma.edicaoSena.findUnique({
@@ -146,7 +146,7 @@ export class VendasSenaService {
     // 7. Calcular total
     const tipoPagamento = this.resolverTipoPagamento(dto.tipoPagamento, user);
     const origemParticipacao =
-      dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
+      options?.origemParticipacao ?? OrigemParticipacao.DIGITAL;
 
     const valorCombo = dto.comboSenaId
       ? (edicao.combos.find((c) => c.id === dto.comboSenaId)?.preco ?? null)

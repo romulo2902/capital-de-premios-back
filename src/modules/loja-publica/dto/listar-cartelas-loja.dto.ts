@@ -36,14 +36,14 @@ export class ListarCartelasLojaDto {
   quantidadeCartelas?: number;
 
   @ApiPropertyOptional({
-    enum: [OrigemParticipacao.DIGITAL, OrigemParticipacao.POS],
+    enum: [OrigemParticipacao.DIGITAL],
     example: OrigemParticipacao.DIGITAL,
     description: 'Origem da participação. Na loja pública, o padrão é DIGITAL.',
   })
   @IsOptional()
   @IsEnum(OrigemParticipacao)
-  @IsIn([OrigemParticipacao.DIGITAL, OrigemParticipacao.POS], {
-    message: 'origemParticipacao aceita apenas DIGITAL ou POS',
+  @IsIn([OrigemParticipacao.DIGITAL], {
+    message: 'origemParticipacao aceita apenas DIGITAL',
   })
   origemParticipacao?: OrigemParticipacao;
 

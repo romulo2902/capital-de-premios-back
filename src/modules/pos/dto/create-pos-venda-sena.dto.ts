@@ -11,5 +11,4 @@ export class CreatePosVendaSenaDto extends OmitType(CreateVendaSenaDto, [
   'vendedorId',
   'distribuidorId',
   'seller_id',
-  'origemParticipacao',
 ] as const) {}

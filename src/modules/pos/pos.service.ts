@@ -77,11 +77,13 @@ export class PosService {
   criarVenda(dto: CreatePosVendaDto, user: RequestUser) {
     const vendaDto: CreateVendaDto = {
       ...dto,
-      origemParticipacao: OrigemParticipacao.POS,
       vendedorId: user.vendedorId,
       distribuidorId: user.distribuidorId,
     };
-    return this.vendasService.create(vendaDto, user, { skipGateway: true });
+    return this.vendasService.create(vendaDto, user, {
+      skipGateway: true,
+      origemParticipacao: OrigemParticipacao.POS,
+    });
   }
 
   async confirmarPagamento(
@@ -170,11 +172,13 @@ export class PosService {
   criarVendaSena(dto: CreatePosVendaSenaDto, user: RequestUser) {
     const vendaDto: CreateVendaSenaDto = {
       ...dto,
-      origemParticipacao: OrigemParticipacao.POS,
       vendedorId: user.vendedorId,
       distribuidorId: user.distribuidorId,
     };
-    return this.vendasSenaService.create(vendaDto, user, { skipGateway: true });
+    return this.vendasSenaService.create(vendaDto, user, {
+      skipGateway: true,
+      origemParticipacao: OrigemParticipacao.POS,
+    });
   }
 
   async confirmarPagamentoSena(

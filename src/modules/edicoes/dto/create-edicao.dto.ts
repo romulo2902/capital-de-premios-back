@@ -179,11 +179,6 @@ export class CreateEdicaoDto {
         quantidadeCartelas: 2,
         preco: '20.00',
       },
-      {
-        origemParticipacao: 'POS',
-        quantidadeCartelas: 2,
-        preco: '22.00',
-      },
     ],
     description:
       'Combos da edição com preço total por origem e quantidade de cartelas. Use sempre `quantidadeCartelas` como inteiro positivo. A cartela única usa `valorCartela` como valor unitário.',

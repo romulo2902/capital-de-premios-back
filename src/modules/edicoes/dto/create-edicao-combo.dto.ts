@@ -21,13 +21,14 @@ const VALOR_COMBO_REGEX = /^\d+([.,]\d{1,2})?$/;
 
 export class CreateEdicaoComboDto {
   @ApiProperty({
-    enum: [OrigemParticipacao.DIGITAL, OrigemParticipacao.POS],
+    enum: [OrigemParticipacao.DIGITAL],
     example: OrigemParticipacao.DIGITAL,
-    description: 'Origem do combo (ex.: DIGITAL ou POS).',
+    description:
+      'Origem do combo. Apenas DIGITAL — vendas POS reutilizam a configuração DIGITAL.',
   })
   @IsEnum(OrigemParticipacao)
-  @IsIn([OrigemParticipacao.DIGITAL, OrigemParticipacao.POS], {
-    message: 'origemParticipacao em combos aceita apenas DIGITAL ou POS',
+  @IsIn([OrigemParticipacao.DIGITAL], {
+    message: 'origemParticipacao em combos aceita apenas DIGITAL',
   })
   origemParticipacao: OrigemParticipacao;
 

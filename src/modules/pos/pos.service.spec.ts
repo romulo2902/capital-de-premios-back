@@ -61,12 +61,11 @@ describe('PosService', () => {
 
     expect(mockVendas.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        origemParticipacao: OrigemParticipacao.POS,
         vendedorId: 'vend-1',
         distribuidorId: undefined,
       }),
       vendedor,
-      { skipGateway: true },
+      { skipGateway: true, origemParticipacao: OrigemParticipacao.POS },
     );
   });
 

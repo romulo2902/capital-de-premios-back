@@ -3,7 +3,6 @@ import {
   IsArray,
   IsEmail,
   IsEnum,
-  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -17,11 +16,7 @@ import {
   ArrayMaxSize,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import {
-  ModoSelecaoSena,
-  OrigemParticipacao,
-  TipoPagamento,
-} from '@prisma/client';
+import { ModoSelecaoSena, TipoPagamento } from '@prisma/client';
 
 export class ItemCartelaSenaDto {
   @ApiPropertyOptional({
@@ -68,18 +63,6 @@ export class CreateVendaSenaDto {
   @ApiProperty({ enum: TipoPagamento, example: TipoPagamento.PIX })
   @IsEnum(TipoPagamento)
   tipoPagamento: TipoPagamento;
-
-  @ApiPropertyOptional({
-    enum: [OrigemParticipacao.DIGITAL, OrigemParticipacao.POS],
-    example: OrigemParticipacao.DIGITAL,
-    description: 'Origem da participação. Default: DIGITAL.',
-  })
-  @IsOptional()
-  @IsEnum(OrigemParticipacao)
-  @IsIn([OrigemParticipacao.DIGITAL, OrigemParticipacao.POS], {
-    message: 'origemParticipacao aceita apenas DIGITAL ou POS',
-  })
-  origemParticipacao?: OrigemParticipacao;
 
   // Dados do cliente
   @ApiProperty({ example: '12345678900' })

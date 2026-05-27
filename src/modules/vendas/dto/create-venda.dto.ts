@@ -93,14 +93,15 @@ export class CreateVendaDto {
   tipoPagamento?: TipoPagamento;
 
   @ApiPropertyOptional({
-    enum: [OrigemParticipacao.DIGITAL, OrigemParticipacao.POS],
+    enum: [OrigemParticipacao.DIGITAL],
     example: OrigemParticipacao.DIGITAL,
-    description: 'Origem da participação. Default: DIGITAL.',
+    description:
+      'Origem da participação. Default: DIGITAL. Vendas POS possuem canal próprio em /pos.',
   })
   @IsOptional()
   @IsEnum(OrigemParticipacao)
-  @IsIn([OrigemParticipacao.DIGITAL, OrigemParticipacao.POS], {
-    message: 'origemParticipacao aceita apenas DIGITAL ou POS',
+  @IsIn([OrigemParticipacao.DIGITAL], {
+    message: 'origemParticipacao aceita apenas DIGITAL',
   })
   origemParticipacao?: OrigemParticipacao;
 

@@ -102,7 +102,7 @@ export class VendasService {
   async create(
     dto: CreateVendaDto,
     user?: RequestUser,
-    options?: { skipGateway?: boolean },
+    options?: { skipGateway?: boolean; origemParticipacao?: OrigemParticipacao },
   ) {
     // 1. Validar edição
     const edicao = await this.prisma.edicao.findUnique({
@@ -128,7 +128,9 @@ export class VendasService {
     this.validarJanelaDeVenda(edicao.numero, edicao.dataEncerramento);
 
     const origemParticipacao =
-      dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
+      options?.origemParticipacao ??
+      dto.origemParticipacao ??
+      OrigemParticipacao.DIGITAL;
     const quantidadeCartelasSolicitada =
       this.resolverQuantidadeCartelasSolicitada(dto);
 
