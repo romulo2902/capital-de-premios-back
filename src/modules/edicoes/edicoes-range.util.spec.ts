@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
 import {
   expandirSetoresDosDetalhes,
+  normalizarDetalhes,
   validarDetalhesInternos,
 } from './edicoes-range.util';
 
@@ -54,6 +55,39 @@ describe('edicoes-range.util', () => {
         },
       ]),
     ).not.toThrow();
+  });
+
+  it('renumera indices repetidos por origem durante a normalizacao', () => {
+    const detalhes = normalizarDetalhes([
+      {
+        origemParticipacao: OrigemParticipacao.DIGITAL,
+        indiceRange: 1,
+        rangeInicio: '0980000',
+        rangeFinal: '0985000',
+      },
+      {
+        origemParticipacao: OrigemParticipacao.DIGITAL,
+        indiceRange: 1,
+        rangeInicio: '0990000',
+        rangeFinal: '0995000',
+      },
+    ]);
+
+    expect(detalhes).toEqual([
+      expect.objectContaining({
+        origemParticipacao: OrigemParticipacao.DIGITAL,
+        indiceRange: 1,
+        rangeInicio: 980000n,
+        rangeFinal: 985000n,
+      }),
+      expect.objectContaining({
+        origemParticipacao: OrigemParticipacao.DIGITAL,
+        indiceRange: 2,
+        rangeInicio: 990000n,
+        rangeFinal: 995000n,
+      }),
+    ]);
+    expect(() => validarDetalhesInternos(detalhes)).not.toThrow();
   });
 
   it('rejeita ranges que se sobrepoem', () => {

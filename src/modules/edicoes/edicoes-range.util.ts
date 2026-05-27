@@ -62,11 +62,16 @@ export function normalizarDetalhes(
 ): DetalheRangeNormalizado[] {
   const quantidadePorOrigem = contarDetalhesPorOrigem(detalhes);
   const proximoIndicePorOrigem = new Map<OrigemParticipacao, number>();
+  const origensComIndiceDuplicado = obterOrigensComIndiceDuplicado(detalhes);
 
   return detalhes.map((detalhe, index) => {
     const proximoIndice =
       (proximoIndicePorOrigem.get(detalhe.origemParticipacao) ?? 0) + 1;
-    const indiceRange = detalhe.indiceRange ?? proximoIndice;
+    const indiceRange = origensComIndiceDuplicado.has(
+      detalhe.origemParticipacao,
+    )
+      ? proximoIndice
+      : (detalhe.indiceRange ?? proximoIndice);
     const quantidadeDaOrigem =
       quantidadePorOrigem.get(detalhe.origemParticipacao) ?? 1;
 
@@ -433,6 +438,34 @@ function contarDetalhesPorOrigem<
   }
 
   return quantidadePorOrigem;
+}
+
+function obterOrigensComIndiceDuplicado<
+  T extends {
+    origemParticipacao: OrigemParticipacao;
+    indiceRange?: number;
+  },
+>(detalhes: T[]): Set<OrigemParticipacao> {
+  const indicesPorOrigem = new Map<OrigemParticipacao, Set<number>>();
+  const origensComIndiceDuplicado = new Set<OrigemParticipacao>();
+
+  for (const detalhe of detalhes) {
+    if (detalhe.indiceRange === undefined) {
+      continue;
+    }
+
+    const indices =
+      indicesPorOrigem.get(detalhe.origemParticipacao) ?? new Set<number>();
+
+    if (indices.has(detalhe.indiceRange)) {
+      origensComIndiceDuplicado.add(detalhe.origemParticipacao);
+    }
+
+    indices.add(detalhe.indiceRange);
+    indicesPorOrigem.set(detalhe.origemParticipacao, indices);
+  }
+
+  return origensComIndiceDuplicado;
 }
 
 function resolverTipoCartelaBasePorQuantidade(
