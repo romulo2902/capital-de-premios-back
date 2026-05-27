@@ -81,7 +81,7 @@ describe('QrcodeService', () => {
     const result = await service.gerarQrcodeVendedor('vend-1');
 
     expect(qrcode.toBuffer).toHaveBeenCalledWith(
-      'https://loja.capitalpremios.com.br/?seller_id=cfda6bc8-665d-4735-a217-3f51775d431c&seller_name=Jo%C3%A3o+Vendedor',
+      'https://loja.capitalpremios.com.br/?seller_id=vend-1&seller_name=Jo%C3%A3o+Vendedor',
       expect.any(Object),
     );
     expect(mockS3UploadService.uploadPublicObject).toHaveBeenCalledWith({
@@ -92,7 +92,7 @@ describe('QrcodeService', () => {
     expect(mockPrisma.vendedor.update).toHaveBeenCalledWith({
       where: { id: 'vend-1' },
       data: {
-        link: 'https://loja.capitalpremios.com.br/?seller_id=cfda6bc8-665d-4735-a217-3f51775d431c&seller_name=Jo%C3%A3o+Vendedor',
+        link: 'https://loja.capitalpremios.com.br/?seller_id=vend-1&seller_name=Jo%C3%A3o+Vendedor',
         qrcode:
           'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-1/qrcode.png',
       },
@@ -109,7 +109,7 @@ describe('QrcodeService', () => {
       usuarioId: 'd7ee8b71-0574-4795-bfbb-114ff941aa70',
       codigo: 456,
       nome: 'Maria Vendedora',
-      link: 'https://loja.capitalpremios.com.br/?seller_id=d7ee8b71-0574-4795-bfbb-114ff941aa70&seller_name=Maria+Vendedora',
+      link: 'https://loja.capitalpremios.com.br/?seller_id=vend-2&seller_name=Maria+Vendedora',
       qrcode:
         'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-2/qrcode.png',
     });
@@ -121,7 +121,43 @@ describe('QrcodeService', () => {
     expect(result.data.qrcodeUrl).toBe(
       'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-2/qrcode.png',
     );
+    expect(result.data.link).toBe(
+      'https://loja.capitalpremios.com.br/?seller_id=vend-2&seller_name=Maria+Vendedora',
+    );
     expect(result.message).toBe('QR Code do vendedor disponível com sucesso');
+  });
+
+  it('should retornar link e qrcode do vendedor autenticado', async () => {
+    mockPrisma.vendedor.findUnique.mockResolvedValue({
+      id: 'vend-3',
+      usuarioId: 'usuario-vendedor',
+      codigo: 789,
+      nome: 'Vendedor Logado',
+      link: 'https://loja.capitalpremios.com.br/?seller_id=vend-3&seller_name=Vendedor+Logado',
+      qrcode:
+        'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-3/qrcode.png',
+    });
+
+    const result = await service.obterMeuQrcode({
+      id: 'usuario-vendedor',
+      email: 'vendedor@test.com',
+      cpf: '12345678901',
+      perfil: 'VENDEDOR',
+      status: 'ATIVO',
+      vendedorId: 'vend-3',
+    });
+
+    expect(result).toEqual({
+      message: 'Link e QR Code disponíveis com sucesso',
+      data: {
+        tipo: 'VENDEDOR',
+        sellerId: 'vend-3',
+        link: 'https://loja.capitalpremios.com.br/?seller_id=vend-3&seller_name=Vendedor+Logado',
+        qrcodeUrl:
+          'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-3/qrcode.png',
+        reused: true,
+      },
+    });
   });
 
   it('should lançar not found quando distribuidor nao existir', async () => {

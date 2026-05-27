@@ -12,6 +12,8 @@ import { QrcodeService } from './qrcode.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @ApiTags('Admin / QR Code')
 @ApiBearerAuth()
@@ -20,6 +22,16 @@ import { Roles } from '../../common/decorators/roles.decorator';
 @Controller('admin/qrcode')
 export class QrcodeController {
   constructor(private readonly qrcodeService: QrcodeService) {}
+
+  @Get('me')
+  @Roles('DISTRIBUIDOR', 'VENDEDOR')
+  @ApiOperation({
+    summary:
+      'Obter link e QR Code do usuário autenticado (DISTRIBUIDOR/VENDEDOR)',
+  })
+  meuQrcode(@CurrentUser() user: RequestUser) {
+    return this.qrcodeService.obterMeuQrcode(user);
+  }
 
   @Get('vendedor/:id')
   @Header('Content-Type', 'image/png')

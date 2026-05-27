@@ -1,8 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as qrcode from 'qrcode';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3UploadService } from '../../common/s3/s3-upload.service';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 interface QrcodeGerado {
   buffer: Buffer;
@@ -22,6 +28,8 @@ interface AtualizacaoQrcodeSellersResultado {
     motivo: string;
   }>;
 }
+
+type MeuQrcodeTipo = 'VENDEDOR' | 'DISTRIBUIDOR';
 
 @Injectable()
 export class QrcodeService {
@@ -88,6 +96,7 @@ export class QrcodeService {
       return {
         message: 'QR Code do vendedor disponível com sucesso',
         data: {
+          link,
           qrcodeUrl: vendedor.qrcode,
           reused: true,
         },
@@ -98,6 +107,7 @@ export class QrcodeService {
     return {
       message: 'QR Code do vendedor gerado com sucesso',
       data: {
+        link,
         qrcodeUrl,
         reused: false,
       },
@@ -165,6 +175,7 @@ export class QrcodeService {
       return {
         message: 'QR Code do distribuidor disponível com sucesso',
         data: {
+          link,
           qrcodeUrl: distribuidor.qrcode,
           reused: true,
         },
@@ -175,8 +186,35 @@ export class QrcodeService {
     return {
       message: 'QR Code do distribuidor gerado com sucesso',
       data: {
+        link,
         qrcodeUrl,
         reused: false,
+      },
+    };
+  }
+
+  async obterMeuQrcode(user: RequestUser) {
+    const tipo = this.resolverTipoSellerDoUsuario(user);
+    const sellerId =
+      tipo === 'VENDEDOR' ? user.vendedorId : user.distribuidorId;
+
+    if (!sellerId) {
+      throw new NotFoundException(
+        'Vínculo de vendedor/distribuidor não encontrado para este usuário',
+      );
+    }
+
+    const resultado =
+      tipo === 'VENDEDOR'
+        ? await this.obterQrcodeVendedorLink(sellerId)
+        : await this.obterQrcodeDistribuidorLink(sellerId);
+
+    return {
+      message: 'Link e QR Code disponíveis com sucesso',
+      data: {
+        tipo,
+        sellerId,
+        ...resultado.data,
       },
     };
   }
@@ -238,6 +276,20 @@ export class QrcodeService {
     url.searchParams.set('seller_name', sellerName);
 
     return url.toString();
+  }
+
+  private resolverTipoSellerDoUsuario(user: RequestUser): MeuQrcodeTipo {
+    if (user.perfil === 'VENDEDOR') {
+      return 'VENDEDOR';
+    }
+
+    if (user.perfil === 'DISTRIBUIDOR') {
+      return 'DISTRIBUIDOR';
+    }
+
+    throw new ForbiddenException(
+      'Acesso permitido apenas para DISTRIBUIDOR ou VENDEDOR',
+    );
   }
 
   private async obterBufferPorUrl(qrcodeUrl: string): Promise<Buffer | null> {
