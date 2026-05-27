@@ -11,15 +11,13 @@ import {
   IsString,
   IsUUID,
   Matches,
-  Max,
   Min,
   MinLength,
   IsArray,
-  ValidateNested,
   IsIn,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { OrigemParticipacao, TipoCartela, TipoPagamento } from '@prisma/client';
+import { OrigemParticipacao, TipoPagamento } from '@prisma/client';
 
 const emptyStringToUndefined = ({ value }: { value: unknown }): unknown => {
   if (typeof value !== 'string') {
@@ -38,21 +36,33 @@ export class CreateVendaDto {
   @IsUUID('4', { message: 'edicaoId deve ser um UUID válido' })
   edicaoId: string;
 
-
-  @ApiProperty({ example: 30.00, description: 'Valor total da compra' })
-  @Type(() => Number)
-  @Min(0)
-  valor: number;
-
-  @ApiProperty({
-    example: 1,
+  @ApiPropertyOptional({
+    example: 30.0,
     description:
-      'Quantidade de itens sendo comprados (ex: quantidade de combos ou quantidade de cartelas avulsas)',
+      'Valor total legado enviado pelo frontend. A API recalcula o total pela configuração da edição.',
   })
   @Type(() => Number)
+  @IsOptional()
+  @Min(0)
+  valor?: number;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description:
+      'Quantidade de itens sendo comprados (ex: quantidade de combos ou quantidade de cartelas avulsas). O campo legado quantidade também é aceito.',
+  })
+  @Type(() => Number)
+  @IsOptional()
   @IsInt()
   @Min(1)
-  quantidadeCartelas: number;
+  quantidadeCartelas?: number;
+
+  @ApiHideProperty()
+  @Type(() => Number)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  quantidade?: number;
 
   @ApiPropertyOptional({
     example: 'uuid-do-combo',

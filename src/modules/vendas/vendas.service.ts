@@ -125,6 +125,8 @@ export class VendasService {
 
     const origemParticipacao =
       dto.origemParticipacao ?? OrigemParticipacao.DIGITAL;
+    const quantidadeCartelasSolicitada =
+      this.resolverQuantidadeCartelasSolicitada(dto);
 
     let comboSelecionado: EdicaoCombo | null = null;
     let tipoCartelaSolicitada: TipoCartela = TipoCartela.UMA_CHANCE;
@@ -196,7 +198,7 @@ export class VendasService {
           'Não é permitido selecionar cartelas explicitamente em compras de combos',
         );
       }
-      if (dto.quantidadeCartelas !== dto.cartelasSelecionadas.length) {
+      if (quantidadeCartelasSolicitada !== dto.cartelasSelecionadas.length) {
         throw new BadRequestException(
           'A quantidadeCartelas deve ser igual ao número de cartelasSelecionadas',
         );
@@ -209,11 +211,11 @@ export class VendasService {
     const valorCartela = Number(
       configuracaoVenda.precoCombo ?? edicao.valorCartela,
     );
-    const total = valorCartela * dto.quantidadeCartelas;
+    const total = valorCartela * quantidadeCartelasSolicitada;
 
     if (tipoPagamentoResolvido === TipoPagamento.MANUAL) {
       const quantidadeCartelasCompra =
-        configuracaoVenda.quantidadeCartelas * dto.quantidadeCartelas;
+        configuracaoVenda.quantidadeCartelas * quantidadeCartelasSolicitada;
       const resultadoManual = await this.prisma.$transaction(async (tx) => {
         const venda = await tx.venda.create({
           data: {
@@ -221,7 +223,7 @@ export class VendasService {
             clienteId: cliente.id,
             vendedorId: dto.vendedorId ?? null,
             distribuidorId: dto.distribuidorId ?? null,
-            quantidade: dto.quantidadeCartelas,
+            quantidade: quantidadeCartelasSolicitada,
             tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
             total: new Prisma.Decimal(total.toFixed(2)),
             status: StatusVenda.APROVADO,
@@ -270,7 +272,7 @@ export class VendasService {
         clienteId: cliente.id,
         vendedorId: dto.vendedorId ?? null,
         distribuidorId: dto.distribuidorId ?? null,
-        quantidade: dto.quantidadeCartelas,
+        quantidade: quantidadeCartelasSolicitada,
         tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
         total: new Prisma.Decimal(total.toFixed(2)),
         status: StatusVenda.PENDENTE,
@@ -290,7 +292,7 @@ export class VendasService {
     });
 
     const quantidadeCartelasCompra =
-      configuracaoVenda.quantidadeCartelas * dto.quantidadeCartelas;
+      configuracaoVenda.quantidadeCartelas * quantidadeCartelasSolicitada;
 
     this.logger.log(
       `Venda ${venda.id} criada — ${quantidadeCartelasCompra} cartela(s) — R$ ${total.toFixed(2)} — ${tipoPagamentoResolvido}`,
@@ -310,7 +312,7 @@ export class VendasService {
       const cobranca = await gateway.criarCobranca({
         vendaId: venda.id,
         valorCentavos: Math.round(total * 100),
-        quantidadeItens: dto.quantidadeCartelas,
+        quantidadeItens: quantidadeCartelasSolicitada,
         valorUnitarioCentavos: Math.round(valorCartela * 100),
         descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
         cpfPagador: cpfLimpo,
@@ -1439,6 +1441,26 @@ export class VendasService {
     }
 
     throw criarExcecaoEdicaoEmManutencao(edicao);
+  }
+
+  private resolverQuantidadeCartelasSolicitada(dto: CreateVendaDto): number {
+    const quantidadeCartelas = dto.quantidadeCartelas ?? dto.quantidade;
+
+    if (quantidadeCartelas === undefined) {
+      throw new BadRequestException('Informe quantidadeCartelas');
+    }
+
+    if (
+      dto.quantidadeCartelas !== undefined &&
+      dto.quantidade !== undefined &&
+      dto.quantidadeCartelas !== dto.quantidade
+    ) {
+      throw new BadRequestException(
+        'quantidade deve ser igual a quantidadeCartelas quando ambos forem enviados',
+      );
+    }
+
+    return quantidadeCartelas;
   }
 
   private resolverTipoPagamento(
