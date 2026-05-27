@@ -119,7 +119,14 @@ describe('DashboardService', () => {
   describe('getAdminVendasPorEdicao', () => {
     it('should return mapped array with faturamento', async () => {
       mockPrisma.edicao.findMany.mockResolvedValue([
-        { id: '1', numero: 1, vendas: [{ total: new Prisma.Decimal(150.50) }, { total: new Prisma.Decimal(50) }] },
+        {
+          id: '1',
+          numero: 1,
+          vendas: [
+            { total: new Prisma.Decimal(150.5) },
+            { total: new Prisma.Decimal(50) },
+          ],
+        },
         { id: '2', numero: 2, vendas: [{ total: new Prisma.Decimal(300) }] },
       ]);
 
@@ -192,20 +199,32 @@ describe('DashboardService', () => {
 
   describe('Timeline functions (Admin, Distribuidor, Vendedor)', () => {
     const mockVendas = [
-      { createdAt: new Date('2026-04-01T10:00:00Z'), quantidade: 10, total: new Prisma.Decimal(100) },
-      { createdAt: new Date('2026-04-01T15:00:00Z'), quantidade: 5, total: new Prisma.Decimal(50) },
-      { createdAt: new Date('2026-04-02T10:00:00Z'), quantidade: 20, total: new Prisma.Decimal(200) },
+      {
+        createdAt: new Date('2026-04-01T10:00:00Z'),
+        quantidade: 10,
+        total: new Prisma.Decimal(100),
+      },
+      {
+        createdAt: new Date('2026-04-01T15:00:00Z'),
+        quantidade: 5,
+        total: new Prisma.Decimal(50),
+      },
+      {
+        createdAt: new Date('2026-04-02T10:00:00Z'),
+        quantidade: 20,
+        total: new Prisma.Decimal(200),
+      },
     ];
 
     it('Admin timeline groups by day correctly', async () => {
       mockPrisma.venda.findMany.mockResolvedValue(mockVendas);
       const res = await service.getAdminAnaliseTimeline({});
-      
+
       expect(res.timeline).toHaveLength(2); // Apr 1 and Apr 2
       expect(res.timeline[0].dia).toBe('2026-04-01');
       expect(res.timeline[0].cartelas).toBe(15);
       expect(res.timeline[0].totalRS).toBe(150);
-      
+
       expect(res.resumo.totalAcumuladoRS).toBe(350);
     });
 
@@ -231,13 +250,13 @@ describe('DashboardService', () => {
     it('Distribuidor timeline filters by distribuidorId', async () => {
       mockPrisma.venda.findMany.mockResolvedValue(mockVendas);
       const user = { distribuidorId: 'dist-1' } as RequestUser;
-      
+
       await service.getDistribuidorTimeline(user, {});
-      
+
       expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ distribuidorId: 'dist-1' })
-        })
+          where: expect.objectContaining({ distribuidorId: 'dist-1' }),
+        }),
       );
     });
 
@@ -391,13 +410,13 @@ describe('DashboardService', () => {
     it('Vendedor timeline filters by vendedorId', async () => {
       mockPrisma.venda.findMany.mockResolvedValue(mockVendas);
       const user = { vendedorId: 'vend-1' } as RequestUser;
-      
+
       await service.getVendedorTimeline(user, {});
-      
+
       expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ vendedorId: 'vend-1' })
-        })
+          where: expect.objectContaining({ vendedorId: 'vend-1' }),
+        }),
       );
     });
 
@@ -420,6 +439,43 @@ describe('DashboardService', () => {
       });
       expect(mockPrisma.cliente.count).toHaveBeenCalledWith({
         where: { vendedorId: 'vend-1' },
+      });
+    });
+
+    it('Vendedor comissoes returns total de vendas e total de comissao com filtro', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([
+        { total: new Prisma.Decimal(70) },
+        { total: new Prisma.Decimal(30) },
+      ]);
+      mockPrisma.comissao.findMany.mockResolvedValue([
+        { valor: new Prisma.Decimal(6) },
+        { valor: new Prisma.Decimal(4) },
+      ]);
+      const user = { vendedorId: 'vend-1' } as RequestUser;
+
+      const res = await service.getVendedorComissoes(user, {
+        edicaoIds: ['edicao-1'],
+      });
+
+      expect(res).toEqual({
+        totalVendasValor: 100,
+        totalComissao: 10,
+      });
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'APROVADO',
+          vendedorId: 'vend-1',
+          edicaoId: { in: ['edicao-1'] },
+        },
+        select: { total: true },
+      });
+      expect(mockPrisma.comissao.findMany).toHaveBeenCalledWith({
+        where: {
+          vendedorId: 'vend-1',
+          status: 'PENDENTE',
+          venda: { edicaoId: { in: ['edicao-1'] } },
+        },
+        select: { valor: true },
       });
     });
 

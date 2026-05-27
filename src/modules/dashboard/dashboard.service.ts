@@ -21,21 +21,22 @@ export class DashboardService {
 
   async getAdminVisaoGeral() {
     this.logger.log('Buscando visão geral (ADMIN)');
-    const [totalClientes, totalVendedores, totalDistribuidores, vendedores] = await Promise.all([
-      this.prisma.cliente.count(),
-      this.prisma.vendedor.count(),
-      this.prisma.distribuidor.count(),
-      this.prisma.vendedor.findMany({
-        select: {
-          id: true,
-          nome: true,
-          vendas: {
-            where: { status: StatusVenda.APROVADO },
-            select: { total: true, quantidade: true, tipoCartela: true },
+    const [totalClientes, totalVendedores, totalDistribuidores, vendedores] =
+      await Promise.all([
+        this.prisma.cliente.count(),
+        this.prisma.vendedor.count(),
+        this.prisma.distribuidor.count(),
+        this.prisma.vendedor.findMany({
+          select: {
+            id: true,
+            nome: true,
+            vendas: {
+              where: { status: StatusVenda.APROVADO },
+              select: { total: true, quantidade: true, tipoCartela: true },
+            },
           },
-        },
-      }),
-    ]);
+        }),
+      ]);
 
     const rankingVendedores = vendedores
       .map((vendedor) => ({
@@ -53,10 +54,7 @@ export class DashboardService {
         ),
         totalVendasValor: Number(
           vendedor.vendas
-            .reduce(
-              (acumulado, venda) => acumulado + Number(venda.total),
-              0,
-            )
+            .reduce((acumulado, venda) => acumulado + Number(venda.total), 0)
             .toFixed(2),
         ),
       }))
@@ -99,7 +97,11 @@ export class DashboardService {
 
     const faturamentoAgregado = edicoes.map((e) => {
       const soma = e.vendas.reduce((acc, v) => acc + Number(v.total), 0);
-      return { id: e.id, nome: `Edição ${String(e.numero).padStart(3, '0')}`, totalFaturamento: soma };
+      return {
+        id: e.id,
+        nome: `Edição ${String(e.numero).padStart(3, '0')}`,
+        totalFaturamento: soma,
+      };
     });
 
     return faturamentoAgregado;
@@ -111,7 +113,12 @@ export class DashboardService {
 
     const vendas = await this.prisma.venda.findMany({
       where: vendaWhere,
-      select: { createdAt: true, quantidade: true, tipoCartela: true, total: true },
+      select: {
+        createdAt: true,
+        quantidade: true,
+        tipoCartela: true,
+        total: true,
+      },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -147,9 +154,7 @@ export class DashboardService {
     }
 
     if (user.perfil !== Perfil.VENDEDOR) {
-      throw new ForbiddenException(
-        'Perfil sem acesso às edições do dashboard',
-      );
+      throw new ForbiddenException('Perfil sem acesso às edições do dashboard');
     }
 
     const edicoes = await this.prisma.edicao.findMany({
@@ -176,14 +181,24 @@ export class DashboardService {
 
   // ─── DISTRIBUIDOR DASHBOARD ──────────────────────────────────────
 
-  async getDistribuidorTimeline(user: RequestUser, filtros: DashboardFilterDto) {
-    this.logger.log(`Buscando timeline de vendas para Distribuidor ${user.distribuidorId}`);
+  async getDistribuidorTimeline(
+    user: RequestUser,
+    filtros: DashboardFilterDto,
+  ) {
+    this.logger.log(
+      `Buscando timeline de vendas para Distribuidor ${user.distribuidorId}`,
+    );
     const where = this.buildTimelineWhere(filtros);
     where.distribuidorId = user.distribuidorId;
 
     const vendas = await this.prisma.venda.findMany({
       where,
-      select: { createdAt: true, quantidade: true, tipoCartela: true, total: true },
+      select: {
+        createdAt: true,
+        quantidade: true,
+        tipoCartela: true,
+        total: true,
+      },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -194,7 +209,9 @@ export class DashboardService {
     user: RequestUser,
     filtros: DashboardFilterDto,
   ) {
-    this.logger.log(`Buscando vendas por vendedor para Distribuidor ${user.distribuidorId}`);
+    this.logger.log(
+      `Buscando vendas por vendedor para Distribuidor ${user.distribuidorId}`,
+    );
     const vendasWhere = this.buildTimelineWhere(filtros);
     const vendedores = await this.prisma.vendedor.findMany({
       where: { distribuidorId: user.distribuidorId },
@@ -208,27 +225,34 @@ export class DashboardService {
       },
     });
 
-    return vendedores.map(v => ({
-      vendedorId: v.id,
-      nome: v.nome,
-      quantidadeVendas: v.vendas.reduce(
-        (acc, venda) =>
-          acc +
-          calcularQuantidadeCartelasDaVenda({
-            quantidade: venda.quantidade,
-            tipoCartela: venda.tipoCartela,
-          }),
-        0,
-      ),
-      totalFaturamento: v.vendas.reduce((acc, venda) => acc + Number(venda.total), 0),
-    })).sort((a, b) => b.totalFaturamento - a.totalFaturamento);
+    return vendedores
+      .map((v) => ({
+        vendedorId: v.id,
+        nome: v.nome,
+        quantidadeVendas: v.vendas.reduce(
+          (acc, venda) =>
+            acc +
+            calcularQuantidadeCartelasDaVenda({
+              quantidade: venda.quantidade,
+              tipoCartela: venda.tipoCartela,
+            }),
+          0,
+        ),
+        totalFaturamento: v.vendas.reduce(
+          (acc, venda) => acc + Number(venda.total),
+          0,
+        ),
+      }))
+      .sort((a, b) => b.totalFaturamento - a.totalFaturamento);
   }
 
   async getDistribuidorClientesPorVendedor(
     user: RequestUser,
     filtros: DashboardFilterDto,
   ) {
-    this.logger.log(`Buscando clientes por vendedor para Distribuidor ${user.distribuidorId}`);
+    this.logger.log(
+      `Buscando clientes por vendedor para Distribuidor ${user.distribuidorId}`,
+    );
     const possuiFiltros =
       Boolean(filtros.edicaoIds?.length) ||
       Boolean(filtros.dataInicio) ||
@@ -262,9 +286,8 @@ export class DashboardService {
       return vendedoresComVendas.map((vendedor) => ({
         vendedorId: vendedor.id,
         nome: vendedor.nome,
-        totalClientes: new Set(
-          vendedor.vendas.map((venda) => venda.clienteId),
-        ).size,
+        totalClientes: new Set(vendedor.vendas.map((venda) => venda.clienteId))
+          .size,
       }));
     }
 
@@ -281,8 +304,13 @@ export class DashboardService {
     }));
   }
 
-  async getDistribuidorComissoes(user: RequestUser, filtros: DashboardFilterDto) {
-    this.logger.log(`Buscando comissões para Distribuidor ${user.distribuidorId}`);
+  async getDistribuidorComissoes(
+    user: RequestUser,
+    filtros: DashboardFilterDto,
+  ) {
+    this.logger.log(
+      `Buscando comissões para Distribuidor ${user.distribuidorId}`,
+    );
     const [vendas, comissoes] = await Promise.all([
       this.prisma.venda.findMany({
         where: {
@@ -316,24 +344,65 @@ export class DashboardService {
   // ─── VENDEDOR DASHBOARD ──────────────────────────────────────────
 
   async getVendedorTimeline(user: RequestUser, filtros: DashboardFilterDto) {
-    this.logger.log(`Buscando timeline de vendas para Vendedor ${user.vendedorId}`);
+    this.logger.log(
+      `Buscando timeline de vendas para Vendedor ${user.vendedorId}`,
+    );
     const where = this.buildTimelineWhere(filtros);
     where.vendedorId = user.vendedorId;
 
     const vendas = await this.prisma.venda.findMany({
       where,
-      select: { createdAt: true, quantidade: true, tipoCartela: true, total: true },
+      select: {
+        createdAt: true,
+        quantidade: true,
+        tipoCartela: true,
+        total: true,
+      },
       orderBy: { createdAt: 'asc' },
     });
 
     return this.aggregateTimeline(vendas);
   }
 
+  async getVendedorComissoes(user: RequestUser, filtros: DashboardFilterDto) {
+    this.logger.log(`Buscando comissões para Vendedor ${user.vendedorId}`);
+    const [vendas, comissoes] = await Promise.all([
+      this.prisma.venda.findMany({
+        where: {
+          ...this.buildTimelineWhere(filtros),
+          vendedorId: user.vendedorId,
+        },
+        select: { total: true },
+      }),
+      this.prisma.comissao.findMany({
+        where: this.buildVendedorComissaoWhere(user, filtros),
+        select: { valor: true },
+      }),
+    ]);
+
+    const totalVendasValor = vendas.reduce(
+      (acc, venda) => acc + Number(venda.total),
+      0,
+    );
+    const totalComissao = comissoes.reduce(
+      (acc: number, comissao: { valor: Prisma.Decimal }) =>
+        acc + Number(comissao.valor),
+      0,
+    );
+
+    return {
+      totalVendasValor: Number(totalVendasValor.toFixed(2)),
+      totalComissao: Number(totalComissao.toFixed(2)),
+    };
+  }
+
   async getVendedorTotalClientes(
     user: RequestUser,
     filtros: DashboardFilterDto,
   ) {
-    this.logger.log(`Buscando total de clientes para Vendedor ${user.vendedorId}`);
+    this.logger.log(
+      `Buscando total de clientes para Vendedor ${user.vendedorId}`,
+    );
     const possuiFiltros =
       Boolean(filtros.edicaoIds?.length) ||
       Boolean(filtros.dataInicio) ||
@@ -385,7 +454,9 @@ export class DashboardService {
 
   // ─── HELPERS ───────────────────────────────────────────────────
 
-  private buildTimelineWhere(filtros: DashboardFilterDto): Prisma.VendaWhereInput {
+  private buildTimelineWhere(
+    filtros: DashboardFilterDto,
+  ): Prisma.VendaWhereInput {
     const where: Prisma.VendaWhereInput = { status: StatusVenda.APROVADO };
 
     if (filtros.edicaoIds) {
@@ -489,7 +560,10 @@ export class DashboardService {
       total: Prisma.Decimal;
     }[],
   ) {
-    const dailyMap = new Map<string, { dia: string; cartelas: number; totalR$: number }>();
+    const dailyMap = new Map<
+      string,
+      { dia: string; cartelas: number; totalR$: number }
+    >();
     let totalAcumuladoR$ = 0;
     let totalCartelasAcumulado = 0;
 
@@ -515,15 +589,18 @@ export class DashboardService {
       dayData.totalR$ += t;
     }
 
-    const timeline = Array.from(dailyMap.values()).map(d => ({
+    const timeline = Array.from(dailyMap.values()).map((d) => ({
       dia: d.dia,
       cartelas: d.cartelas,
-      totalRS: Number(d.totalR$.toFixed(2))
+      totalRS: Number(d.totalR$.toFixed(2)),
     }));
 
-    return { 
-      resumo: { totalAcumuladoRS: Number(totalAcumuladoR$.toFixed(2)), totalCartelasAcumulado },
-      timeline 
+    return {
+      resumo: {
+        totalAcumuladoRS: Number(totalAcumuladoR$.toFixed(2)),
+        totalCartelasAcumulado,
+      },
+      timeline,
     };
   }
 

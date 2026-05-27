@@ -1,5 +1,10 @@
 import { Controller, Get, Query, UseGuards, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -20,7 +25,8 @@ export class DashboardController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Visão geral com totais do sistema (ADMIN)',
-    description: 'Endpoint de uso exclusivo do Admin. Retorna contadores globais sem qualquer limite de rede ou hierarquia.'
+    description:
+      'Endpoint de uso exclusivo do Admin. Retorna contadores globais sem qualquer limite de rede ou hierarquia.',
   })
   getAdminVisaoGeral() {
     return this.dashboardService.getAdminVisaoGeral();
@@ -35,7 +41,9 @@ export class DashboardController {
 
   @Get('analise')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Análise de vendas combinadas e timeline diária (ADMIN)' })
+  @ApiOperation({
+    summary: 'Análise de vendas combinadas e timeline diária (ADMIN)',
+  })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   getAdminAnaliseTimeline(@Query() filtros: DashboardFilterDto) {
     return this.dashboardService.getAdminAnaliseTimeline(filtros);
@@ -58,18 +66,24 @@ export class DashboardController {
   @Roles('DISTRIBUIDOR')
   @ApiOperation({
     summary: 'Vendas diárias agregadas da equipe (DISTRIBUIDOR)',
-    description: 'Retorna a timeline de vendas (somas diárias) estritamente limitadas às vendas que foram originadas pela rede de vendedores deste distribuidor logado.'
+    description:
+      'Retorna a timeline de vendas (somas diárias) estritamente limitadas às vendas que foram originadas pela rede de vendedores deste distribuidor logado.',
   })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
-  getDistribuidorTimeline(@Req() req: any, @Query() filtros: DashboardFilterDto) {
+  getDistribuidorTimeline(
+    @Req() req: any,
+    @Query() filtros: DashboardFilterDto,
+  ) {
     return this.dashboardService.getDistribuidorTimeline(req.user, filtros);
   }
 
   @Get('distribuidor/vendas-por-vendedor')
   @Roles('DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Quantidade total em valor/cartelas por vendedor da equipe' })
+  @ApiOperation({
+    summary: 'Quantidade total em valor/cartelas por vendedor da equipe',
+  })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
@@ -85,7 +99,9 @@ export class DashboardController {
 
   @Get('distribuidor/clientes-por-vendedor')
   @Roles('DISTRIBUIDOR')
-  @ApiOperation({ summary: 'Total de clientes captados organizados por vendedor' })
+  @ApiOperation({
+    summary: 'Total de clientes captados organizados por vendedor',
+  })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
@@ -103,12 +119,16 @@ export class DashboardController {
   @Roles('DISTRIBUIDOR')
   @ApiOperation({
     summary: 'Comissões líquidas adquiridas pelo Distribuidor',
-    description: 'Soma o dinheiro ganho pelo Distribuidor (Spread). Retorna os lucros com base na sobra percentual da sua rede transacionada na ComissaoDistribuidor, respeitando seu perfil Auth.'
+    description:
+      'Soma o dinheiro ganho pelo Distribuidor (Spread). Retorna os lucros com base na sobra percentual da sua rede transacionada na ComissaoDistribuidor, respeitando seu perfil Auth.',
   })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
-  getDistribuidorComissoes(@Req() req: any, @Query() filtros: DashboardFilterDto) {
+  getDistribuidorComissoes(
+    @Req() req: any,
+    @Query() filtros: DashboardFilterDto,
+  ) {
     return this.dashboardService.getDistribuidorComissoes(req.user, filtros);
   }
 
@@ -118,7 +138,8 @@ export class DashboardController {
   @Roles('VENDEDOR')
   @ApiOperation({
     summary: 'Vendas diárias acumuladas do próprio vendedor (VENDEDOR)',
-    description: 'Apresenta as vendas filtradas cirurgicamente e conectadas ao vendedor logado via JWT. Bloqueia dados de outros vendedores e da hierarquia superior.'
+    description:
+      'Apresenta as vendas filtradas cirurgicamente e conectadas ao vendedor logado via JWT. Bloqueia dados de outros vendedores e da hierarquia superior.',
   })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
@@ -127,13 +148,30 @@ export class DashboardController {
     return this.dashboardService.getVendedorTimeline(req.user, filtros);
   }
 
+  @Get('vendedor/comissoes')
+  @Roles('VENDEDOR')
+  @ApiOperation({
+    summary: 'Comissões adquiridas pelo Vendedor',
+    description:
+      'Soma o valor vendido e a comissão adquirida pelo vendedor logado, respeitando os filtros informados e o perfil autenticado.',
+  })
+  @ApiQuery({ name: 'edicaoIds', required: false, type: String })
+  @ApiQuery({ name: 'dataInicio', required: false, type: String })
+  @ApiQuery({ name: 'dataFim', required: false, type: String })
+  getVendedorComissoes(@Req() req: any, @Query() filtros: DashboardFilterDto) {
+    return this.dashboardService.getVendedorComissoes(req.user, filtros);
+  }
+
   @Get('vendedor/clientes')
   @Roles('VENDEDOR')
   @ApiOperation({ summary: 'Total de clientes deste vendedor' })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
-  getVendedorTotalClientes(@Req() req: any, @Query() filtros: DashboardFilterDto) {
+  getVendedorTotalClientes(
+    @Req() req: any,
+    @Query() filtros: DashboardFilterDto,
+  ) {
     return this.dashboardService.getVendedorTotalClientes(req.user, filtros);
   }
 }
