@@ -30,6 +30,10 @@ import { CreatePosVendaSenaDto } from './dto/create-pos-venda-sena.dto';
 import { ConfirmarPagamentoPosDto } from './dto/confirmar-pagamento-pos.dto';
 import { ListarCombosAdminDto } from '../vendas/dto/listar-combos-admin.dto';
 
+const POS_AUTH_TAG = 'POS / Autenticação';
+const POS_PREMIOS_TAG = 'POS / Prêmios';
+const POS_SENA_TAG = 'POS / Capital Sena';
+
 const POS_LOGIN_REQUEST_EXAMPLE = {
   cpf: '12345678900',
 };
@@ -145,7 +149,6 @@ const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
  * `confirmar-pagamento`. Origem da venda é sempre `POS`, e a configuração de
  * ranges/preços reutiliza a do canal DIGITAL.
  */
-@ApiTags('POS')
 @Controller('pos')
 export class PosController {
   constructor(
@@ -157,6 +160,7 @@ export class PosController {
 
   @Post('auth/login')
   @HttpCode(HttpStatus.OK)
+  @ApiTags(POS_AUTH_TAG)
   @ApiOperation({
     summary: '1. Login do POS por CPF (VENDEDOR + DISTRIBUIDOR) — sem senha',
     description: `
@@ -169,8 +173,21 @@ a ele.
     `.trim(),
   })
   @ApiBody({
-    type: LoginPosDto,
     description: 'Login POS usa somente o CPF do operador. Não envie senha.',
+    schema: {
+      type: 'object',
+      required: ['cpf'],
+      properties: {
+        cpf: {
+          type: 'string',
+          example: '12345678900',
+          description:
+            'CPF do operador do POS (VENDEDOR ou DISTRIBUIDOR). Somente números ou formatado.',
+          pattern: '^\\d{3}\\.?\\d{3}\\.?\\d{3}-?\\d{2}$',
+        },
+      },
+      example: POS_LOGIN_REQUEST_EXAMPLE,
+    },
     examples: {
       cpfSemMascara: {
         summary: 'CPF sem máscara',
@@ -214,6 +231,7 @@ a ele.
   @Get('auth/me')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
+  @ApiTags(POS_AUTH_TAG)
   @ApiOperation({
     summary: '2. 🔒 Dados do operador logado (VENDEDOR + DISTRIBUIDOR)',
     description: 'Retorna o operador atual do token — útil para o cabeçalho do terminal.',
@@ -251,6 +269,7 @@ a ele.
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
+  @ApiTags(POS_AUTH_TAG)
   @ApiOperation({
     summary: '3. 🔒 Logout do POS (VENDEDOR + DISTRIBUIDOR) — sessão stateless',
     description: `
@@ -279,6 +298,7 @@ fazer um novo \`POST /pos/auth/login\`.
   @Get('edicoes')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
+  @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary: '4. 🔒 Listar edições ativas — Prêmios (VENDEDOR + DISTRIBUIDOR)',
     description: 'Edições com status ATIVA disponíveis para venda no terminal.',
@@ -312,6 +332,7 @@ fazer um novo \`POST /pos/auth/login\`.
   @Get('edicoes/:edicaoId/combos')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
+  @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
       '5. 🔒 Navegar combos disponíveis — Prêmios (VENDEDOR + DISTRIBUIDOR)',
@@ -367,6 +388,7 @@ reutiliza a configuração **DIGITAL** de ranges e preços.
   @Post('vendas')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
+  @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
       '6. 🔒 Criar venda PENDENTE — Prêmios, unitária ou combo (VENDEDOR + DISTRIBUIDOR)',
@@ -424,6 +446,7 @@ Guarde o \`id\` retornado: ele é usado no \`confirmar-pagamento\`.
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
+  @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
       '7. 🔒 Confirmar pagamento e gerar cartelas — Prêmios (VENDEDOR + DISTRIBUIDOR)',
@@ -497,6 +520,7 @@ Recebe a resposta de pagamento da maquininha (PagBank), **valida** e:
   @Get('capital-sena/edicoes')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
+  @ApiTags(POS_SENA_TAG)
   @ApiOperation({
     summary: '8. 🔒 Listar edições ativas — Sena (VENDEDOR + DISTRIBUIDOR)',
     description: 'Edições Sena ativas, com os combos disponíveis.',
@@ -531,6 +555,7 @@ Recebe a resposta de pagamento da maquininha (PagBank), **valida** e:
   @Post('capital-sena/vendas')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
+  @ApiTags(POS_SENA_TAG)
   @ApiOperation({
     summary:
       '9. 🔒 Criar venda PENDENTE — Sena, cartelas ou combo (VENDEDOR + DISTRIBUIDOR)',
@@ -587,6 +612,7 @@ Guarde o \`id\` para a etapa de \`confirmar-pagamento\`.
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
+  @ApiTags(POS_SENA_TAG)
   @ApiOperation({
     summary:
       '10. 🔒 Confirmar pagamento e gerar cartelas — Sena (VENDEDOR + DISTRIBUIDOR)',
