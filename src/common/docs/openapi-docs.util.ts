@@ -490,6 +490,10 @@ function getSwaggerAudience(
   path: string,
   operation: OperationObject,
 ): SwaggerAudience {
+  if (path.includes('/pos/') || path.startsWith('pos/')) {
+    return 'pos';
+  }
+
   if (path.endsWith('/auth/refresh')) {
     return 'shared';
   }
@@ -510,10 +514,6 @@ function getSwaggerAudience(
 
   if (path.includes('/whatsapp/')) {
     return 'whatsapp';
-  }
-
-  if (path.includes('/pos/') || path.startsWith('pos/')) {
-    return 'pos';
   }
 
   // Capital Sena
