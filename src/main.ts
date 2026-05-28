@@ -55,7 +55,11 @@ async function bootstrap(): Promise<void> {
   );
   const developmentCorsOrigins = isProduction
     ? []
-    : ['http://localhost:3001', 'http://localhost:3002'];
+    : [
+        'http://localhost:3001',
+        'http://localhost:3002',
+        'http://localhost:8081',
+      ];
   const corsOrigins = Array.from(
     new Set(
       [
