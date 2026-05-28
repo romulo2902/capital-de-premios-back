@@ -3,12 +3,15 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma, StatusVenda } from '@prisma/client';
+import { Prisma, StatusVenda, StatusVendaSena } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { VendasService } from '../vendas/vendas.service';
+import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import { DistributedLockService } from '../../common/redis/distributed-lock.service';
 import {
   buildPaginatedResponse,
@@ -50,6 +53,8 @@ export class PagamentosService {
     private readonly config: ConfigService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
     private readonly vendasService: VendasService,
+    @Inject(forwardRef(() => VendasSenaService))
+    private readonly vendasSenaService: VendasSenaService,
     private readonly distributedLock: DistributedLockService,
   ) {}
 
@@ -128,7 +133,37 @@ export class PagamentosService {
           select: { id: true, status: true },
         });
 
-        if (!venda) {
+        if (venda) {
+          if (venda.status !== StatusVenda.PENDENTE) {
+            this.logger.log(
+              `Venda ${venda.id} já processada (status: ${venda.status})`,
+            );
+            resultados.push({
+              gatewayId: identificador,
+              status: 'JA_PROCESSADA',
+            });
+            continue;
+          }
+
+          await this.vendasService.confirmarPagamento(venda.id, {
+            pagbankWebhook: body,
+            pagbankPayment: eventoPagamento.payload,
+            confirmadoEm: new Date().toISOString(),
+          });
+          await this.notificarConfirmacaoPagamentoN8n(venda.id, identificador);
+          resultados.push({ gatewayId: identificador, status: 'CONFIRMADA' });
+          this.logger.log(
+            `Pagamento confirmado via webhook PagBank para venda ${venda.id}`,
+          );
+          continue;
+        }
+
+        const vendaSena = await this.prisma.vendaSena.findFirst({
+          where: this.montarFiltroVendaSenaPorGateway(eventoPagamento),
+          select: { id: true, status: true },
+        });
+
+        if (!vendaSena) {
           this.logger.warn(
             `Venda não encontrada para gatewayId/reference_id: ${identificador}`,
           );
@@ -139,9 +174,9 @@ export class PagamentosService {
           continue;
         }
 
-        if (venda.status !== StatusVenda.PENDENTE) {
+        if (vendaSena.status !== StatusVendaSena.PENDENTE) {
           this.logger.log(
-            `Venda ${venda.id} já processada (status: ${venda.status})`,
+            `Venda Sena ${vendaSena.id} já processada (status: ${vendaSena.status})`,
           );
           resultados.push({
             gatewayId: identificador,
@@ -150,15 +185,14 @@ export class PagamentosService {
           continue;
         }
 
-        await this.vendasService.confirmarPagamento(venda.id, {
+        await this.vendasSenaService.confirmarPagamento(vendaSena.id, {
           pagbankWebhook: body,
           pagbankPayment: eventoPagamento.payload,
           confirmadoEm: new Date().toISOString(),
         });
-        await this.notificarConfirmacaoPagamentoN8n(venda.id, identificador);
-        resultados.push({ gatewayId: identificador, status: 'CONFIRMADA' });
+        resultados.push({ gatewayId: identificador, status: 'CONFIRMADA_SENA' });
         this.logger.log(
-          `Pagamento confirmado via webhook PagBank para venda ${venda.id}`,
+          `Pagamento confirmado via webhook PagBank para venda Sena ${vendaSena.id}`,
         );
       } catch (error) {
         this.logger.error(
@@ -299,6 +333,38 @@ export class PagamentosService {
   private montarFiltroVendaPorGateway(
     eventoPagamento: EventoPagamentoPagBank,
   ): Prisma.VendaWhereInput {
+    const identificadores = [
+      eventoPagamento.identificador,
+      eventoPagamento.orderId,
+      eventoPagamento.referenceId,
+      eventoPagamento.chargeId,
+      eventoPagamento.qrCodeId,
+    ].filter((valor): valor is string => Boolean(valor));
+
+    return {
+      OR: [
+        { gatewayId: { in: identificadores } },
+        { id: { in: identificadores } },
+        ...identificadores.flatMap((valor) => [
+          { gatewayPayload: { path: ['orderId'], equals: valor } },
+          { gatewayPayload: { path: ['qrCodeId'], equals: valor } },
+          {
+            gatewayPayload: { path: ['pagbankResponse', 'id'], equals: valor },
+          },
+          {
+            gatewayPayload: {
+              path: ['pagbankResponse', 'reference_id'],
+              equals: valor,
+            },
+          },
+        ]),
+      ],
+    };
+  }
+
+  private montarFiltroVendaSenaPorGateway(
+    eventoPagamento: EventoPagamentoPagBank,
+  ): Prisma.VendaSenaWhereInput {
     const identificadores = [
       eventoPagamento.identificador,
       eventoPagamento.orderId,

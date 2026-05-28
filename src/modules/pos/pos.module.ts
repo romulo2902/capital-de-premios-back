@@ -5,6 +5,7 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { VendasModule } from '../vendas/vendas.module';
 import { VendasSenaModule } from '../capital-sena/vendas-sena/vendas-sena.module';
+import { PagamentosModule } from '../pagamentos/pagamentos.module';
 import { PosController } from './pos.controller';
 import { PosService } from './pos.service';
 import { PosAuthService } from './pos-auth.service';
@@ -18,6 +19,7 @@ import { JwtPosStrategy } from './strategies/jwt-pos.strategy';
     JwtModule.register({}),
     VendasModule,
     VendasSenaModule,
+    PagamentosModule,
   ],
   controllers: [PosController],
   providers: [PosService, PosAuthService, JwtPosStrategy],

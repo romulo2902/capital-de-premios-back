@@ -6,9 +6,13 @@ import { PagBankCartaoGateway } from './gateways/pagbank-cartao.gateway';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { MockPixGateway } from './gateways/mock-pix.gateway';
 import { VendasModule } from '../vendas/vendas.module';
+import { VendasSenaModule } from '../capital-sena/vendas-sena/vendas-sena.module';
 
 @Module({
-  imports: [forwardRef(() => VendasModule)],
+  imports: [
+    forwardRef(() => VendasModule),
+    forwardRef(() => VendasSenaModule),
+  ],
   controllers: [PagamentosController],
   providers: [
     PagamentosService,

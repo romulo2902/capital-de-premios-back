@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -6,11 +7,11 @@ import {
 } from '@nestjs/common';
 import {
   OrigemParticipacao,
-  Prisma,
   StatusEdicao,
   StatusEdicaoSena,
   StatusVenda,
   StatusVendaSena,
+  TipoPagamento,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
@@ -20,22 +21,15 @@ import { CreateVendaDto } from '../vendas/dto/create-venda.dto';
 import { CreateVendaSenaDto } from '../capital-sena/vendas-sena/dto/create-venda-sena.dto';
 import type { CreatePosVendaDto } from './dto/create-pos-venda.dto';
 import type { CreatePosVendaSenaDto } from './dto/create-pos-venda-sena.dto';
-import type { ConfirmarPagamentoPosDto } from './dto/confirmar-pagamento-pos.dto';
 import type { ListarCombosAdminDto } from '../vendas/dto/listar-combos-admin.dto';
-
-/** Status de pagamento aceitos como "pago" no retorno da maquininha. */
-const STATUS_PAGAMENTO_APROVADO: ReadonlySet<string> = new Set([
-  'PAID',
-  'APPROVED',
-  'APROVADO',
-]);
+import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 
 /**
  * Orquestra as operações do canal POS (Capital de Prêmios + Capital Sena).
  *
- * As vendas são criadas como PENDENTE (sem cobrança interna — `skipGateway`),
- * pois o pagamento é processado na maquininha. Em seguida o POS envia a resposta
- * do PagBank, que é validada antes de confirmar a venda e gerar as cartelas.
+ * As vendas são criadas como PENDENTE e a própria API cria a cobrança no gateway
+ * de pagamento. A confirmação acontece pelo webhook/polling do gateway, como nos
+ * demais canais digitais.
  */
 @Injectable()
 export class PosService {
@@ -45,6 +39,7 @@ export class PosService {
     private readonly prisma: PrismaService,
     private readonly vendasService: VendasService,
     private readonly vendasSenaService: VendasSenaService,
+    private readonly paymentGatewayFactory: PaymentGatewayFactory,
   ) {}
 
   // ─── Capital de Prêmios ───────────────────────────────────────────
@@ -75,31 +70,32 @@ export class PosService {
   }
 
   criarVenda(dto: CreatePosVendaDto, user: RequestUser) {
+    this.validarDadosPagamento(dto.tipoPagamento);
     const vendaDto: CreateVendaDto = {
       ...dto,
+      tipoPagamento: TipoPagamento.PIX,
       vendedorId: user.vendedorId,
       distribuidorId: user.distribuidorId,
     };
     return this.vendasService.create(vendaDto, user, {
-      skipGateway: true,
       origemParticipacao: OrigemParticipacao.POS,
+      requireGateway: true,
     });
   }
 
-  async confirmarPagamento(
-    vendaId: string,
-    dto: ConfirmarPagamentoPosDto,
-    user: RequestUser,
-  ) {
+  async consultarStatusPagamento(vendaId: string, user: RequestUser) {
     const venda = await this.prisma.venda.findUnique({
       where: { id: vendaId },
       select: {
         id: true,
         status: true,
         origemParticipacao: true,
+        tipoPagamento: true,
         vendedorId: true,
         distribuidorId: true,
-        gatewayPayload: true,
+        gatewayId: true,
+        total: true,
+        createdAt: true,
       },
     });
 
@@ -108,41 +104,23 @@ export class PosService {
     }
     this.garantirPropriedadeVenda(venda, user);
 
-    if (venda.status !== StatusVenda.PENDENTE) {
-      throw new ForbiddenException(
-        `Venda já processada (status: ${venda.status})`,
-      );
-    }
-
-    const payloadPagamento = this.montarPayloadPagamento(
-      venda.gatewayPayload,
-      dto,
+    const statusGateway = await this.consultarGatewaySePossivel(
+      venda.gatewayId,
+      venda.tipoPagamento,
     );
 
-    if (!this.validarPagamentoPagBank(dto)) {
-      await this.prisma.venda.update({
-        where: { id: venda.id },
-        data: {
-          status: StatusVenda.RECUSADO,
-          gatewayId: dto.transacaoId,
-          gatewayPayload: payloadPagamento as Prisma.InputJsonValue,
-        },
-      });
-      this.logger.warn(
-        `Pagamento POS recusado para venda ${venda.id} (transacao ${dto.transacaoId}, status ${dto.status})`,
-      );
-      return {
-        message: 'Pagamento não aprovado. Cartelas não geradas.',
-        data: { vendaId: venda.id, status: StatusVenda.RECUSADO },
-      };
-    }
-
-    await this.prisma.venda.update({
-      where: { id: venda.id },
-      data: { gatewayId: dto.transacaoId },
-    });
-
-    return this.vendasService.confirmarPagamento(venda.id, payloadPagamento);
+    return {
+      message: 'Status do pagamento POS consultado',
+      data: {
+        vendaId: venda.id,
+        status: venda.status,
+        statusLabel: this.statusVendaLabel(venda.status),
+        statusGateway,
+        total: venda.total.toString(),
+        criadoEm: venda.createdAt,
+        pago: venda.status === StatusVenda.APROVADO,
+      },
+    };
   }
 
   // ─── Capital Sena ─────────────────────────────────────────────────
@@ -170,31 +148,32 @@ export class PosService {
   }
 
   criarVendaSena(dto: CreatePosVendaSenaDto, user: RequestUser) {
+    this.validarDadosPagamento(dto.tipoPagamento);
     const vendaDto: CreateVendaSenaDto = {
       ...dto,
+      tipoPagamento: TipoPagamento.PIX,
       vendedorId: user.vendedorId,
       distribuidorId: user.distribuidorId,
     };
     return this.vendasSenaService.create(vendaDto, user, {
-      skipGateway: true,
       origemParticipacao: OrigemParticipacao.POS,
+      requireGateway: true,
     });
   }
 
-  async confirmarPagamentoSena(
-    vendaSenaId: string,
-    dto: ConfirmarPagamentoPosDto,
-    user: RequestUser,
-  ) {
+  async consultarStatusPagamentoSena(vendaSenaId: string, user: RequestUser) {
     const venda = await this.prisma.vendaSena.findUnique({
       where: { id: vendaSenaId },
       select: {
         id: true,
         status: true,
         origemParticipacao: true,
+        tipoPagamento: true,
         vendedorId: true,
         distribuidorId: true,
-        gatewayPayload: true,
+        gatewayId: true,
+        total: true,
+        createdAt: true,
       },
     });
 
@@ -203,80 +182,75 @@ export class PosService {
     }
     this.garantirPropriedadeVenda(venda, user);
 
-    if (venda.status !== StatusVendaSena.PENDENTE) {
-      throw new ForbiddenException(
-        `Venda Sena já processada (status: ${venda.status})`,
-      );
-    }
-
-    const payloadPagamento = this.montarPayloadPagamento(
-      venda.gatewayPayload,
-      dto,
+    const statusGateway = await this.consultarGatewaySePossivel(
+      venda.gatewayId,
+      venda.tipoPagamento,
     );
 
-    if (!this.validarPagamentoPagBank(dto)) {
-      await this.prisma.vendaSena.update({
-        where: { id: venda.id },
-        data: {
-          status: StatusVendaSena.RECUSADO,
-          gatewayId: dto.transacaoId,
-          gatewayPayload: payloadPagamento as Prisma.InputJsonValue,
-        },
-      });
-      this.logger.warn(
-        `Pagamento POS Sena recusado para venda ${venda.id} (transacao ${dto.transacaoId}, status ${dto.status})`,
-      );
-      return {
-        message: 'Pagamento não aprovado. Cartelas não geradas.',
-        data: { vendaId: venda.id, status: StatusVendaSena.RECUSADO },
-      };
-    }
-
-    await this.prisma.vendaSena.update({
-      where: { id: venda.id },
-      data: { gatewayId: dto.transacaoId },
-    });
-
-    return this.vendasSenaService.confirmarPagamento(venda.id, payloadPagamento);
+    return {
+      message: 'Status do pagamento POS Sena consultado',
+      data: {
+        vendaId: venda.id,
+        status: venda.status,
+        statusLabel: this.statusVendaSenaLabel(venda.status),
+        statusGateway,
+        total: venda.total.toString(),
+        criadoEm: venda.createdAt,
+        pago: venda.status === StatusVendaSena.APROVADO,
+      },
+    };
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────
 
-  /**
-   * Ponto de extensão para validar a resposta de pagamento no PagBank.
-   *
-   * TODO: consultar a transação `transacaoId` na API PagBank e confirmar que
-   * foi realmente paga antes de gerar as cartelas. Hoje confia no status
-   * reportado pela maquininha.
-   */
-  private validarPagamentoPagBank(dto: ConfirmarPagamentoPosDto): boolean {
-    this.logger.warn(
-      `Validação PagBank pendente — confiando no status reportado pela maquininha (transacao ${dto.transacaoId})`,
-    );
-    return STATUS_PAGAMENTO_APROVADO.has(dto.status.trim().toUpperCase());
+  private validarDadosPagamento(tipoPagamento: TipoPagamento | undefined): void {
+    if (tipoPagamento && tipoPagamento !== TipoPagamento.PIX) {
+      throw new BadRequestException(
+        'O POS aceita apenas tipoPagamento PIX por enquanto',
+      );
+    }
   }
 
-  private montarPayloadPagamento(
-    gatewayPayloadAtual: Prisma.JsonValue | null,
-    dto: ConfirmarPagamentoPosDto,
-  ): Record<string, unknown> {
-    const base =
-      gatewayPayloadAtual &&
-      typeof gatewayPayloadAtual === 'object' &&
-      !Array.isArray(gatewayPayloadAtual)
-        ? (gatewayPayloadAtual as Record<string, unknown>)
-        : {};
+  private async consultarGatewaySePossivel(
+    gatewayId: string | null,
+    tipoPagamento: TipoPagamento,
+  ): Promise<string | undefined> {
+    if (!gatewayId) {
+      return undefined;
+    }
 
-    return {
-      ...base,
-      origem: 'POS',
-      pagamentoPos: {
-        transacaoId: dto.transacaoId,
-        status: dto.status,
-        resposta: dto.pagamento ?? null,
-      },
-      confirmadoEm: new Date().toISOString(),
+    try {
+      const gateway = this.paymentGatewayFactory.getGateway(tipoPagamento);
+      const resultado = await gateway.consultarCobranca(gatewayId);
+      return resultado.status;
+    } catch (error) {
+      this.logger.warn(
+        `Erro ao consultar gateway POS (${gatewayId}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    }
+  }
+
+  private statusVendaLabel(status: StatusVenda): string {
+    const labels: Record<StatusVenda, string> = {
+      [StatusVenda.PENDENTE]: 'Aguardando pagamento',
+      [StatusVenda.APROVADO]: 'Pagamento confirmado',
+      [StatusVenda.CANCELADO]: 'Pedido cancelado',
+      [StatusVenda.RECUSADO]: 'Pagamento recusado',
     };
+    return labels[status];
+  }
+
+  private statusVendaSenaLabel(status: StatusVendaSena): string {
+    const labels: Record<StatusVendaSena, string> = {
+      [StatusVendaSena.PENDENTE]: 'Aguardando pagamento',
+      [StatusVendaSena.APROVADO]: 'Pagamento confirmado',
+      [StatusVendaSena.CANCELADO]: 'Pedido cancelado',
+      [StatusVendaSena.RECUSADO]: 'Pagamento recusado',
+    };
+    return labels[status];
   }
 
   private garantirPropriedadeVenda(

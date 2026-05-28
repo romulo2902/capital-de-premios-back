@@ -1,4 +1,5 @@
 import {
+  BadGatewayException,
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -87,6 +88,12 @@ interface RelacionamentoClienteMaisRecente {
   distribuidorId?: string | null;
 }
 
+interface CreateVendaOptions {
+  skipGateway?: boolean;
+  origemParticipacao?: OrigemParticipacao;
+  requireGateway?: boolean;
+}
+
 @Injectable()
 export class VendasService {
   private readonly logger = new Logger(VendasService.name);
@@ -102,7 +109,7 @@ export class VendasService {
   async create(
     dto: CreateVendaDto,
     user?: RequestUser,
-    options?: { skipGateway?: boolean; origemParticipacao?: OrigemParticipacao },
+    options?: CreateVendaOptions,
   ) {
     // 1. Validar edição
     const edicao = await this.prisma.edicao.findUnique({
@@ -360,9 +367,27 @@ export class VendasService {
         `Cobrança criada no gateway: gatewayId=${cobranca.gatewayId}`,
       );
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.error(
-        `Erro ao criar cobrança no gateway para venda ${venda.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `Erro ao criar cobrança no gateway para venda ${venda.id}: ${errorMessage}`,
       );
+
+      if (options?.requireGateway) {
+        await this.prisma.venda.update({
+          where: { id: venda.id },
+          data: {
+            status: StatusVenda.RECUSADO,
+            gatewayPayload: {
+              erroPagamento: errorMessage,
+            } as Prisma.InputJsonValue,
+          },
+        });
+        throw new BadGatewayException(
+          'Não foi possível processar o pagamento. Tente novamente.',
+        );
+      }
+
       // Venda fica como PENDENTE mesmo sem cobrança no gateway
       // O admin pode reprocessar ou cancelar manualmente
       }

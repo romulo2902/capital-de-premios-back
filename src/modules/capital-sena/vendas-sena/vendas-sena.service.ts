@@ -1,4 +1,5 @@
 import {
+  BadGatewayException,
   BadRequestException,
   ConflictException,
   Injectable,
@@ -50,6 +51,12 @@ interface RelacionamentoClienteMaisRecente {
   distribuidorId?: string | null;
 }
 
+interface CreateVendaSenaOptions {
+  skipGateway?: boolean;
+  origemParticipacao?: OrigemParticipacao;
+  requireGateway?: boolean;
+}
+
 @Injectable()
 export class VendasSenaService {
   private readonly logger = new Logger(VendasSenaService.name);
@@ -64,7 +71,7 @@ export class VendasSenaService {
   async create(
     dto: CreateVendaSenaDto,
     user?: RequestUser,
-    options?: { skipGateway?: boolean; origemParticipacao?: OrigemParticipacao },
+    options?: CreateVendaSenaOptions,
   ) {
     // 1. Validar edição
     const edicao = await this.prisma.edicaoSena.findUnique({
@@ -263,9 +270,27 @@ export class VendasSenaService {
 
       this.logger.log(`Cobrança Sena criada: gatewayId=${cobranca.gatewayId}`);
       } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         this.logger.error(
-          `Erro ao criar cobrança Sena para venda ${venda.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `Erro ao criar cobrança Sena para venda ${venda.id}: ${errorMessage}`,
         );
+
+        if (options?.requireGateway) {
+          await this.prisma.vendaSena.update({
+            where: { id: venda.id },
+            data: {
+              status: StatusVendaSena.RECUSADO,
+              gatewayPayload: {
+                cartelas,
+                erroPagamento: errorMessage,
+              } as Prisma.InputJsonValue,
+            },
+          });
+          throw new BadGatewayException(
+            'Não foi possível processar o pagamento Sena. Tente novamente.',
+          );
+        }
       }
     }
 

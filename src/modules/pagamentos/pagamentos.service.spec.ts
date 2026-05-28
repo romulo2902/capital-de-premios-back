@@ -3,6 +3,7 @@ import { PagamentosService } from './pagamentos.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { VendasService } from '../vendas/vendas.service';
+import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import { DistributedLockService } from '../../common/redis/distributed-lock.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -23,11 +24,18 @@ describe('PagamentosService', () => {
     confirmarPagamento: jest.fn(),
   };
 
+  const mockVendasSenaService = {
+    confirmarPagamento: jest.fn(),
+  };
+
   const mockPrisma = {
     venda: {
       findMany: jest.fn(),
       count: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
+    },
+    vendaSena: {
       findFirst: jest.fn(),
     },
   };
@@ -53,6 +61,7 @@ describe('PagamentosService', () => {
         },
         { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
         { provide: VendasService, useValue: mockVendasService },
+        { provide: VendasSenaService, useValue: mockVendasSenaService },
         {
           provide: DistributedLockService,
           useValue: mockDistributedLockService,
@@ -165,6 +174,7 @@ describe('PagamentosService', () => {
             useValue: mockPaymentGatewayFactory,
           },
           { provide: VendasService, useValue: mockVendasService },
+          { provide: VendasSenaService, useValue: mockVendasSenaService },
           {
             provide: DistributedLockService,
             useValue: mockDistributedLockService,

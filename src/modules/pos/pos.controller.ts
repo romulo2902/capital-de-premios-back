@@ -27,7 +27,6 @@ import { PosService } from './pos.service';
 import { LoginPosDto } from './dto/login-pos.dto';
 import { CreatePosVendaDto } from './dto/create-pos-venda.dto';
 import { CreatePosVendaSenaDto } from './dto/create-pos-venda-sena.dto';
-import { ConfirmarPagamentoPosDto } from './dto/confirmar-pagamento-pos.dto';
 import { ListarCombosAdminDto } from '../vendas/dto/listar-combos-admin.dto';
 
 const POS_AUTH_TAG = 'POS / Autenticação';
@@ -41,7 +40,7 @@ const POS_LOGIN_REQUEST_EXAMPLE = {
 const POS_PREMIOS_VENDA_UNITARIA_REQUEST_EXAMPLE = {
   edicaoId: '8f52a4b8-1c4f-4e0b-8df6-95522f47a111',
   quantidadeCartelas: 2,
-  tipoPagamento: 'CARTAO',
+  tipoPagamento: 'PIX',
   cartelasSelecionadas: ['0276145', '0276146'],
   cpf: '98765432100',
   nome: 'Maria Cliente',
@@ -52,7 +51,7 @@ const POS_PREMIOS_VENDA_UNITARIA_REQUEST_EXAMPLE = {
 
 const POS_PREMIOS_VENDA_COMBO_REQUEST_EXAMPLE = {
   edicaoId: '8f52a4b8-1c4f-4e0b-8df6-95522f47a111',
-  tipoPagamento: 'CARTAO',
+  tipoPagamento: 'PIX',
   combosSelecionados: ['0276145'],
   cpf: '98765432100',
   nome: 'Maria Cliente',
@@ -60,20 +59,9 @@ const POS_PREMIOS_VENDA_COMBO_REQUEST_EXAMPLE = {
   dataNascimento: '1985-04-11',
 };
 
-const POS_PAGAMENTO_REQUEST_EXAMPLE = {
-  transacaoId: 'CHAR_1A2B3C4D-5E6F-7890-ABCD-EF1234567890',
-  status: 'PAID',
-  pagamento: {
-    id: 'CHAR_1A2B3C4D-5E6F-7890-ABCD-EF1234567890',
-    reference_id: 'POS-123456',
-    payment_method: { type: 'CREDIT_CARD', installments: 1 },
-    paid_at: '2026-05-28T14:30:00.000Z',
-  },
-};
-
 const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
-  tipoPagamento: 'CARTAO',
+  tipoPagamento: 'PIX',
   cartelas: [
     {
       modoSelecao: 'MANUAL',
@@ -90,7 +78,7 @@ const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
 const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
   comboSenaId: 'fd2f8a0e-8ce6-4aa2-9c94-668c7530a111',
-  tipoPagamento: 'CARTAO',
+  tipoPagamento: 'PIX',
   cartelas: [
     { modoSelecao: 'SURPRESINHA' },
     { modoSelecao: 'SURPRESINHA' },
@@ -105,7 +93,7 @@ const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
 /**
  * ## POS — Terminais de venda (Capital de Prêmios + Capital Sena)
  *
- * Canal exclusivo das maquininhas/terminais físicos. Toda a operação do POS
+ * Canal exclusivo dos terminais físicos. Toda a operação do POS
  * vive aqui — não use as rotas de `/admin/vendas` nem `/capital-sena` para POS.
  *
  * ---
@@ -120,18 +108,16 @@ const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
  *    → GET /api/pos/edicoes
  *    → GET /api/pos/edicoes/{edicaoId}/combos
  *
- * 3. Criar a venda (PENDENTE) — unitária ou combo
+ * 3. Criar a venda (PENDENTE) e gerar cobrança pela API
  *    → POST /api/pos/vendas                  (Prêmios)
  *    → POST /api/pos/capital-sena/vendas     (Sena)
- *    → retorna o id da venda (pedido)
+ *    → retorna o id da venda + dados de pagamento PIX
  *
- * 4. Maquininha processa o pagamento (PagBank) e devolve o resultado
+ * 4. Consultar status enquanto o webhook PagBank confirma a venda
+ *    → GET /api/pos/vendas/{id}/pagamento
+ *    → GET /api/pos/capital-sena/vendas/{id}/pagamento
  *
- * 5. Confirmar o pagamento → valida e gera as cartelas (ou recusa)
- *    → POST /api/pos/vendas/{id}/confirmar-pagamento
- *    → POST /api/pos/capital-sena/vendas/{id}/confirmar-pagamento
- *
- * 6. Trocar de operador: logout (stateless) + novo login
+ * 5. Trocar de operador: logout (stateless) + novo login
  *    → POST /api/pos/auth/logout
  * ```
  *
@@ -144,10 +130,9 @@ const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
  * header `Authorization: Bearer {accessToken}` nas rotas marcadas com 🔒.
  *
  * ### Pagamento
- * O pagamento é processado na maquininha; a venda nasce **PENDENTE** e só vira
- * **APROVADO** (gerando as cartelas) quando o resultado do PagBank é enviado em
- * `confirmar-pagamento`. Origem da venda é sempre `POS`, e a configuração de
- * ranges/preços reutiliza a do canal DIGITAL.
+ * O pagamento é processado pela API, igual ao fluxo WhatsApp/loja. A venda nasce
+ * **PENDENTE**, a API cria a cobrança no PagBank e o webhook confirma a venda,
+ * gerando as cartelas. Origem da venda é sempre `POS`.
  */
 @Controller('pos')
 export class PosController {
@@ -383,7 +368,7 @@ reutiliza a configuração **DIGITAL** de ranges e preços.
     return this.posService.listarCombos(edicaoId, filtros);
   }
 
-  // ─── 3. PRÊMIOS — VENDA E CONFIRMAÇÃO ─────────────────────────────
+  // ─── 3. PRÊMIOS — VENDA E PAGAMENTO ───────────────────────────────
 
   @Post('vendas')
   @UseGuards(PosAuthGuard)
@@ -391,17 +376,21 @@ reutiliza a configuração **DIGITAL** de ranges e preços.
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
-      '6. 🔒 Criar venda PENDENTE — Prêmios, unitária ou combo (VENDEDOR + DISTRIBUIDOR)',
+      '6. 🔒 Criar venda POS e gerar cobrança — Prêmios (VENDEDOR + DISTRIBUIDOR)',
     description: `
-Cria a venda com origem **POS** e status **PENDENTE**, **sem cobrança interna** — o
-pagamento é feito na maquininha. O vendedor/distribuidor é definido pelo token
-(não envie no corpo).
+Cria a venda com origem **POS**, status **PENDENTE** e gera a cobrança no gateway
+pela própria API, igual ao fluxo WhatsApp. O vendedor/distribuidor é definido
+pelo token (não envie no corpo).
 
 **Compra unitária:** informe \`quantidadeCartelas\` (e opcionalmente
 \`cartelasSelecionadas\`).
 **Combo:** informe \`comboId\` ou \`combosSelecionados\`.
+**Pagamento:** somente \`PIX\` por enquanto; retorna \`pixCopiaECola\`/QR Code em \`pagamento\`.
 
-Guarde o \`id\` retornado: ele é usado no \`confirmar-pagamento\`.
+Guarde o \`id\` retornado: ele é usado para consultar status em
+\`GET /pos/vendas/{id}/pagamento\`. O terminal deve fazer polling a cada
+3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`, \`RECUSADO\`,
+\`CANCELADO\` }.
     `.trim(),
   })
   @ApiBody({
@@ -431,7 +420,11 @@ Guarde o \`id\` retornado: ele é usado no \`confirmar-pagamento\`.
           status: 'PENDENTE',
           origemParticipacao: 'POS',
           total: '20.00',
-          pagamento: {},
+          pagamento: {
+            pixCopiaECola: '00020126580014br.gov.bcb.pix0136...',
+            qrCodeBase64: 'https://assets.pagseguro.com.br/qrcode/...',
+            urlPagamento: 'https://assets.pagseguro.com.br/qrcode/...',
+          },
         },
       },
     },
@@ -442,61 +435,42 @@ Guarde o \`id\` retornado: ele é usado no \`confirmar-pagamento\`.
     return this.posService.criarVenda(dto, user);
   }
 
-  @Post('vendas/:id/confirmar-pagamento')
+  @Get('vendas/:id/pagamento')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
-  @HttpCode(HttpStatus.OK)
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
-      '7. 🔒 Confirmar pagamento e gerar cartelas — Prêmios (VENDEDOR + DISTRIBUIDOR)',
+      '7. 🔒 Consultar status do pagamento — Prêmios (VENDEDOR + DISTRIBUIDOR)',
     description: `
-Recebe a resposta de pagamento da maquininha (PagBank), **valida** e:
-- se aprovado → confirma a venda e **gera as cartelas** (status APROVADO);
-- se não aprovado → marca a venda como **RECUSADO** e **não** gera cartelas.
+Consulta o status interno da venda e, quando houver \`gatewayId\`, consulta o
+status atual no gateway. A aprovação definitiva ocorre pelo webhook PagBank.
 
-> A validação no PagBank é um ponto de extensão; hoje considera aprovado quando
-> \`status\` ∈ { PAID, APPROVED, APROVADO }.
+**Polling do POS:** chame este endpoint a cada 3–5 segundos após criar a venda.
+Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`, \`RECUSADO\` ou
+\`CANCELADO\`.
     `.trim(),
   })
   @ApiParam({
     name: 'id',
-    description: 'ID da venda PENDENTE (retornado em POST /pos/vendas)',
+    description: 'ID da venda (retornado em POST /pos/vendas)',
     example: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
-  })
-  @ApiBody({
-    type: ConfirmarPagamentoPosDto,
-    description:
-      'Request enviado pelo terminal após a maquininha retornar o resultado do pagamento.',
-    examples: {
-      pagamentoAprovado: {
-        summary: 'Pagamento aprovado pela maquininha',
-        value: POS_PAGAMENTO_REQUEST_EXAMPLE,
-      },
-      pagamentoRecusado: {
-        summary: 'Pagamento recusado pela maquininha',
-        value: {
-          ...POS_PAGAMENTO_REQUEST_EXAMPLE,
-          status: 'DECLINED',
-          pagamento: {
-            id: 'CHAR_1A2B3C4D-5E6F-7890-ABCD-EF1234567890',
-            reference_id: 'POS-123456',
-            decline_code: 'card_declined',
-          },
-        },
-      },
-    },
   })
   @ApiResponse({
     status: 200,
-    description: 'Pagamento processado (aprovado ou recusado).',
+    description: 'Status do pagamento consultado.',
     schema: {
       example: {
         statusCode: 200,
-        message: 'Pagamento confirmado com sucesso',
+        message: 'Status do pagamento POS consultado',
         data: {
-          id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
-          status: 'APROVADO',
+          vendaId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+          status: 'PENDENTE',
+          statusLabel: 'Aguardando pagamento',
+          statusGateway: 'PENDENTE',
+          total: '20.00',
+          criadoEm: '2026-05-28T14:30:00.000Z',
+          pago: false,
         },
       },
     },
@@ -504,18 +478,17 @@ Recebe a resposta de pagamento da maquininha (PagBank), **valida** e:
   @ApiResponse({ status: 401, description: 'Token inválido.' })
   @ApiResponse({
     status: 403,
-    description: 'Venda já processada ou não pertence a este operador.',
+    description: 'Venda não pertence a este operador.',
   })
   @ApiResponse({ status: 404, description: 'Venda POS não encontrada.' })
-  confirmarPagamento(
+  consultarPagamento(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ConfirmarPagamentoPosDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.posService.confirmarPagamento(id, dto, user);
+    return this.posService.consultarStatusPagamento(id, user);
   }
 
-  // ─── 4. SENA — EDIÇÕES, VENDA E CONFIRMAÇÃO ───────────────────────
+  // ─── 4. SENA — EDIÇÕES, VENDA E PAGAMENTO ─────────────────────────
 
   @Get('capital-sena/edicoes')
   @UseGuards(PosAuthGuard)
@@ -558,13 +531,17 @@ Recebe a resposta de pagamento da maquininha (PagBank), **valida** e:
   @ApiTags(POS_SENA_TAG)
   @ApiOperation({
     summary:
-      '9. 🔒 Criar venda PENDENTE — Sena, cartelas ou combo (VENDEDOR + DISTRIBUIDOR)',
+      '9. 🔒 Criar venda POS e gerar cobrança — Sena (VENDEDOR + DISTRIBUIDOR)',
     description: `
-Cria a venda Sena com origem **POS** e status **PENDENTE**, sem cobrança interna.
+Cria a venda Sena com origem **POS**, status **PENDENTE** e cobrança no gateway
+pela própria API.
 Informe as \`cartelas\` (MANUAL com 6 números, ou SURPRESINHA) e, opcionalmente,
 \`comboSenaId\`. O vendedor/distribuidor vem do token.
 
-Guarde o \`id\` para a etapa de \`confirmar-pagamento\`.
+Guarde o \`id\` para consultar status em
+\`GET /pos/capital-sena/vendas/{id}/pagamento\`. O terminal deve fazer polling a
+cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
+\`RECUSADO\`, \`CANCELADO\` }.
     `.trim(),
   })
   @ApiBody({
@@ -594,7 +571,11 @@ Guarde o \`id\` para a etapa de \`confirmar-pagamento\`.
           status: 'PENDENTE',
           quantidade: 3,
           total: '12.00',
-          pagamento: {},
+          pagamento: {
+            pixCopiaECola: '00020126580014br.gov.bcb.pix0136...',
+            qrCodeBase64: 'https://assets.pagseguro.com.br/qrcode/...',
+            urlPagamento: 'https://assets.pagseguro.com.br/qrcode/...',
+          },
         },
       },
     },
@@ -608,69 +589,56 @@ Guarde o \`id\` para a etapa de \`confirmar-pagamento\`.
     return this.posService.criarVendaSena(dto, user);
   }
 
-  @Post('capital-sena/vendas/:id/confirmar-pagamento')
+  @Get('capital-sena/vendas/:id/pagamento')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
-  @HttpCode(HttpStatus.OK)
   @ApiTags(POS_SENA_TAG)
   @ApiOperation({
     summary:
-      '10. 🔒 Confirmar pagamento e gerar cartelas — Sena (VENDEDOR + DISTRIBUIDOR)',
+      '10. 🔒 Consultar status do pagamento — Sena (VENDEDOR + DISTRIBUIDOR)',
     description: `
-Recebe a resposta de pagamento da maquininha (PagBank), valida e gera as cartelas
-(com o 7º número) se aprovado; caso contrário marca a venda como **RECUSADO**.
+Consulta o status interno da venda Sena e, quando houver \`gatewayId\`, consulta
+o status atual no gateway. A aprovação definitiva ocorre pelo webhook PagBank.
+
+**Polling do POS:** chame este endpoint a cada 3–5 segundos após criar a venda
+Sena. Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`,
+\`RECUSADO\` ou \`CANCELADO\`.
     `.trim(),
   })
   @ApiParam({
     name: 'id',
-    description: 'ID da venda Sena PENDENTE (retornado em POST /pos/capital-sena/vendas)',
+    description: 'ID da venda Sena (retornado em POST /pos/capital-sena/vendas)',
     example: 'd4e5f6a7-b8c9-0123-defa-234567890123',
-  })
-  @ApiBody({
-    type: ConfirmarPagamentoPosDto,
-    description:
-      'Request enviado pelo terminal após o pagamento da venda Sena ser concluído na maquininha.',
-    examples: {
-      pagamentoAprovado: {
-        summary: 'Pagamento aprovado pela maquininha',
-        value: POS_PAGAMENTO_REQUEST_EXAMPLE,
-      },
-      pagamentoRecusado: {
-        summary: 'Pagamento recusado pela maquininha',
-        value: {
-          ...POS_PAGAMENTO_REQUEST_EXAMPLE,
-          status: 'DECLINED',
-          pagamento: {
-            id: 'CHAR_1A2B3C4D-5E6F-7890-ABCD-EF1234567890',
-            reference_id: 'POS-SENA-123456',
-            decline_code: 'card_declined',
-          },
-        },
-      },
-    },
   })
   @ApiResponse({
     status: 200,
-    description: 'Pagamento Sena processado (aprovado ou recusado).',
+    description: 'Status do pagamento Sena consultado.',
     schema: {
       example: {
         statusCode: 200,
-        message: 'Pagamento Sena confirmado',
-        data: { id: 'd4e5f6a7-b8c9-0123-defa-234567890123', status: 'APROVADO' },
+        message: 'Status do pagamento POS Sena consultado',
+        data: {
+          vendaId: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+          status: 'PENDENTE',
+          statusLabel: 'Aguardando pagamento',
+          statusGateway: 'PENDENTE',
+          total: '12.00',
+          criadoEm: '2026-05-28T14:30:00.000Z',
+          pago: false,
+        },
       },
     },
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
   @ApiResponse({
     status: 403,
-    description: 'Venda já processada ou não pertence a este operador.',
+    description: 'Venda não pertence a este operador.',
   })
   @ApiResponse({ status: 404, description: 'Venda Sena POS não encontrada.' })
-  confirmarPagamentoSena(
+  consultarPagamentoSena(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ConfirmarPagamentoPosDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.posService.confirmarPagamentoSena(id, dto, user);
+    return this.posService.consultarStatusPagamentoSena(id, user);
   }
 }

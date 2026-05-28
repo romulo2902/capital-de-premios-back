@@ -1,4 +1,6 @@
-import { OmitType } from '@nestjs/swagger';
+import { ApiPropertyOptional, OmitType } from '@nestjs/swagger';
+import { TipoPagamento } from '@prisma/client';
+import { IsEnum, IsIn, IsOptional } from 'class-validator';
 import { CreateVendaDto } from '../../vendas/dto/create-venda.dto';
 
 /**
@@ -11,4 +13,18 @@ export class CreatePosVendaDto extends OmitType(CreateVendaDto, [
   'vendedorId',
   'distribuidorId',
   'origemParticipacao',
-] as const) {}
+  'tipoPagamento',
+] as const) {
+  @ApiPropertyOptional({
+    enum: [TipoPagamento.PIX],
+    example: TipoPagamento.PIX,
+    description:
+      'Método de pagamento do POS. Por enquanto, o POS aceita apenas PIX.',
+  })
+  @IsOptional()
+  @IsEnum(TipoPagamento)
+  @IsIn([TipoPagamento.PIX], {
+    message: 'O POS aceita apenas tipoPagamento PIX por enquanto',
+  })
+  tipoPagamento?: TipoPagamento;
+}

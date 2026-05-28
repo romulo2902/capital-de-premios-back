@@ -1,10 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { OrigemParticipacao, StatusVenda } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { OrigemParticipacao, StatusVenda, TipoPagamento } from '@prisma/client';
 import { PosService } from './pos.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
+import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 describe('PosService', () => {
@@ -28,6 +33,12 @@ describe('PosService', () => {
     confirmarPagamento: jest.fn(),
   };
 
+  const mockPaymentGatewayFactory = {
+    getGateway: jest.fn().mockReturnValue({
+      consultarCobranca: jest.fn().mockResolvedValue({ status: 'PENDENTE' }),
+    }),
+  };
+
   const vendedor: RequestUser = {
     id: 'user-1',
     email: null,
@@ -45,17 +56,25 @@ describe('PosService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: VendasService, useValue: mockVendas },
         { provide: VendasSenaService, useValue: mockVendasSena },
+        { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
       ],
     }).compile();
 
     service = module.get<PosService>(PosService);
   });
 
-  it('cria venda forçando origem POS, ids do token e skipGateway', () => {
+  it('cria venda forçando origem POS, ids do token e cobrança via API', () => {
     mockVendas.create.mockResolvedValue({ data: { id: 'venda-1' } });
 
     service.criarVenda(
-      { edicaoId: 'ed-1', cpf: '1', nome: 'X', telefone: '1', dataNascimento: '1990-01-01' } as never,
+      {
+        edicaoId: 'ed-1',
+        cpf: '1',
+        nome: 'X',
+        telefone: '1',
+        dataNascimento: '1990-01-01',
+        tipoPagamento: TipoPagamento.PIX,
+      } as never,
       vendedor,
     );
 
@@ -65,99 +84,88 @@ describe('PosService', () => {
         distribuidorId: undefined,
       }),
       vendedor,
-      { skipGateway: true, origemParticipacao: OrigemParticipacao.POS },
+      {
+        origemParticipacao: OrigemParticipacao.POS,
+        requireGateway: true,
+      },
     );
   });
 
-  it('confirma pagamento aprovado e delega geração de cartelas', async () => {
+  it('rejeita venda POS com cartão', () => {
+    expect(() =>
+      service.criarVenda(
+        {
+          edicaoId: 'ed-1',
+          cpf: '1',
+          nome: 'X',
+          telefone: '1',
+          dataNascimento: '1990-01-01',
+          tipoPagamento: TipoPagamento.CARTAO,
+        } as never,
+        vendedor,
+      ),
+    ).toThrow(BadRequestException);
+  });
+
+  it('consulta status de pagamento da venda POS', async () => {
     mockPrisma.venda.findUnique.mockResolvedValue({
       id: 'venda-1',
       status: StatusVenda.PENDENTE,
       origemParticipacao: OrigemParticipacao.POS,
+      tipoPagamento: TipoPagamento.PIX,
       vendedorId: 'vend-1',
       distribuidorId: null,
-      gatewayPayload: null,
+      gatewayId: 'ORDE_1',
+      total: { toString: () => '20.00' },
+      createdAt: new Date('2026-05-28T14:30:00.000Z'),
     });
-    mockPrisma.venda.update.mockResolvedValue({});
-    mockVendas.confirmarPagamento.mockResolvedValue({ data: { id: 'venda-1' } });
 
-    await service.confirmarPagamento(
-      'venda-1',
-      { transacaoId: 'CHAR_1', status: 'PAID' },
-      vendedor,
+    const result = await service.consultarStatusPagamento('venda-1', vendedor);
+
+    expect(mockPaymentGatewayFactory.getGateway).toHaveBeenCalledWith(
+      TipoPagamento.PIX,
     );
-
-    expect(mockVendas.confirmarPagamento).toHaveBeenCalledWith(
-      'venda-1',
-      expect.objectContaining({
-        pagamentoPos: expect.objectContaining({ transacaoId: 'CHAR_1' }),
-      }),
-    );
-  });
-
-  it('marca RECUSADO e não gera cartelas quando pagamento não aprovado', async () => {
-    mockPrisma.venda.findUnique.mockResolvedValue({
-      id: 'venda-1',
+    expect(result.data).toMatchObject({
+      vendaId: 'venda-1',
       status: StatusVenda.PENDENTE,
-      origemParticipacao: OrigemParticipacao.POS,
-      vendedorId: 'vend-1',
-      distribuidorId: null,
-      gatewayPayload: null,
+      statusGateway: 'PENDENTE',
+      pago: false,
     });
-    mockPrisma.venda.update.mockResolvedValue({});
-
-    const result = await service.confirmarPagamento(
-      'venda-1',
-      { transacaoId: 'CHAR_1', status: 'DECLINED' },
-      vendedor,
-    );
-
-    expect(mockVendas.confirmarPagamento).not.toHaveBeenCalled();
-    expect(mockPrisma.venda.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: StatusVenda.RECUSADO }),
-      }),
-    );
-    expect((result.data as { status: string }).status).toBe(
-      StatusVenda.RECUSADO,
-    );
   });
 
-  it('rejeita confirmação de venda que não é POS', async () => {
+  it('rejeita consulta de status de venda que não é POS', async () => {
     mockPrisma.venda.findUnique.mockResolvedValue({
       id: 'venda-1',
       status: StatusVenda.PENDENTE,
       origemParticipacao: OrigemParticipacao.DIGITAL,
+      tipoPagamento: TipoPagamento.PIX,
       vendedorId: 'vend-1',
       distribuidorId: null,
-      gatewayPayload: null,
+      gatewayId: 'ORDE_1',
+      total: { toString: () => '20.00' },
+      createdAt: new Date(),
     });
 
-    await expect(
-      service.confirmarPagamento(
-        'venda-1',
-        { transacaoId: 'CHAR_1', status: 'PAID' },
-        vendedor,
-      ),
-    ).rejects.toThrow(NotFoundException);
+    await expect(service.consultarStatusPagamento('venda-1', vendedor)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
-  it('rejeita confirmação de venda de outro operador', async () => {
+  it('rejeita consulta de status de venda de outro operador', async () => {
     mockPrisma.venda.findUnique.mockResolvedValue({
       id: 'venda-1',
       status: StatusVenda.PENDENTE,
       origemParticipacao: OrigemParticipacao.POS,
+      tipoPagamento: TipoPagamento.PIX,
       vendedorId: 'outro-vend',
       distribuidorId: null,
-      gatewayPayload: null,
+      gatewayId: 'ORDE_1',
+      total: { toString: () => '20.00' },
+      createdAt: new Date(),
     });
 
-    await expect(
-      service.confirmarPagamento(
-        'venda-1',
-        { transacaoId: 'CHAR_1', status: 'PAID' },
-        vendedor,
-      ),
-    ).rejects.toThrow(ForbiddenException);
+    await expect(service.consultarStatusPagamento('venda-1', vendedor)).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 });
