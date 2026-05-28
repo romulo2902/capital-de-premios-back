@@ -8,31 +8,21 @@ import {
   Patch,
   Post,
   Query,
-  UploadedFiles,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiBody,
-  ApiConsumes,
   ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { EdicoesSenaService } from './edicoes-sena.service';
-import type { ArquivosEdicaoSena } from './edicoes-sena.service';
 import { CreateEdicaoSenaDto } from './dto/create-edicao-sena.dto';
 import { UpdateEdicaoSenaDto } from './dto/update-edicao-sena.dto';
-import {
-  CreateEdicaoSenaUploadDto,
-  UpdateEdicaoSenaUploadDto,
-} from './dto/edicao-sena-upload.dto';
 import { ListarEdicoesSenaLojaDto } from './dto/listar-edicoes-sena-loja.dto';
 
 @ApiTags('Sena Admin / Edições')
@@ -47,22 +37,10 @@ export class EdicoesSenaController {
   @ApiOperation({
     summary: 'Criar edição Sena com prêmios e combos',
     description:
-      'Envie via `multipart/form-data`. Os campos de texto são serializados como JSON strings. ' +
-      'As imagens são enviadas como arquivos: `imagem` (capa) e `premioImagens[]` (uma por prêmio, na mesma ordem do array `premios`).',
+      'Envie via JSON. A imagem da edição deve ir em `imagemBase64` e as imagens dos prêmios em `premios[].imagemBase64`, seguindo o padrão do CDP.',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ type: CreateEdicaoSenaUploadDto })
-  @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'imagem', maxCount: 1 },
-      { name: 'premioImagens', maxCount: 10 },
-    ]),
-  )
-  create(
-    @Body() dto: CreateEdicaoSenaDto,
-    @UploadedFiles() arquivos?: ArquivosEdicaoSena,
-  ) {
-    return this.edicoesSenaService.create(dto, arquivos);
+  create(@Body() dto: CreateEdicaoSenaDto) {
+    return this.edicoesSenaService.create(dto);
   }
 
   @Get()
@@ -86,23 +64,13 @@ export class EdicoesSenaController {
   @ApiOperation({
     summary: 'Atualizar edição Sena',
     description:
-      'Envie via `multipart/form-data`. Envie somente os campos que deseja alterar. ' +
-      'Imagens opcionais: `imagem` (nova capa) e `premioImagens[]` (novas imagens de prêmios).',
+      'Envie via JSON. Para trocar a capa, informe `imagemBase64`. Para trocar imagens de prêmios, informe `premios[].imagemBase64`.',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ type: UpdateEdicaoSenaUploadDto })
-  @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'imagem', maxCount: 1 },
-      { name: 'premioImagens', maxCount: 10 },
-    ]),
-  )
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEdicaoSenaDto,
-    @UploadedFiles() arquivos?: ArquivosEdicaoSena,
   ) {
-    return this.edicoesSenaService.update(id, dto, arquivos);
+    return this.edicoesSenaService.update(id, dto);
   }
 
   @Patch(':id/ativar')

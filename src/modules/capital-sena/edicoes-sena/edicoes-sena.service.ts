@@ -12,7 +12,6 @@ import {
   normalizePagination,
 } from '../../../common/utils/pagination.util';
 import { S3UploadService } from '../../../common/s3/s3-upload.service';
-import type { UploadFile } from '../../../common/types/upload-file.type';
 import { CreateEdicaoSenaDto } from './dto/create-edicao-sena.dto';
 import { UpdateEdicaoSenaDto } from './dto/update-edicao-sena.dto';
 
@@ -22,11 +21,6 @@ const FAIXAS_VALIDAS: FaixaPremiacao[] = [
   FaixaPremiacao.SENA,
   FaixaPremiacao.SENA_BONUS,
 ];
-
-export interface ArquivosEdicaoSena {
-  imagem?: UploadFile[];
-  premioImagens?: UploadFile[];
-}
 
 @Injectable()
 export class EdicoesSenaService {
@@ -39,7 +33,7 @@ export class EdicoesSenaService {
 
   // ─── CREATE ────────────────────────────────────────────
 
-  async create(dto: CreateEdicaoSenaDto, arquivos?: ArquivosEdicaoSena) {
+  async create(dto: CreateEdicaoSenaDto) {
     this.validarDatas(dto.dataEncerramento, dto.dataSorteioMegaSena);
     this.validarPremios(dto.premios);
 
@@ -50,16 +44,13 @@ export class EdicoesSenaService {
       throw new ConflictException(`Edição Sena "${dto.numero}" já existe`);
     }
 
-    // Upload imagem de capa
     const imagemUrl = await this.resolverImagemUrl(
-      arquivos?.imagem?.[0],
       `capital-sena/edicoes/${dto.numero}`,
+      dto.imagemBase64,
     );
 
-    // Upload imagens dos prêmios (na mesma ordem do array dto.premios)
     const premiosComImagem = await this.resolverPremiosComImagens(
       dto.premios,
-      arquivos?.premioImagens,
       `capital-sena/edicoes/${dto.numero}/premios`,
     );
 
@@ -216,11 +207,7 @@ export class EdicoesSenaService {
 
   // ─── UPDATE ────────────────────────────────────────────
 
-  async update(
-    id: string,
-    dto: UpdateEdicaoSenaDto,
-    arquivos?: ArquivosEdicaoSena,
-  ) {
+  async update(id: string, dto: UpdateEdicaoSenaDto) {
     const atual = await this.obterOuFalhar(id);
 
     if (
@@ -244,20 +231,19 @@ export class EdicoesSenaService {
 
     if (dto.premios) this.validarPremios(dto.premios);
 
-    // Upload imagem de capa (se enviada)
-    const novaImagemUrl = arquivos?.imagem?.[0]
-      ? await this.resolverImagemUrl(
-          arquivos.imagem[0],
-          `capital-sena/edicoes/${atual.numero}`,
-        )
-      : undefined;
+    const novaImagemUrl = await this.resolverImagemUrl(
+      `capital-sena/edicoes/${dto.numero ?? atual.numero}`,
+      dto.imagemBase64,
+    );
 
-    // Upload imagens dos prêmios (se enviadas)
     const premiosComImagem = dto.premios
       ? await this.resolverPremiosComImagens(
           dto.premios,
-          arquivos?.premioImagens,
-          `capital-sena/edicoes/${atual.numero}/premios`,
+          `capital-sena/edicoes/${dto.numero ?? atual.numero}/premios`,
+          atual.premios.map((premio) => ({
+            faixa: premio.faixa,
+            imagemUrl: premio.imagemUrl ?? null,
+          })),
         )
       : undefined;
 
@@ -411,18 +397,18 @@ export class EdicoesSenaService {
   }
 
   private async resolverImagemUrl(
-    arquivo: UploadFile | undefined,
     folder: string,
-  ): Promise<string | null> {
-    if (!arquivo?.buffer || arquivo.buffer.length === 0) return null;
-    try {
-      return await this.s3UploadService.uploadImage(arquivo, folder);
-    } catch (err) {
-      this.logger.warn(
-        `Falha ao enviar imagem para S3 (pasta=${folder}): ${err instanceof Error ? err.message : String(err)}`,
+    base64?: string,
+  ): Promise<string | undefined> {
+    if (base64) {
+      const url = await this.s3UploadService.uploadImageFromBase64(
+        base64,
+        folder,
       );
-      return null;
+      return url ?? undefined;
     }
+
+    return undefined;
   }
 
   private async resolverPremiosComImagens(
@@ -430,19 +416,29 @@ export class EdicoesSenaService {
       faixa: FaixaPremiacao;
       descricao: string;
       valor: number;
-      imagemUrl?: string;
+      imagemBase64?: string;
     }[],
-    premioImagens: UploadFile[] | undefined,
     folder: string,
+    premiosExistentes: Array<{
+      faixa: FaixaPremiacao;
+      imagemUrl: string | null;
+    }> = [],
   ) {
     return Promise.all(
-      premios.map(async (p, i) => {
-        const arquivo = premioImagens?.[i];
+      premios.map(async (p) => {
         const imagemUrl = await this.resolverImagemUrl(
-          arquivo,
           `${folder}/${p.faixa}`,
+          p.imagemBase64,
         );
-        return { ...p, imagemUrl: imagemUrl ?? p.imagemUrl ?? null };
+        const imagemExistente = premiosExistentes.find(
+          (premio) => premio.faixa === p.faixa,
+        );
+        return {
+          faixa: p.faixa,
+          descricao: p.descricao,
+          valor: p.valor,
+          imagemUrl: imagemUrl ?? imagemExistente?.imagemUrl ?? null,
+        };
       }),
     );
   }
