@@ -29,7 +29,11 @@ import { EdicoesSenaService } from './edicoes-sena.service';
 import type { ArquivosEdicaoSena } from './edicoes-sena.service';
 import { CreateEdicaoSenaDto } from './dto/create-edicao-sena.dto';
 import { UpdateEdicaoSenaDto } from './dto/update-edicao-sena.dto';
-import { CreateEdicaoSenaUploadDto, UpdateEdicaoSenaUploadDto } from './dto/edicao-sena-upload.dto';
+import {
+  CreateEdicaoSenaUploadDto,
+  UpdateEdicaoSenaUploadDto,
+} from './dto/edicao-sena-upload.dto';
+import { ListarEdicoesSenaLojaDto } from './dto/listar-edicoes-sena-loja.dto';
 
 @ApiTags('Sena Admin / Edições')
 @ApiBearerAuth()
@@ -81,7 +85,8 @@ export class EdicoesSenaController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Atualizar edição Sena',
-    description: 'Envie via `multipart/form-data`. Envie somente os campos que deseja alterar. ' +
+    description:
+      'Envie via `multipart/form-data`. Envie somente os campos que deseja alterar. ' +
       'Imagens opcionais: `imagem` (nova capa) e `premioImagens[]` (novas imagens de prêmios).',
   })
   @ApiConsumes('multipart/form-data')
@@ -119,5 +124,48 @@ export class EdicoesSenaController {
   @ApiOperation({ summary: 'Excluir edição Sena (somente RASCUNHO)' })
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.edicoesSenaService.remove(id);
+  }
+}
+
+@ApiTags('Sena / Loja')
+@Controller('capital-sena')
+export class EdicoesSenaPublicoController {
+  constructor(private readonly edicoesSenaService: EdicoesSenaService) {}
+
+  @Get('edicoes')
+  @ApiOperation({
+    summary: 'Listar edições Sena disponíveis para a loja',
+    description:
+      'Lista edições públicas do Capital Sena. Sem informar `status`, retorna somente edições ATIVAS, prontas para compra pelo cliente.',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['ATIVA', 'ENCERRADA', 'APURANDO', 'FINALIZADA'],
+  })
+  findAllPublicas(@Query() filtros: ListarEdicoesSenaLojaDto) {
+    return this.edicoesSenaService.findAllPublicas(
+      filtros.page,
+      filtros.limit,
+      filtros.status,
+    );
+  }
+
+  @Get('edicao-ativa')
+  @ApiOperation({
+    summary: 'Buscar edição Sena ativa para compra',
+    description:
+      'Atalho para o frontend da loja carregar a edição vigente com prêmios e combos ativos.',
+  })
+  findAtiva() {
+    return this.edicoesSenaService.findAtiva();
+  }
+
+  @Get('edicoes/:id')
+  @ApiOperation({ summary: 'Detalhar edição Sena pública por ID' })
+  findOnePublica(@Param('id', ParseUUIDPipe) id: string) {
+    return this.edicoesSenaService.findOnePublica(id);
   }
 }

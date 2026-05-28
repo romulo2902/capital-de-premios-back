@@ -5,11 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  FaixaPremiacao,
-  Prisma,
-  StatusEdicaoSena,
-} from '@prisma/client';
+import { FaixaPremiacao, Prisma, StatusEdicaoSena } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   buildPaginatedResponse,
@@ -100,7 +96,10 @@ export class EdicoesSenaService {
     });
 
     this.logger.log(`EdicaoSena "${edicao.numero}" criada (id=${edicao.id})`);
-    return { message: 'Edição Sena criada com sucesso', data: this.serializar(edicao) };
+    return {
+      message: 'Edição Sena criada com sucesso',
+      data: this.serializar(edicao),
+    };
   }
 
   // ─── FIND ALL ──────────────────────────────────────────
@@ -112,7 +111,11 @@ export class EdicoesSenaService {
         skip: pagination.skip,
         take: pagination.limit,
         orderBy: { createdAt: 'desc' },
-        include: { premios: true, combos: { where: { ativo: true } }, resultado: true },
+        include: {
+          premios: true,
+          combos: { where: { ativo: true } },
+          resultado: true,
+        },
       }),
       this.prisma.edicaoSena.count(),
     ]);
@@ -122,7 +125,43 @@ export class EdicoesSenaService {
       total,
       pagination.page,
       pagination.limit,
-      { successMessage: 'Edições Sena listadas com sucesso', emptyMessage: 'Nenhuma edição Sena encontrada' },
+      {
+        successMessage: 'Edições Sena listadas com sucesso',
+        emptyMessage: 'Nenhuma edição Sena encontrada',
+      },
+    );
+  }
+
+  async findAllPublicas(page = 1, limit = 20, status?: StatusEdicaoSena) {
+    const pagination = normalizePagination(page, limit);
+    const where: Prisma.EdicaoSenaWhereInput = {
+      status: status ?? StatusEdicaoSena.ATIVA,
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.edicaoSena.findMany({
+        where,
+        skip: pagination.skip,
+        take: pagination.limit,
+        orderBy: [{ dataSorteioMegaSena: 'asc' }, { createdAt: 'desc' }],
+        include: {
+          premios: true,
+          combos: { where: { ativo: true } },
+          resultado: true,
+        },
+      }),
+      this.prisma.edicaoSena.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(
+      data.map((e) => this.serializar(e)),
+      total,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Edições Sena públicas listadas com sucesso',
+        emptyMessage: 'Nenhuma edição Sena pública encontrada',
+      },
     );
   }
 
@@ -133,28 +172,64 @@ export class EdicoesSenaService {
     return { message: 'Edição Sena encontrada', data: this.serializar(edicao) };
   }
 
+  async findOnePublica(id: string) {
+    const edicao = await this.prisma.edicaoSena.findFirst({
+      where: {
+        id,
+        status: {
+          in: [
+            StatusEdicaoSena.ATIVA,
+            StatusEdicaoSena.ENCERRADA,
+            StatusEdicaoSena.APURANDO,
+            StatusEdicaoSena.FINALIZADA,
+          ],
+        },
+      },
+      include: {
+        premios: true,
+        combos: { where: { ativo: true } },
+        resultado: true,
+      },
+    });
+    if (!edicao) throw new NotFoundException('Edição Sena não encontrada');
+    return { message: 'Edição Sena encontrada', data: this.serializar(edicao) };
+  }
+
   // ─── FIND ATIVA ────────────────────────────────────────
 
   async findAtiva() {
     const edicao = await this.prisma.edicaoSena.findFirst({
       where: { status: StatusEdicaoSena.ATIVA },
       orderBy: { createdAt: 'desc' },
-      include: { premios: true, combos: { where: { ativo: true } }, resultado: true },
+      include: {
+        premios: true,
+        combos: { where: { ativo: true } },
+        resultado: true,
+      },
     });
     if (!edicao) throw new NotFoundException('Nenhuma edição Sena ativa');
-    return { message: 'Edição Sena ativa encontrada', data: this.serializar(edicao) };
+    return {
+      message: 'Edição Sena ativa encontrada',
+      data: this.serializar(edicao),
+    };
   }
 
   // ─── UPDATE ────────────────────────────────────────────
 
-  async update(id: string, dto: UpdateEdicaoSenaDto, arquivos?: ArquivosEdicaoSena) {
+  async update(
+    id: string,
+    dto: UpdateEdicaoSenaDto,
+    arquivos?: ArquivosEdicaoSena,
+  ) {
     const atual = await this.obterOuFalhar(id);
 
     if (
       atual.status === StatusEdicaoSena.FINALIZADA ||
       atual.status === StatusEdicaoSena.APURANDO
     ) {
-      throw new BadRequestException(`Não é possível editar uma edição com status ${atual.status}`);
+      throw new BadRequestException(
+        `Não é possível editar uma edição com status ${atual.status}`,
+      );
     }
 
     if (dto.dataEncerramento || dto.dataSorteioMegaSena) {
@@ -235,9 +310,15 @@ export class EdicoesSenaService {
       });
     });
 
-    if (!atualizada) throw new NotFoundException('Edição Sena não encontrada após atualização');
+    if (!atualizada)
+      throw new NotFoundException(
+        'Edição Sena não encontrada após atualização',
+      );
     this.logger.log(`EdicaoSena "${atualizada.numero}" atualizada`);
-    return { message: 'Edição Sena atualizada com sucesso', data: this.serializar(atualizada) };
+    return {
+      message: 'Edição Sena atualizada com sucesso',
+      data: this.serializar(atualizada),
+    };
   }
 
   // ─── ATIVAR / ENCERRAR ────────────────────────────────
@@ -245,13 +326,18 @@ export class EdicoesSenaService {
   async ativar(id: string) {
     const edicao = await this.obterOuFalhar(id);
     if (edicao.status === StatusEdicaoSena.ATIVA) {
-      return { message: 'Edição Sena já está ativa', data: this.serializar(edicao) };
+      return {
+        message: 'Edição Sena já está ativa',
+        data: this.serializar(edicao),
+      };
     }
     if (
       edicao.status === StatusEdicaoSena.FINALIZADA ||
       edicao.status === StatusEdicaoSena.APURANDO
     ) {
-      throw new BadRequestException(`Não é possível ativar uma edição com status ${edicao.status}`);
+      throw new BadRequestException(
+        `Não é possível ativar uma edição com status ${edicao.status}`,
+      );
     }
 
     const conflito = await this.prisma.edicaoSena.findFirst({
@@ -266,17 +352,26 @@ export class EdicoesSenaService {
     const atualizada = await this.prisma.edicaoSena.update({
       where: { id },
       data: { status: StatusEdicaoSena.ATIVA },
-      include: { premios: true, combos: { where: { ativo: true } }, resultado: true },
+      include: {
+        premios: true,
+        combos: { where: { ativo: true } },
+        resultado: true,
+      },
     });
 
     this.logger.log(`EdicaoSena "${atualizada.numero}" ativada`);
-    return { message: 'Edição Sena ativada com sucesso', data: this.serializar(atualizada) };
+    return {
+      message: 'Edição Sena ativada com sucesso',
+      data: this.serializar(atualizada),
+    };
   }
 
   async encerrar(id: string) {
     const edicao = await this.obterOuFalhar(id);
     if (edicao.status !== StatusEdicaoSena.ATIVA) {
-      throw new BadRequestException('Somente edições ATIVAS podem ser encerradas');
+      throw new BadRequestException(
+        'Somente edições ATIVAS podem ser encerradas',
+      );
     }
     const atualizada = await this.prisma.edicaoSena.update({
       where: { id },
@@ -284,7 +379,10 @@ export class EdicoesSenaService {
       include: { premios: true, combos: true, resultado: true },
     });
     this.logger.log(`EdicaoSena "${atualizada.numero}" encerrada`);
-    return { message: 'Edição Sena encerrada', data: this.serializar(atualizada) };
+    return {
+      message: 'Edição Sena encerrada',
+      data: this.serializar(atualizada),
+    };
   }
 
   // ─── REMOVE ────────────────────────────────────────────
@@ -292,7 +390,9 @@ export class EdicoesSenaService {
   async remove(id: string) {
     const edicao = await this.obterOuFalhar(id);
     if (edicao.status !== StatusEdicaoSena.RASCUNHO) {
-      throw new BadRequestException('Somente edições em RASCUNHO podem ser excluídas');
+      throw new BadRequestException(
+        'Somente edições em RASCUNHO podem ser excluídas',
+      );
     }
     await this.prisma.edicaoSena.delete({ where: { id } });
     this.logger.log(`EdicaoSena "${edicao.numero}" excluída`);
@@ -326,14 +426,22 @@ export class EdicoesSenaService {
   }
 
   private async resolverPremiosComImagens(
-    premios: { faixa: FaixaPremiacao; descricao: string; valor: number; imagemUrl?: string }[],
+    premios: {
+      faixa: FaixaPremiacao;
+      descricao: string;
+      valor: number;
+      imagemUrl?: string;
+    }[],
     premioImagens: UploadFile[] | undefined,
     folder: string,
   ) {
     return Promise.all(
       premios.map(async (p, i) => {
         const arquivo = premioImagens?.[i];
-        const imagemUrl = await this.resolverImagemUrl(arquivo, `${folder}/${p.faixa}`);
+        const imagemUrl = await this.resolverImagemUrl(
+          arquivo,
+          `${folder}/${p.faixa}`,
+        );
         return { ...p, imagemUrl: imagemUrl ?? p.imagemUrl ?? null };
       }),
     );
@@ -346,7 +454,9 @@ export class EdicoesSenaService {
       throw new BadRequestException('Datas inválidas');
     }
     if (enc >= sort) {
-      throw new BadRequestException('dataEncerramento deve ser anterior ao dataSorteioMegaSena');
+      throw new BadRequestException(
+        'dataEncerramento deve ser anterior ao dataSorteioMegaSena',
+      );
     }
   }
 
@@ -354,11 +464,15 @@ export class EdicoesSenaService {
     const faixas = premios.map((p) => p.faixa);
     const invalidas = faixas.filter((f) => !FAIXAS_VALIDAS.includes(f));
     if (invalidas.length > 0) {
-      throw new BadRequestException(`Faixas inválidas: ${invalidas.join(', ')}`);
+      throw new BadRequestException(
+        `Faixas inválidas: ${invalidas.join(', ')}`,
+      );
     }
     const duplicatas = faixas.filter((f, idx) => faixas.indexOf(f) !== idx);
     if (duplicatas.length > 0) {
-      throw new ConflictException(`Faixas duplicadas: ${duplicatas.join(', ')}`);
+      throw new ConflictException(
+        `Faixas duplicadas: ${duplicatas.join(', ')}`,
+      );
     }
   }
 
@@ -373,9 +487,26 @@ export class EdicoesSenaService {
     status: StatusEdicaoSena;
     createdAt: Date;
     updatedAt: Date;
-    premios: { id: string; faixa: FaixaPremiacao; descricao: string; valor: Prisma.Decimal; imagemUrl: string | null }[];
-    combos: { id: string; nome: string; quantidade: number; preco: Prisma.Decimal; ativo: boolean }[];
-    resultado: { id: string; numerosSorteados: number[]; apurado: boolean; imagemResultadoUrl: string | null } | null;
+    premios: {
+      id: string;
+      faixa: FaixaPremiacao;
+      descricao: string;
+      valor: Prisma.Decimal;
+      imagemUrl: string | null;
+    }[];
+    combos: {
+      id: string;
+      nome: string;
+      quantidade: number;
+      preco: Prisma.Decimal;
+      ativo: boolean;
+    }[];
+    resultado: {
+      id: string;
+      numerosSorteados: number[];
+      apurado: boolean;
+      imagemResultadoUrl: string | null;
+    } | null;
   }) {
     return {
       ...edicao,

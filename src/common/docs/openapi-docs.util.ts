@@ -34,7 +34,13 @@ const HTTP_METHODS = [
   'trace',
 ] as const;
 
-type SwaggerAudience = 'admin' | 'geral' | 'whatsapp' | 'sena-admin' | 'sena-loja' | 'shared';
+type SwaggerAudience =
+  | 'admin'
+  | 'geral'
+  | 'whatsapp'
+  | 'sena-admin'
+  | 'sena-loja'
+  | 'shared';
 type HttpMethod = (typeof HTTP_METHODS)[number];
 
 export function setupOpenApiDocs(
@@ -113,16 +119,22 @@ export function setupOpenApiDocs(
       '',
       '**Usuários**: ADMIN, DISTRIBUIDOR, VENDEDOR',
       '',
+      '- Login admin/distribuidor/vendedor: `POST /api/auth/login` (email + senha)',
+      '- Buscar cliente por CPF no painel: `GET /api/admin/clientes/cpf/{cpf}` (Bearer)',
+      '- Refresh token: `POST /api/auth/refresh`',
+      '',
       '### Fluxo operacional',
       '```',
-      '1. POST /api/admin/capital-sena/edicoes           — Criar edição Sena',
-      '2. PATCH /api/admin/capital-sena/edicoes/:id/ativar — Ativar edição',
-      '3. POST /api/capital-sena/comprar                 — Vender cartelas (via loja)',
-      '4. POST /api/admin/capital-sena/vendas            — Vender cartelas (admin/manual)',
-      '5. PATCH /api/admin/capital-sena/edicoes/:id/encerrar — Encerrar edição',
-      '6. POST /api/admin/capital-sena/sorteio/:id/resultado — Inserir resultado Mega-Sena',
-      '7. POST /api/admin/capital-sena/apuracao/:id      — Executar apuração automática',
-      '8. GET  /api/admin/capital-sena/apuracao/:id/ganhadores — Listar premiados',
+      '1. POST /api/auth/login                              — Login ADMIN, DISTRIBUIDOR ou VENDEDOR',
+      '2. POST /api/admin/capital-sena/edicoes              — Criar edição Sena',
+      '3. PATCH /api/admin/capital-sena/edicoes/:id/ativar  — Ativar edição',
+      '4. GET  /api/admin/clientes/cpf/:cpf                 — Buscar dados do cliente por CPF',
+      '5. POST /api/capital-sena/comprar                    — Vender cartelas (via loja)',
+      '6. POST /api/admin/capital-sena/vendas               — Vender cartelas (admin/manual)',
+      '7. PATCH /api/admin/capital-sena/edicoes/:id/encerrar — Encerrar edição',
+      '8. POST /api/admin/capital-sena/sorteio/:id/resultado — Inserir resultado Mega-Sena',
+      '9. POST /api/admin/capital-sena/apuracao/:id         — Executar apuração automática',
+      '10. GET /api/admin/capital-sena/apuracao/:id/ganhadores — Listar premiados',
       '```',
       '',
       '### Faixas de premiação',
@@ -143,12 +155,17 @@ export function setupOpenApiDocs(
       '',
       '### Fluxo de compra',
       '```',
-      '1. GET  /api/capital-sena/edicao-ativa         — Edição ativa com prêmios/combos',
-      '2. POST /api/capital-sena/comprar              — Comprar cartela(s) (PIX ou Cartão)',
-      '3. GET  /api/capital-sena/vendas/:id/status    — Consultar status de pagamento',
-      '4. GET  /api/capital-sena/minhas-cartelas      — Área do cliente (Bearer)',
-      '5. GET  /api/capital-sena/resultado/:edicaoId  — Resultado público',
+      '1. GET  /api/capital-sena/edicoes              — Listar edições ativas para compra',
+      '2. GET  /api/capital-sena/edicao-ativa         — Edição ativa com prêmios/combos',
+      '3. POST /api/capital-sena/comprar              — Comprar cartela(s) (PIX ou Cartão)',
+      '4. POST /api/auth/loja                         — Login/área do cliente por CPF',
+      '5. GET  /api/capital-sena/vendas/:id/status    — Consultar status de pagamento',
+      '6. GET  /api/capital-sena/minhas-cartelas      — Área do cliente (Bearer)',
+      '7. GET  /api/capital-sena/resultado/:edicaoId  — Resultado público',
       '```',
+      '',
+      '### Autenticação do cliente',
+      'Use `POST /api/auth/loja` com CPF. Se o CPF já existir, a resposta retorna os dados do cliente e os tokens; se for primeiro acesso, informe também nome, telefone e dataNascimento.',
       '',
       '### 7º Número',
       'Gerado automaticamente após confirmação do pagamento. Visível em **minhas-cartelas**.',
@@ -279,7 +296,12 @@ export function setupOpenApiDocs(
     (_request: unknown, response: Response) => {
       response
         .type('html')
-        .send(buildRedocHtml('Capital Sena API - Admin', `/${DOCS_JSON_BASE_PATH}/sena-admin`));
+        .send(
+          buildRedocHtml(
+            'Capital Sena API - Admin',
+            `/${DOCS_JSON_BASE_PATH}/sena-admin`,
+          ),
+        );
     },
   );
   expressApp.get(
@@ -287,16 +309,27 @@ export function setupOpenApiDocs(
     (_request: unknown, response: Response) => {
       response
         .type('html')
-        .send(buildRedocHtml('Capital Sena API - Loja', `/${DOCS_JSON_BASE_PATH}/sena-loja`));
+        .send(
+          buildRedocHtml(
+            'Capital Sena API - Loja',
+            `/${DOCS_JSON_BASE_PATH}/sena-loja`,
+          ),
+        );
     },
   );
   SwaggerModule.setup(SWAGGER_SENA_ADMIN_FLAT_PATH, app, senaAdminDocument, {
     customSiteTitle: 'Capital Sena API - Swagger Admin',
-    swaggerOptions: { persistAuthorization: true, url: `/${DOCS_JSON_BASE_PATH}/sena-admin` },
+    swaggerOptions: {
+      persistAuthorization: true,
+      url: `/${DOCS_JSON_BASE_PATH}/sena-admin`,
+    },
   });
   SwaggerModule.setup(SWAGGER_SENA_LOJA_FLAT_PATH, app, senaLojaDocument, {
     customSiteTitle: 'Capital Sena API - Swagger Loja',
-    swaggerOptions: { persistAuthorization: true, url: `/${DOCS_JSON_BASE_PATH}/sena-loja` },
+    swaggerOptions: {
+      persistAuthorization: true,
+      url: `/${DOCS_JSON_BASE_PATH}/sena-loja`,
+    },
   });
 
   expressApp.get(
@@ -338,18 +371,34 @@ export function setupOpenApiDocs(
     },
   });
   logger.log(`📚 Redoc WhatsApp: http://localhost:${port}/api/docs/whatsapp`);
-  logger.log(`📚 Swagger WhatsApp: http://localhost:${port}/api/swagger/whatsapp`);
-  logger.log(`📚 OpenAPI WhatsApp JSON: http://localhost:${port}/api/docs-json/whatsapp`);
-  logger.log(`📚 Redoc Sena Admin: http://localhost:${port}/api/docs/sena-admin`);
-  logger.log(`📚 Redoc Sena Loja:  http://localhost:${port}/api/docs/sena-loja`);
-  logger.log(`📚 Swagger Sena Admin: http://localhost:${port}/api/swagger/sena-admin`);
-  logger.log(`📚 Swagger Sena Loja:  http://localhost:${port}/api/swagger/sena-loja`);
+  logger.log(
+    `📚 Swagger WhatsApp: http://localhost:${port}/api/swagger/whatsapp`,
+  );
+  logger.log(
+    `📚 OpenAPI WhatsApp JSON: http://localhost:${port}/api/docs-json/whatsapp`,
+  );
+  logger.log(
+    `📚 Redoc Sena Admin: http://localhost:${port}/api/docs/sena-admin`,
+  );
+  logger.log(
+    `📚 Redoc Sena Loja:  http://localhost:${port}/api/docs/sena-loja`,
+  );
+  logger.log(
+    `📚 Swagger Sena Admin: http://localhost:${port}/api/swagger/sena-admin`,
+  );
+  logger.log(
+    `📚 Swagger Sena Loja:  http://localhost:${port}/api/swagger/sena-loja`,
+  );
   logger.log(`📚 Redoc Admin: http://localhost:${port}/api/docs/admin`);
   logger.log(`📚 Redoc Geral: http://localhost:${port}/api/docs/geral`);
   logger.log(`📚 Swagger Admin: http://localhost:${port}/api/swagger/admin`);
   logger.log(`📚 Swagger Geral: http://localhost:${port}/api/swagger/geral`);
-  logger.log(`📚 OpenAPI Admin JSON: http://localhost:${port}/api/docs-json/admin`);
-  logger.log(`📚 OpenAPI Geral JSON: http://localhost:${port}/api/docs-json/geral`);
+  logger.log(
+    `📚 OpenAPI Admin JSON: http://localhost:${port}/api/docs-json/admin`,
+  );
+  logger.log(
+    `📚 OpenAPI Geral JSON: http://localhost:${port}/api/docs-json/geral`,
+  );
 }
 
 function isHttpMethod(value: string): value is HttpMethod {
@@ -394,7 +443,9 @@ function getSwaggerAudience(
   if (path.includes('/capital-sena/')) {
     const isSenaAdmin =
       isAdminPath(path) ||
-      (operation.tags ?? []).some((tag: string) => tag.startsWith(SENA_ADMIN_TAG_PREFIX));
+      (operation.tags ?? []).some((tag: string) =>
+        tag.startsWith(SENA_ADMIN_TAG_PREFIX),
+      );
     if (isSenaAdmin) return 'sena-admin';
     return 'sena-loja';
   }
@@ -409,6 +460,39 @@ function getSwaggerAudience(
   }
 
   return 'geral';
+}
+
+function isSenaAdminExtraPath(path: string): boolean {
+  return (
+    path.endsWith('/auth/login') ||
+    path.endsWith('/auth/redefinir-senha-primeiro-acesso') ||
+    path.endsWith('/auth/admin/redefinir-senha') ||
+    path.includes('/admin/clientes/cpf/')
+  );
+}
+
+function isSenaLojaExtraPath(path: string): boolean {
+  return path.endsWith('/auth/loja');
+}
+
+function shouldIncludeOperation(
+  path: string,
+  operationAudience: SwaggerAudience,
+  audience: Exclude<SwaggerAudience, 'shared'>,
+): boolean {
+  if (operationAudience === audience || operationAudience === 'shared') {
+    return true;
+  }
+
+  if (audience === 'sena-admin' && isSenaAdminExtraPath(path)) {
+    return true;
+  }
+
+  if (audience === 'sena-loja' && isSenaLojaExtraPath(path)) {
+    return true;
+  }
+
+  return false;
 }
 
 function buildAudienceDocument(
@@ -459,8 +543,11 @@ function buildAudienceDocument(
 
       const operation = value as OperationObject;
       const operationAudience = getSwaggerAudience(path, operation);
-      const shouldInclude =
-        operationAudience === audience || operationAudience === 'shared';
+      const shouldInclude = shouldIncludeOperation(
+        path,
+        operationAudience,
+        audience,
+      );
 
       if (!shouldInclude) {
         continue;
