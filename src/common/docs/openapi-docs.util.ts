@@ -580,6 +580,26 @@ function shouldIncludeOperation(
   return false;
 }
 
+function normalizeAudienceOperationTags(
+  operation: OperationObject,
+  audience: Exclude<SwaggerAudience, 'shared'>,
+): OperationObject {
+  if (audience !== 'pos') {
+    return operation;
+  }
+
+  const tags = operation.tags ?? [];
+  const hasSpecificPosTag = tags.some((tag) => tag.startsWith('POS /'));
+  if (!hasSpecificPosTag) {
+    return operation;
+  }
+
+  return {
+    ...operation,
+    tags: tags.filter((tag) => tag !== 'Pos' && tag !== 'POS'),
+  };
+}
+
 function buildAudienceDocument(
   document: OpenAPIObject,
   audience: Exclude<SwaggerAudience, 'shared'>,
@@ -638,10 +658,14 @@ function buildAudienceDocument(
         continue;
       }
 
-      nextPathItem[key] = operation;
+      const normalizedOperation = normalizeAudienceOperationTags(
+        operation,
+        audience,
+      );
+      nextPathItem[key] = normalizedOperation;
       hasOperations = true;
 
-      for (const tag of operation.tags ?? []) {
+      for (const tag of normalizedOperation.tags ?? []) {
         allowedTags.add(tag);
       }
     }
