@@ -13,6 +13,7 @@ const DOCS_JSON_BASE_PATH = 'api/docs-json';
 const SWAGGER_ADMIN_FLAT_PATH = 'api/swagger-admin';
 const SWAGGER_GERAL_FLAT_PATH = 'api/swagger-geral';
 const SWAGGER_WHATSAPP_FLAT_PATH = 'api/swagger-whatsapp';
+const SWAGGER_POS_FLAT_PATH = 'api/swagger-pos';
 const SWAGGER_SENA_ADMIN_FLAT_PATH = 'api/swagger-sena-admin';
 const SWAGGER_SENA_LOJA_FLAT_PATH = 'api/swagger-sena-loja';
 const ADMIN_TAG_PREFIX = 'Admin /';
@@ -38,6 +39,7 @@ type SwaggerAudience =
   | 'admin'
   | 'geral'
   | 'whatsapp'
+  | 'pos'
   | 'sena-admin'
   | 'sena-loja'
   | 'shared';
@@ -106,6 +108,34 @@ export function setupOpenApiDocs(
       '',
       'Use o `accessToken` retornado em `POST /api/whatsapp/auth` no header:',
       '`Authorization: Bearer {accessToken}`',
+    ].join('\n'),
+  );
+  const posDocument = buildAudienceDocument(
+    fullDocument,
+    'pos',
+    'Capital de Prêmios API - POS',
+    [
+      '## POS — Terminais de venda',
+      '',
+      'Rotas exclusivas para maquininhas e terminais físicos, incluindo Capital de Prêmios e Capital Sena.',
+      '',
+      '### Fluxo recomendado',
+      '```',
+      '1. POST /api/pos/auth/login                               — Login por CPF do operador',
+      '2. GET  /api/pos/edicoes                                  — Edições ativas de Prêmios',
+      '3. GET  /api/pos/edicoes/:edicaoId/combos                 — Navegar combos disponíveis',
+      '4. POST /api/pos/vendas                                   — Criar venda Prêmios pendente',
+      '5. POST /api/pos/vendas/:id/confirmar-pagamento           — Confirmar pagamento Prêmios',
+      '6. GET  /api/pos/capital-sena/edicoes                     — Edições ativas Sena',
+      '7. POST /api/pos/capital-sena/vendas                      — Criar venda Sena pendente',
+      '8. POST /api/pos/capital-sena/vendas/:id/confirmar-pagamento — Confirmar pagamento Sena',
+      '```',
+      '',
+      '### Autenticação',
+      'Use o `accessToken` retornado em `POST /api/pos/auth/login` no header:',
+      '`Authorization: Bearer {accessToken}`',
+      '',
+      'O token POS usa secret próprio (`JWT_POS_SECRET`), expiração longa (`JWT_POS_EXPIRES`) e não acessa rotas administrativas.',
     ].join('\n'),
   );
   const senaAdminDocument = buildAudienceDocument(
@@ -215,6 +245,18 @@ export function setupOpenApiDocs(
     },
   );
   expressApp.get(
+    `/${SWAGGER_BASE_PATH}/pos`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_POS_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
+    `/${SWAGGER_BASE_PATH}/pos/`,
+    (_request: unknown, response: Response) => {
+      response.redirect(302, `/${SWAGGER_POS_FLAT_PATH}`);
+    },
+  );
+  expressApp.get(
     `/${DOCS_JSON_BASE_PATH}/admin`,
     (_request: unknown, response: Response) => {
       response.json(adminDocument);
@@ -224,6 +266,12 @@ export function setupOpenApiDocs(
     `/${DOCS_JSON_BASE_PATH}/geral`,
     (_request: unknown, response: Response) => {
       response.json(generalDocument);
+    },
+  );
+  expressApp.get(
+    `/${DOCS_JSON_BASE_PATH}/pos`,
+    (_request: unknown, response: Response) => {
+      response.json(posDocument);
     },
   );
   expressApp.get(
@@ -252,6 +300,19 @@ export function setupOpenApiDocs(
         );
     },
   );
+  expressApp.get(
+    `/${DOCS_BASE_PATH}/pos`,
+    (_request: unknown, response: Response) => {
+      response
+        .type('html')
+        .send(
+          buildRedocHtml(
+            'Capital de Prêmios API - POS',
+            `/${DOCS_JSON_BASE_PATH}/pos`,
+          ),
+        );
+    },
+  );
   SwaggerModule.setup(SWAGGER_ADMIN_FLAT_PATH, app, adminDocument, {
     customSiteTitle: 'Capital de Prêmios API - Swagger Admin',
     swaggerOptions: {
@@ -264,6 +325,13 @@ export function setupOpenApiDocs(
     swaggerOptions: {
       persistAuthorization: true,
       url: `/${DOCS_JSON_BASE_PATH}/geral`,
+    },
+  });
+  SwaggerModule.setup(SWAGGER_POS_FLAT_PATH, app, posDocument, {
+    customSiteTitle: 'Capital de Prêmios API - Swagger POS',
+    swaggerOptions: {
+      persistAuthorization: true,
+      url: `/${DOCS_JSON_BASE_PATH}/pos`,
     },
   });
 
@@ -371,11 +439,16 @@ export function setupOpenApiDocs(
     },
   });
   logger.log(`📚 Redoc WhatsApp: http://localhost:${port}/api/docs/whatsapp`);
+  logger.log(`📚 Redoc POS: http://localhost:${port}/api/docs/pos`);
   logger.log(
     `📚 Swagger WhatsApp: http://localhost:${port}/api/swagger/whatsapp`,
   );
+  logger.log(`📚 Swagger POS: http://localhost:${port}/api/swagger/pos`);
   logger.log(
     `📚 OpenAPI WhatsApp JSON: http://localhost:${port}/api/docs-json/whatsapp`,
+  );
+  logger.log(
+    `📚 OpenAPI POS JSON: http://localhost:${port}/api/docs-json/pos`,
   );
   logger.log(
     `📚 Redoc Sena Admin: http://localhost:${port}/api/docs/sena-admin`,
@@ -439,6 +512,10 @@ function getSwaggerAudience(
     return 'whatsapp';
   }
 
+  if (path.includes('/pos/') || path.startsWith('pos/')) {
+    return 'pos';
+  }
+
   // Capital Sena
   if (path.includes('/capital-sena/')) {
     const isSenaAdmin =
@@ -480,8 +557,12 @@ function shouldIncludeOperation(
   operationAudience: SwaggerAudience,
   audience: Exclude<SwaggerAudience, 'shared'>,
 ): boolean {
-  if (operationAudience === audience || operationAudience === 'shared') {
+  if (operationAudience === audience) {
     return true;
+  }
+
+  if (operationAudience === 'shared') {
+    return audience !== 'pos';
   }
 
   if (audience === 'sena-admin' && isSenaAdminExtraPath(path)) {
@@ -736,6 +817,13 @@ function buildDocsIndexHtml(port: number): string {
           <code>/api/docs/whatsapp</code>
         </a>
 
+        <a class="card" href="/api/docs/pos">
+          <span class="eyebrow">Redoc</span>
+          <h2>Redoc POS</h2>
+          <p>Rotas exclusivas dos terminais físicos, com login por CPF e confirmação de pagamento.</p>
+          <code>/api/docs/pos</code>
+        </a>
+
         <a class="card" href="/api/docs/sena-admin">
           <span class="eyebrow" style="background:#fef3c7;color:#b45309">Sena · Redoc</span>
           <h2>Redoc Capital Sena Admin</h2>
@@ -771,6 +859,13 @@ function buildDocsIndexHtml(port: number): string {
           <code>/api/swagger/whatsapp</code>
         </a>
 
+        <a class="card" href="/api/swagger/pos">
+          <span class="eyebrow">Swagger</span>
+          <h2>Swagger POS</h2>
+          <p>Interface interativa para testar vendas presenciais de Prêmios e Capital Sena.</p>
+          <code>/api/swagger/pos</code>
+        </a>
+
         <a class="card" href="/api/swagger/sena-admin">
           <span class="eyebrow" style="background:#fef3c7;color:#b45309">Sena · Swagger</span>
           <h2>Swagger Capital Sena Admin</h2>
@@ -797,6 +892,7 @@ function buildDocsIndexHtml(port: number): string {
         <li>JSON Admin: <code>http://localhost:${port}/api/docs-json/admin</code></li>
         <li>JSON Geral: <code>http://localhost:${port}/api/docs-json/geral</code></li>
         <li>JSON WhatsApp: <code>http://localhost:${port}/api/docs-json/whatsapp</code></li>
+        <li>JSON POS: <code>http://localhost:${port}/api/docs-json/pos</code></li>
       </ul>
 
       <section class="commands">

@@ -106,10 +106,13 @@ Em ambiente nao produtivo, a documentacao fica separada por contexto:
 - indice: `http://localhost:3000/api/docs`
 - redoc admin: `http://localhost:3000/api/docs/admin`
 - redoc geral: `http://localhost:3000/api/docs/geral`
+- redoc pos: `http://localhost:3000/api/docs/pos`
 - swagger admin: `http://localhost:3000/api/swagger/admin`
 - swagger geral: `http://localhost:3000/api/swagger/geral`
+- swagger pos: `http://localhost:3000/api/swagger/pos`
 - json admin: `http://localhost:3000/api/docs-json/admin`
 - json geral: `http://localhost:3000/api/docs-json/geral`
+- json pos: `http://localhost:3000/api/docs-json/pos`
 
 O indice `/api/docs` centraliza os atalhos. Use Redoc para leitura da referencia e Swagger para testes interativos das rotas.
 
