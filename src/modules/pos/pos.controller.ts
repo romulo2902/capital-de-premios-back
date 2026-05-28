@@ -30,6 +30,74 @@ import { CreatePosVendaSenaDto } from './dto/create-pos-venda-sena.dto';
 import { ConfirmarPagamentoPosDto } from './dto/confirmar-pagamento-pos.dto';
 import { ListarCombosAdminDto } from '../vendas/dto/listar-combos-admin.dto';
 
+const POS_LOGIN_REQUEST_EXAMPLE = {
+  cpf: '12345678900',
+};
+
+const POS_PREMIOS_VENDA_UNITARIA_REQUEST_EXAMPLE = {
+  edicaoId: '8f52a4b8-1c4f-4e0b-8df6-95522f47a111',
+  quantidadeCartelas: 2,
+  tipoPagamento: 'CARTAO',
+  cartelasSelecionadas: ['0276145', '0276146'],
+  cpf: '98765432100',
+  nome: 'Maria Cliente',
+  telefone: '(11) 99999-9999',
+  email: 'maria.cliente@email.com',
+  dataNascimento: '1985-04-11',
+};
+
+const POS_PREMIOS_VENDA_COMBO_REQUEST_EXAMPLE = {
+  edicaoId: '8f52a4b8-1c4f-4e0b-8df6-95522f47a111',
+  tipoPagamento: 'CARTAO',
+  combosSelecionados: ['0276145'],
+  cpf: '98765432100',
+  nome: 'Maria Cliente',
+  telefone: '(11) 99999-9999',
+  dataNascimento: '1985-04-11',
+};
+
+const POS_PAGAMENTO_REQUEST_EXAMPLE = {
+  transacaoId: 'CHAR_1A2B3C4D-5E6F-7890-ABCD-EF1234567890',
+  status: 'PAID',
+  pagamento: {
+    id: 'CHAR_1A2B3C4D-5E6F-7890-ABCD-EF1234567890',
+    reference_id: 'POS-123456',
+    payment_method: { type: 'CREDIT_CARD', installments: 1 },
+    paid_at: '2026-05-28T14:30:00.000Z',
+  },
+};
+
+const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
+  edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
+  tipoPagamento: 'CARTAO',
+  cartelas: [
+    {
+      modoSelecao: 'MANUAL',
+      numeros: [3, 12, 24, 37, 45, 58],
+    },
+  ],
+  cpf: '98765432100',
+  nome: 'Maria Cliente',
+  telefone: '(11) 99999-9999',
+  email: 'maria.cliente@email.com',
+  dataNascimento: '1985-04-11',
+};
+
+const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
+  edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
+  comboSenaId: 'fd2f8a0e-8ce6-4aa2-9c94-668c7530a111',
+  tipoPagamento: 'CARTAO',
+  cartelas: [
+    { modoSelecao: 'SURPRESINHA' },
+    { modoSelecao: 'SURPRESINHA' },
+    { modoSelecao: 'SURPRESINHA' },
+  ],
+  cpf: '98765432100',
+  nome: 'Maria Cliente',
+  telefone: '(11) 99999-9999',
+  dataNascimento: '1985-04-11',
+};
+
 /**
  * ## POS — Terminais de venda (Capital de Prêmios + Capital Sena)
  *
@@ -100,7 +168,20 @@ embutido no token — as vendas criadas no terminal são automaticamente atribu�
 a ele.
     `.trim(),
   })
-  @ApiBody({ type: LoginPosDto })
+  @ApiBody({
+    type: LoginPosDto,
+    description: 'Login POS usa somente o CPF do operador. Não envie senha.',
+    examples: {
+      cpfSemMascara: {
+        summary: 'CPF sem máscara',
+        value: POS_LOGIN_REQUEST_EXAMPLE,
+      },
+      cpfFormatado: {
+        summary: 'CPF formatado',
+        value: { cpf: '123.456.789-00' },
+      },
+    },
+  })
   @ApiResponse({
     status: 200,
     description: 'Operador autenticado.',
@@ -244,10 +325,33 @@ reutiliza a configuração **DIGITAL** de ranges e preços.
     description: 'ID da edição ativa (obtido em GET /pos/edicoes)',
     example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   })
-  @ApiQuery({ name: 'tipoCartela', required: false })
-  @ApiQuery({ name: 'quantidadeCartelas', required: false, type: Number })
-  @ApiQuery({ name: 'cursorNumeroBase', required: false, type: String })
-  @ApiQuery({ name: 'direcao', required: false, enum: ['PROXIMO', 'ANTERIOR'] })
+  @ApiQuery({
+    name: 'tipoCartela',
+    required: false,
+    example: 'COMBO',
+    description: 'Tipo de cartela/seleção do combo. Opcional.',
+  })
+  @ApiQuery({
+    name: 'quantidadeCartelas',
+    required: false,
+    type: Number,
+    example: 3,
+    description: 'Quantidade de cartelas do combo. Se omitida, assume 1.',
+  })
+  @ApiQuery({
+    name: 'cursorNumeroBase',
+    required: false,
+    type: String,
+    example: '0276145',
+    description: 'Número base atual para buscar próximo/anterior.',
+  })
+  @ApiQuery({
+    name: 'direcao',
+    required: false,
+    enum: ['PROXIMO', 'ANTERIOR'],
+    example: 'PROXIMO',
+    description: 'Direção da navegação por combos.',
+  })
   @ApiResponse({ status: 200, description: 'Combos disponíveis listados.' })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
   @ApiResponse({ status: 404, description: 'Edição não encontrada.' })
@@ -278,7 +382,21 @@ pagamento é feito na maquininha. O vendedor/distribuidor é definido pelo token
 Guarde o \`id\` retornado: ele é usado no \`confirmar-pagamento\`.
     `.trim(),
   })
-  @ApiBody({ type: CreatePosVendaDto })
+  @ApiBody({
+    type: CreatePosVendaDto,
+    description:
+      'Request da venda POS de Prêmios. Não envie vendedorId, distribuidorId nem origemParticipacao; a API resolve pelo token POS e força origem POS.',
+    examples: {
+      vendaUnitaria: {
+        summary: 'Venda unitária com cartelas selecionadas',
+        value: POS_PREMIOS_VENDA_UNITARIA_REQUEST_EXAMPLE,
+      },
+      vendaCombo: {
+        summary: 'Venda por combo selecionado',
+        value: POS_PREMIOS_VENDA_COMBO_REQUEST_EXAMPLE,
+      },
+    },
+  })
   @ApiResponse({
     status: 201,
     description: 'Venda criada (PENDENTE), aguardando confirmação de pagamento.',
@@ -323,7 +441,29 @@ Recebe a resposta de pagamento da maquininha (PagBank), **valida** e:
     description: 'ID da venda PENDENTE (retornado em POST /pos/vendas)',
     example: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
   })
-  @ApiBody({ type: ConfirmarPagamentoPosDto })
+  @ApiBody({
+    type: ConfirmarPagamentoPosDto,
+    description:
+      'Request enviado pelo terminal após a maquininha retornar o resultado do pagamento.',
+    examples: {
+      pagamentoAprovado: {
+        summary: 'Pagamento aprovado pela maquininha',
+        value: POS_PAGAMENTO_REQUEST_EXAMPLE,
+      },
+      pagamentoRecusado: {
+        summary: 'Pagamento recusado pela maquininha',
+        value: {
+          ...POS_PAGAMENTO_REQUEST_EXAMPLE,
+          status: 'DECLINED',
+          pagamento: {
+            id: 'CHAR_1A2B3C4D-5E6F-7890-ABCD-EF1234567890',
+            reference_id: 'POS-123456',
+            decline_code: 'card_declined',
+          },
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 200,
     description: 'Pagamento processado (aprovado ou recusado).',
@@ -402,7 +542,21 @@ Informe as \`cartelas\` (MANUAL com 6 números, ou SURPRESINHA) e, opcionalmente
 Guarde o \`id\` para a etapa de \`confirmar-pagamento\`.
     `.trim(),
   })
-  @ApiBody({ type: CreatePosVendaSenaDto })
+  @ApiBody({
+    type: CreatePosVendaSenaDto,
+    description:
+      'Request da venda POS do Capital Sena. Não envie vendedorId, distribuidorId nem seller_id; a API resolve pelo token POS.',
+    examples: {
+      vendaManual: {
+        summary: 'Venda manual com números escolhidos',
+        value: POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE,
+      },
+      vendaComboSurpresinha: {
+        summary: 'Venda combo com Surpresinha',
+        value: POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE,
+      },
+    },
+  })
   @ApiResponse({
     status: 201,
     description: 'Venda Sena criada (PENDENTE).',
@@ -446,7 +600,29 @@ Recebe a resposta de pagamento da maquininha (PagBank), valida e gera as cartela
     description: 'ID da venda Sena PENDENTE (retornado em POST /pos/capital-sena/vendas)',
     example: 'd4e5f6a7-b8c9-0123-defa-234567890123',
   })
-  @ApiBody({ type: ConfirmarPagamentoPosDto })
+  @ApiBody({
+    type: ConfirmarPagamentoPosDto,
+    description:
+      'Request enviado pelo terminal após o pagamento da venda Sena ser concluído na maquininha.',
+    examples: {
+      pagamentoAprovado: {
+        summary: 'Pagamento aprovado pela maquininha',
+        value: POS_PAGAMENTO_REQUEST_EXAMPLE,
+      },
+      pagamentoRecusado: {
+        summary: 'Pagamento recusado pela maquininha',
+        value: {
+          ...POS_PAGAMENTO_REQUEST_EXAMPLE,
+          status: 'DECLINED',
+          pagamento: {
+            id: 'CHAR_1A2B3C4D-5E6F-7890-ABCD-EF1234567890',
+            reference_id: 'POS-SENA-123456',
+            decline_code: 'card_declined',
+          },
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 200,
     description: 'Pagamento Sena processado (aprovado ou recusado).',
