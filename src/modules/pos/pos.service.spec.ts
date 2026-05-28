@@ -10,6 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
+import { RedisService } from '../../common/redis/redis.service';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 describe('PosService', () => {
@@ -39,6 +40,11 @@ describe('PosService', () => {
     }),
   };
 
+  const mockRedisService = {
+    isConfigured: jest.fn().mockReturnValue(false),
+    client: null,
+  };
+
   const vendedor: RequestUser = {
     id: 'user-1',
     email: null,
@@ -57,16 +63,17 @@ describe('PosService', () => {
         { provide: VendasService, useValue: mockVendas },
         { provide: VendasSenaService, useValue: mockVendasSena },
         { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
+        { provide: RedisService, useValue: mockRedisService },
       ],
     }).compile();
 
     service = module.get<PosService>(PosService);
   });
 
-  it('cria venda forçando origem POS, ids do token e cobrança via API', () => {
+  it('cria venda forçando origem POS, ids do token e cobrança via API', async () => {
     mockVendas.create.mockResolvedValue({ data: { id: 'venda-1' } });
 
-    service.criarVenda(
+    await service.criarVenda(
       {
         edicaoId: 'ed-1',
         cpf: '1',
@@ -91,8 +98,8 @@ describe('PosService', () => {
     );
   });
 
-  it('rejeita venda POS com cartão', () => {
-    expect(() =>
+  it('rejeita venda POS com cartão', async () => {
+    await expect(
       service.criarVenda(
         {
           edicaoId: 'ed-1',
@@ -104,7 +111,7 @@ describe('PosService', () => {
         } as never,
         vendedor,
       ),
-    ).toThrow(BadRequestException);
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('consulta status de pagamento da venda POS', async () => {

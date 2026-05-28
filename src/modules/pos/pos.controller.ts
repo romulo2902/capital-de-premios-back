@@ -27,6 +27,7 @@ import { PosService } from './pos.service';
 import { LoginPosDto } from './dto/login-pos.dto';
 import { CreatePosVendaDto } from './dto/create-pos-venda.dto';
 import { CreatePosVendaSenaDto } from './dto/create-pos-venda-sena.dto';
+import { ReservarCartelasPosDto } from './dto/reservar-cartelas-pos.dto';
 import { ListarCombosAdminDto } from '../vendas/dto/listar-combos-admin.dto';
 
 const POS_AUTH_TAG = 'POS / Autenticação';
@@ -106,7 +107,9 @@ const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
  *
  * 2. (Prêmios) Listar edições ativas e navegar combos
  *    → GET /api/pos/edicoes
+ *    → GET /api/pos/edicoes/{edicaoId}/opcoes
  *    → GET /api/pos/edicoes/{edicaoId}/combos
+ *    → POST /api/pos/edicoes/{edicaoId}/reservas
  *
  * 3. Criar a venda (PENDENTE) e gerar cobrança pela API
  *    → POST /api/pos/vendas                  (Prêmios)
@@ -314,16 +317,72 @@ fazer um novo \`POST /pos/auth/login\`.
     return this.posService.listarEdicoesAtivas();
   }
 
+  @Get('edicoes/:edicaoId/opcoes')
+  @UseGuards(PosAuthGuard)
+  @ApiBearerAuth()
+  @ApiTags(POS_PREMIOS_TAG)
+  @ApiOperation({
+    summary:
+      '5. 🔒 Listar opções configuradas — Prêmios (unitário e combos)',
+    description: `
+Lista as opções de venda configuradas para o canal **POS** na edição: compra
+unitária e combos, com quantidade de cartelas e preço. Use este endpoint para
+montar a tela de escolha antes de navegar/reservar cartelas.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'edicaoId',
+    description: 'ID da edição ativa (obtido em GET /pos/edicoes)',
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Opções configuradas listadas.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Opções de venda POS listadas com sucesso',
+        data: {
+          edicaoId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          edicaoNumero: '001',
+          origemParticipacao: 'POS',
+          opcoes: [
+            {
+              tipoCompra: 'UNITARIO',
+              tipoCartela: 'UMA_CHANCE',
+              quantidadeCartelas: 1,
+              preco: '10.00',
+              indiceRange: 1,
+            },
+            {
+              tipoCompra: 'COMBO',
+              tipoCartela: 'TRES_CHANCES',
+              quantidadeCartelas: 3,
+              preco: '25.00',
+              indiceRange: null,
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({ status: 404, description: 'Edição não encontrada.' })
+  listarOpcoes(@Param('edicaoId', ParseUUIDPipe) edicaoId: string) {
+    return this.posService.listarOpcoesVenda(edicaoId);
+  }
+
   @Get('edicoes/:edicaoId/combos')
   @UseGuards(PosAuthGuard)
   @ApiBearerAuth()
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
-      '5. 🔒 Navegar combos disponíveis — Prêmios (VENDEDOR + DISTRIBUIDOR)',
+      '6. 🔒 Navegar cartelas/combos disponíveis — Prêmios',
     description: `
 Lista os combos/cotas disponíveis (1 por vez, navegação por cursor). A venda POS
-reutiliza a configuração **DIGITAL** de ranges e preços.
+usa a configuração **POS** de ranges e preços e ignora cartelas já vendidas ou
+reservadas em pré-compra.
     `.trim(),
   })
   @ApiParam({
@@ -358,7 +417,128 @@ reutiliza a configuração **DIGITAL** de ranges e preços.
     example: 'PROXIMO',
     description: 'Direção da navegação por combos.',
   })
-  @ApiResponse({ status: 200, description: 'Combos disponíveis listados.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Combos/cotas disponíveis listados. A API retorna 1 combo por chamada para navegação por cursor.',
+    schema: {
+      examples: {
+        comboDisponivel: {
+          summary: 'Combo disponível',
+          value: {
+            statusCode: 200,
+            message: 'Combos disponíveis listados com sucesso',
+            data: {
+              edicaoId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+              edicaoNumero: '001',
+              status: 'ATIVA',
+              origemParticipacao: 'POS',
+              tipoCompra: 'COMBO',
+              quantidadeCartelas: 3,
+              valorUnitarioCartela: '10.00',
+              valorCombo: '25.00',
+              preco: '25.00',
+              passoEntreCartelas: '100000',
+              rangeTotalInicio: '0000001',
+              rangeTotalFinal: '0999999',
+              setores: [
+                {
+                  indiceCartela: 1,
+                  rangeInicio: '0000001',
+                  rangeFinal: '0099999',
+                },
+                {
+                  indiceCartela: 2,
+                  rangeInicio: '0100001',
+                  rangeFinal: '0199999',
+                },
+                {
+                  indiceCartela: 3,
+                  rangeInicio: '0200001',
+                  rangeFinal: '0299999',
+                },
+              ],
+              cursorNumeroBaseAtual: '0276145',
+              combos: [
+                {
+                  ordemSequencia: 1,
+                  numeroBase: '0276145',
+                  bilhetes: [
+                    {
+                      ordem: 1,
+                      matrizId: 'f8b47a58-0f02-4c8d-9d3e-822c3e9e1111',
+                      numero: '0276145',
+                      sequenciaBolas: [4, 12, 23, 31, 42, 55],
+                    },
+                    {
+                      ordem: 2,
+                      matrizId: 'b4af2dd7-9c97-4ed5-87e7-c4f6b3011111',
+                      numero: '0376145',
+                      sequenciaBolas: [7, 14, 21, 36, 48, 59],
+                    },
+                    {
+                      ordem: 3,
+                      matrizId: '9e71e73a-b72d-4a6f-81fe-cc5d8d911111',
+                      numero: '0476145',
+                      sequenciaBolas: [2, 10, 18, 29, 41, 53],
+                    },
+                  ],
+                },
+              ],
+              comboAtual: {
+                numeroBase: '0276145',
+                bilhetes: [
+                  {
+                    ordem: 1,
+                    matrizId: 'f8b47a58-0f02-4c8d-9d3e-822c3e9e1111',
+                    numero: '0276145',
+                    sequenciaBolas: [4, 12, 23, 31, 42, 55],
+                  },
+                  {
+                    ordem: 2,
+                    matrizId: 'b4af2dd7-9c97-4ed5-87e7-c4f6b3011111',
+                    numero: '0376145',
+                    sequenciaBolas: [7, 14, 21, 36, 48, 59],
+                  },
+                  {
+                    ordem: 3,
+                    matrizId: '9e71e73a-b72d-4a6f-81fe-cc5d8d911111',
+                    numero: '0476145',
+                    sequenciaBolas: [2, 10, 18, 29, 41, 53],
+                  },
+                ],
+              },
+            },
+          },
+        },
+        semComboConfigurado: {
+          summary: 'Nenhum combo configurado/disponível',
+          value: {
+            statusCode: 200,
+            message: 'Nenhum combo configurado para esta seleção',
+            data: {
+              edicaoId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+              edicaoNumero: '001',
+              status: 'ATIVA',
+              origemParticipacao: 'POS',
+              tipoCompra: 'COMBO',
+              quantidadeCartelas: 0,
+              valorUnitarioCartela: '10.00',
+              valorCombo: null,
+              preco: null,
+              passoEntreCartelas: '0',
+              rangeTotalInicio: '0',
+              rangeTotalFinal: '0',
+              setores: [],
+              cursorNumeroBaseAtual: null,
+              combos: [],
+              comboAtual: null,
+            },
+          },
+        },
+      },
+    },
+  })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
   @ApiResponse({ status: 404, description: 'Edição não encontrada.' })
   listarCombos(
@@ -366,6 +546,62 @@ reutiliza a configuração **DIGITAL** de ranges e preços.
     @Query() filtros: ListarCombosAdminDto,
   ) {
     return this.posService.listarCombos(edicaoId, filtros);
+  }
+
+  @Post('edicoes/:edicaoId/reservas')
+  @UseGuards(PosAuthGuard)
+  @ApiBearerAuth()
+  @ApiTags(POS_PREMIOS_TAG)
+  @ApiOperation({
+    summary:
+      '7. 🔒 Reservar cartelas/combos para pré-compra — Prêmios',
+    description: `
+Marca as cartelas escolhidas como **pré-compra** por 5 minutos para o operador
+do POS. Para combo, envie todos os números de \`comboAtual.bilhetes\` retornados
+em \`GET /pos/edicoes/{edicaoId}/combos\`.
+
+Depois da reserva, crie a venda com \`cartelasSelecionadas\` ou
+\`combosSelecionados\`. A API valida que a seleção ainda pertence ao operador e
+estende a reserva durante a cobrança PIX.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'edicaoId',
+    description: 'ID da edição ativa (obtido em GET /pos/edicoes)',
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  })
+  @ApiBody({ type: ReservarCartelasPosDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Cartelas reservadas para pré-compra.',
+    schema: {
+      example: {
+        statusCode: 201,
+        message: 'Cartelas reservadas para pré-compra POS',
+        data: {
+          edicaoId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          edicaoNumero: '001',
+          reservadas: 3,
+          cartelas: ['0276145', '0376145', '0476145'],
+          expiresIn: 300,
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Alguma cartela já foi vendida ou reservada por outro POS.',
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'Redis não configurado para controlar reservas POS.',
+  })
+  reservarCartelas(
+    @Param('edicaoId', ParseUUIDPipe) edicaoId: string,
+    @Body() dto: ReservarCartelasPosDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.posService.reservarCartelas(edicaoId, dto, user);
   }
 
   // ─── 3. PRÊMIOS — VENDA E PAGAMENTO ───────────────────────────────
@@ -376,7 +612,7 @@ reutiliza a configuração **DIGITAL** de ranges e preços.
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
-      '6. 🔒 Criar venda POS e gerar cobrança — Prêmios (VENDEDOR + DISTRIBUIDOR)',
+      '8. 🔒 Criar venda POS e gerar cobrança — Prêmios (VENDEDOR + DISTRIBUIDOR)',
     description: `
 Cria a venda com origem **POS**, status **PENDENTE** e gera a cobrança no gateway
 pela própria API, igual ao fluxo WhatsApp. O vendedor/distribuidor é definido
@@ -441,7 +677,7 @@ Guarde o \`id\` retornado: ele é usado para consultar status em
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
-      '7. 🔒 Consultar status do pagamento — Prêmios (VENDEDOR + DISTRIBUIDOR)',
+      '9. 🔒 Consultar status do pagamento — Prêmios (VENDEDOR + DISTRIBUIDOR)',
     description: `
 Consulta o status interno da venda e, quando houver \`gatewayId\`, consulta o
 status atual no gateway. A aprovação definitiva ocorre pelo webhook PagBank.
@@ -495,7 +731,7 @@ Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`, \`RECUSADO\` ou
   @ApiBearerAuth()
   @ApiTags(POS_SENA_TAG)
   @ApiOperation({
-    summary: '8. 🔒 Listar edições ativas — Sena (VENDEDOR + DISTRIBUIDOR)',
+    summary: '10. 🔒 Listar edições ativas — Sena (VENDEDOR + DISTRIBUIDOR)',
     description: 'Edições Sena ativas, com os combos disponíveis.',
   })
   @ApiResponse({
@@ -531,7 +767,7 @@ Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`, \`RECUSADO\` ou
   @ApiTags(POS_SENA_TAG)
   @ApiOperation({
     summary:
-      '9. 🔒 Criar venda POS e gerar cobrança — Sena (VENDEDOR + DISTRIBUIDOR)',
+      '11. 🔒 Criar venda POS e gerar cobrança — Sena (VENDEDOR + DISTRIBUIDOR)',
     description: `
 Cria a venda Sena com origem **POS**, status **PENDENTE** e cobrança no gateway
 pela própria API.
@@ -595,7 +831,7 @@ cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
   @ApiTags(POS_SENA_TAG)
   @ApiOperation({
     summary:
-      '10. 🔒 Consultar status do pagamento — Sena (VENDEDOR + DISTRIBUIDOR)',
+      '12. 🔒 Consultar status do pagamento — Sena (VENDEDOR + DISTRIBUIDOR)',
     description: `
 Consulta o status interno da venda Sena e, quando houver \`gatewayId\`, consulta
 o status atual no gateway. A aprovação definitiva ocorre pelo webhook PagBank.
