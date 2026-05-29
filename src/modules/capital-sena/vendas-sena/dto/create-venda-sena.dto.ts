@@ -44,18 +44,36 @@ export class CreateVendaSenaDto {
   @IsUUID('4')
   edicaoSenaId: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     type: [ItemCartelaSenaDto],
     description:
-      'Lista de cartelas a comprar. Use junto com cartelas individuais.',
+      'Lista explícita de cartelas (MANUAL=cliente digita os 6 números, SURPRESINHA=sistema gera). Omita para compra rápida — neste caso informe `quantidade` ou `comboSenaId` e o sistema gera todas as cartelas (surpresinha).',
   })
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ItemCartelaSenaDto)
   @ArrayMinSize(1)
-  cartelas: ItemCartelaSenaDto[];
+  cartelas?: ItemCartelaSenaDto[];
 
-  @ApiPropertyOptional({ example: 'uuid-do-combo' })
+  @ApiPropertyOptional({
+    example: 5,
+    minimum: 1,
+    maximum: 1000,
+    description:
+      'Compra rápida unitária: quantidade de cartelas a serem geradas automaticamente pelo sistema (todas SURPRESINHA, com 6 números + 7º aleatório). Ignorado quando `cartelas` é informado.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  quantidade?: number;
+
+  @ApiPropertyOptional({
+    example: 'uuid-do-combo',
+    description:
+      'ID do combo. Quando informado sem `cartelas`, o sistema gera automaticamente `combo.quantidade` cartelas surpresinha (compra rápida combo).',
+  })
   @IsOptional()
   @IsUUID('4')
   comboSenaId?: string;

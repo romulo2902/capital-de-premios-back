@@ -92,25 +92,33 @@ export class VendasSenaService {
       );
     }
 
-    // 2. Validar e normalizar cartelas
-    const cartelas = this.validarEGerarCartelas(dto.cartelas);
-
     const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
     dto.vendedorId = sellerOrigem.vendedorId ?? dto.vendedorId;
     dto.distribuidorId = sellerOrigem.distribuidorId ?? dto.distribuidorId;
 
-    // 3. Resolver combo
+    // 2. Resolver combo (define quantidade esperada quando há combo)
     let comboSenaId: string | null = null;
+    let quantidadeCombo: number | null = null;
     if (dto.comboSenaId) {
       const combo = edicao.combos.find((c) => c.id === dto.comboSenaId);
       if (!combo)
         throw new BadRequestException('Combo Sena não encontrado nesta edição');
-      if (cartelas.length !== combo.quantidade) {
-        throw new BadRequestException(
-          `O combo "${combo.nome}" requer exatamente ${combo.quantidade} cartela(s)`,
-        );
-      }
       comboSenaId = combo.id;
+      quantidadeCombo = combo.quantidade;
+    }
+
+    // 3. Resolver cartelas: explícitas (MANUAL/SURPRESINHA) OU compra rápida
+    const cartelas = this.resolverCartelasDaVenda(
+      dto.cartelas,
+      dto.quantidade,
+      quantidadeCombo,
+    );
+
+    if (quantidadeCombo !== null && cartelas.length !== quantidadeCombo) {
+      const combo = edicao.combos.find((c) => c.id === comboSenaId);
+      throw new BadRequestException(
+        `O combo "${combo?.nome ?? comboSenaId}" requer exatamente ${quantidadeCombo} cartela(s)`,
+      );
     }
 
     // 4. Buscar ou criar cliente
@@ -509,6 +517,30 @@ export class VendasSenaService {
 
   // ─── HELPERS ──────────────────────────────────────────
 
+  private static readonly MAX_TENTATIVAS_UNICA = 100;
+  private static readonly NUMEROS_POR_CARTELA = 6;
+  private static readonly NUMERO_MIN = 1;
+  private static readonly NUMERO_MAX = 60;
+
+  private resolverCartelasDaVenda(
+    cartelas: { numeros?: number[]; modoSelecao: ModoSelecaoSena }[] | undefined,
+    quantidade: number | undefined,
+    quantidadeCombo: number | null,
+  ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[] {
+    if (cartelas && cartelas.length > 0) {
+      return this.validarEGerarCartelas(cartelas);
+    }
+
+    const quantidadeRapida = quantidadeCombo ?? quantidade ?? 0;
+    if (quantidadeRapida <= 0) {
+      throw new BadRequestException(
+        'Informe `cartelas`, `quantidade` ou `comboSenaId` para a compra Sena',
+      );
+    }
+
+    return this.gerarCartelasCompraRapida(quantidadeRapida);
+  }
+
   private validarEGerarCartelas(
     itens: { numeros?: number[]; modoSelecao: ModoSelecaoSena }[],
   ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[] {
@@ -519,13 +551,16 @@ export class VendasSenaService {
           modoSelecao: item.modoSelecao,
         };
       }
-      if (!item.numeros || item.numeros.length !== 6) {
+      if (!item.numeros || item.numeros.length !== VendasSenaService.NUMEROS_POR_CARTELA) {
         throw new BadRequestException(
           'Cartela manual requer exatamente 6 números',
         );
       }
       this.validarNumerosCartela(item.numeros);
-      return { numeros: item.numeros, modoSelecao: item.modoSelecao };
+      return {
+        numeros: [...item.numeros].sort((a, b) => a - b),
+        modoSelecao: item.modoSelecao,
+      };
     });
   }
 
@@ -533,7 +568,12 @@ export class VendasSenaService {
     if (new Set(numeros).size !== numeros.length) {
       throw new BadRequestException('Números da cartela não podem se repetir');
     }
-    if (numeros.some((n) => n < 1 || n > 60)) {
+    if (
+      numeros.some(
+        (n) =>
+          n < VendasSenaService.NUMERO_MIN || n > VendasSenaService.NUMERO_MAX,
+      )
+    ) {
       throw new BadRequestException(
         'Números da cartela devem estar entre 1 e 60',
       );
@@ -542,17 +582,53 @@ export class VendasSenaService {
 
   private gerarNumerosSurpresinha(): number[] {
     const numeros = new Set<number>();
-    while (numeros.size < 6) {
-      numeros.add(Math.floor(Math.random() * 60) + 1);
+    while (numeros.size < VendasSenaService.NUMEROS_POR_CARTELA) {
+      numeros.add(
+        Math.floor(Math.random() * VendasSenaService.NUMERO_MAX) +
+          VendasSenaService.NUMERO_MIN,
+      );
     }
     return Array.from(numeros).sort((a, b) => a - b);
+  }
+
+  /**
+   * Compra rápida: gera N cartelas surpresinha tentando maximizar a diferença
+   * entre elas. Como C(60,6) = 50.063.860, colisões são raras na prática; mesmo
+   * assim, fazemos retry por assinatura única e, no pior caso, aceitamos a
+   * duplicidade (regra: cartelas podem ser iguais, mas o sistema deve evitar).
+   */
+  private gerarCartelasCompraRapida(
+    quantidade: number,
+  ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[] {
+    const assinaturas = new Set<string>();
+    const cartelas: { numeros: number[]; modoSelecao: ModoSelecaoSena }[] = [];
+
+    for (let i = 0; i < quantidade; i++) {
+      let numeros = this.gerarNumerosSurpresinha();
+      let assinatura = numeros.join(',');
+      let tentativas = 1;
+      while (
+        assinaturas.has(assinatura) &&
+        tentativas < VendasSenaService.MAX_TENTATIVAS_UNICA
+      ) {
+        numeros = this.gerarNumerosSurpresinha();
+        assinatura = numeros.join(',');
+        tentativas++;
+      }
+      assinaturas.add(assinatura);
+      cartelas.push({ numeros, modoSelecao: ModoSelecaoSena.SURPRESINHA });
+    }
+
+    return cartelas;
   }
 
   private gerarSetimoNumero(numerosEscolhidos: number[]): number {
     const set = new Set(numerosEscolhidos);
     let setimo: number;
     do {
-      setimo = Math.floor(Math.random() * 60) + 1;
+      setimo =
+        Math.floor(Math.random() * VendasSenaService.NUMERO_MAX) +
+        VendasSenaService.NUMERO_MIN;
     } while (set.has(setimo));
     return setimo;
   }

@@ -34,7 +34,10 @@ export class VendasSenaController {
 
   @Post()
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
-  @ApiOperation({ summary: 'Criar venda Sena (ADMIN=manual, outros=com gateway)' })
+  @ApiOperation({
+    summary:
+      'Criar venda Sena — aceita cartelas explícitas (MANUAL/SURPRESINHA) ou compra rápida (quantidade ou comboSenaId) (ADMIN=aprova direto, DISTRIBUIDOR/VENDEDOR=gateway)',
+  })
   create(@Body() dto: CreateVendaSenaDto, @CurrentUser() user: RequestUser) {
     if (user.perfil === 'VENDEDOR' && user.vendedorId) dto.vendedorId = user.vendedorId;
     else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId)

@@ -30,7 +30,8 @@ export class VendasSenaLojaController {
 
   @Post('comprar')
   @ApiOperation({
-    summary: 'Comprar cartela(s) Sena — gera PIX ou Cartão e aguarda confirmação',
+    summary:
+      'Comprar cartela(s) Sena — aceita cartelas MANUAL/SURPRESINHA explícitas ou compra rápida via `quantidade` (unitário) ou `comboSenaId` (combo). Gera PIX/Cartão e aguarda confirmação.',
   })
   comprar(@Body() dto: CreateVendaSenaDto) {
     return this.vendasSenaService.create(dto);
