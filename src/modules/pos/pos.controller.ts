@@ -381,7 +381,7 @@ montar a tela de escolha antes de navegar/reservar cartelas.
       '6. 🔒 Navegar cartelas/combos disponíveis — Prêmios',
     description: `
 Lista os combos/cotas disponíveis (1 por vez, navegação por cursor). A venda POS
-usa a configuração **POS** de ranges e preços e ignora cartelas já vendidas ou
+usa a configuração **DIGITAL** de ranges e preços e ignora cartelas já vendidas ou
 reservadas em pré-compra.
     `.trim(),
   })
@@ -393,8 +393,23 @@ reservadas em pré-compra.
   @ApiQuery({
     name: 'tipoCartela',
     required: false,
-    example: 'COMBO',
-    description: 'Tipo de cartela/seleção do combo. Opcional.',
+    enum: [
+      'UMA_CHANCE',
+      'DUAS_CHANCES',
+      'TRES_CHANCES',
+      'QUATRO_CHANCES',
+      'CINCO_CHANCES',
+      'SEIS_CHANCES',
+      'SETE_CHANCES',
+      'OITO_CHANCES',
+      'NOVE_CHANCES',
+      'DEZ_CHANCES',
+      'ONZE_CHANCES',
+      'DOZE_CHANCES',
+    ],
+    example: 'DUAS_CHANCES',
+    description:
+      'Tipo de cartela do combo. Corresponde à quantidade de cartelas: DUAS_CHANCES = 2 cartelas, TRES_CHANCES = 3, etc. Pode ser omitido e usar quantidadeCartelas no lugar.',
   })
   @ApiQuery({
     name: 'quantidadeCartelas',
