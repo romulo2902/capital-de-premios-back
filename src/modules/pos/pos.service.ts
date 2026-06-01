@@ -80,12 +80,12 @@ export class PosService {
         status: true,
         valorCartela: true,
         detalhes: {
-          where: { origemParticipacao: OrigemParticipacao.POS },
+          where: { origemParticipacao: OrigemParticipacao.DIGITAL },
           select: { tipoCartela: true, preco: true, indiceRange: true },
           orderBy: { indiceRange: 'asc' },
         },
         combos: {
-          where: { origemParticipacao: OrigemParticipacao.POS },
+          where: { origemParticipacao: OrigemParticipacao.DIGITAL },
           select: { tipoCartela: true, preco: true },
           orderBy: { tipoCartela: 'asc' },
         },
