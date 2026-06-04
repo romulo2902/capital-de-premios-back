@@ -602,6 +602,7 @@ describe('VendasService', () => {
       expect(txMock.venda.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
+            criadoPorId: 'admin-1',
             tipoPagamento: TipoPagamento.MANUAL,
             status: StatusVenda.APROVADO,
           }),

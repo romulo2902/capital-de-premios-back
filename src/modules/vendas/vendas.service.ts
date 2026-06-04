@@ -219,6 +219,7 @@ export class VendasService {
     }
 
     const tipoPagamentoResolvido = this.resolverTipoPagamento(dto, user);
+    const criadoPorId = this.resolverCriadoPorId(user);
 
     // 4. Calcular total
     const valorCartela = Number(
@@ -236,6 +237,7 @@ export class VendasService {
             clienteId: cliente.id,
             vendedorId: dto.vendedorId ?? null,
             distribuidorId: dto.distribuidorId ?? null,
+            criadoPorId,
             quantidade: quantidadeCartelasSolicitada,
             tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
             total: new Prisma.Decimal(total.toFixed(2)),
@@ -285,6 +287,7 @@ export class VendasService {
         clienteId: cliente.id,
         vendedorId: dto.vendedorId ?? null,
         distribuidorId: dto.distribuidorId ?? null,
+        criadoPorId,
         quantidade: quantidadeCartelasSolicitada,
         tipoCartela: configuracaoVenda.tipoCartelaSelecionada,
         total: new Prisma.Decimal(total.toFixed(2)),
@@ -1520,6 +1523,17 @@ export class VendasService {
     }
 
     return dto.tipoPagamento;
+  }
+
+  private resolverCriadoPorId(user?: RequestUser): string | null {
+    if (
+      user &&
+      ['ADMIN', 'DISTRIBUIDOR', 'VENDEDOR'].includes(user.perfil)
+    ) {
+      return user.id;
+    }
+
+    return null;
   }
 
   private normalizarTextoOpcional(value: string): string | null {

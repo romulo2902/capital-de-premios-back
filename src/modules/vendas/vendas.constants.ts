@@ -36,6 +36,14 @@ export const VENDA_INCLUDE = {
       comissaoPercent: true,
     },
   },
+  criadoPor: {
+    select: {
+      id: true,
+      email: true,
+      cpf: true,
+      perfil: true,
+    },
+  },
   comissao: {
     select: {
       id: true,

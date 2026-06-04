@@ -154,6 +154,7 @@ model Usuario {
   status             StatusUsuario @default(ATIVO)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
+  vendasCriadas      Venda[]       @relation("VendaCriadaPor")
 }
 
 model Distribuidor {
@@ -330,6 +331,7 @@ model Venda {
   clienteId            String
   vendedorId           String?
   distribuidorId       String?
+  criadoPorId          String?
   quantidade           Int
   tipoCartela          TipoCartela?
   total                Decimal
@@ -342,9 +344,12 @@ model Venda {
   edicao               Edicao                @relation(fields: [edicaoId], references: [id])
   cliente              Cliente               @relation(fields: [clienteId], references: [id])
   vendedor             Vendedor?             @relation(fields: [vendedorId], references: [id])
+  criadoPor            Usuario?              @relation("VendaCriadaPor", fields: [criadoPorId], references: [id])
   bilhetes             Bilhete[]
   comissao             Comissao?
   comissaoDistribuidor ComissaoDistribuidor?
+
+  @@index([criadoPorId])
 }
 
 model Bilhete {
