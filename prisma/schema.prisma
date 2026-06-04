@@ -144,6 +144,11 @@ enum FaixaPremiacao {
   SENA_BONUS
 }
 
+enum TipoBanner {
+  CDP
+  SENA
+}
+
 model Usuario {
   id                 String        @id @default(uuid())
   cpf                String?       @unique
@@ -618,4 +623,19 @@ model ConfiguracaoComissao {
   percentualDistribuidor   Decimal @default(0)
   percentualVendedor       Decimal @default(0)
   updatedAt                DateTime @updatedAt
+}
+
+model Banner {
+  id          String     @id @default(uuid())
+  tipo        TipoBanner
+  titulo      String?
+  descricao   String?
+  imagemUrl   String
+  linkUrl     String?
+  ordem       Int        @default(0)
+  ativo       Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([tipo, ativo, ordem])
 }

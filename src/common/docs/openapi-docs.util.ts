@@ -70,6 +70,8 @@ export function setupOpenApiDocs(
       '- Login admin: `POST /api/auth/login` (email + senha)',
       '- Refresh token: `POST /api/auth/refresh`',
       '- Redefinir senha migrada: `POST /api/auth/redefinir-senha-primeiro-acesso`',
+      '- Banners CDP/Sena: `POST /api/admin/banners`, `GET /api/admin/banners`, `PATCH /api/admin/banners/{id}`',
+      '- Imagens de banners devem ser enviadas em base64 no campo `imagemBase64`; a API envia para o S3 e retorna `imagemUrl`.',
       '- Demais endpoints administrativos em `/api/admin/*`',
       '',
       '**Fluxo de teste do sorteio**',
@@ -171,6 +173,7 @@ export function setupOpenApiDocs(
       '8. POST /api/admin/capital-sena/sorteio/:id/resultado — Inserir resultado Mega-Sena',
       '9. POST /api/admin/capital-sena/apuracao/:id         — Executar apuração automática',
       '10. GET /api/admin/capital-sena/apuracao/:id/ganhadores — Listar premiados',
+      '11. POST /api/admin/banners                          — Configurar banner SENA (`tipo=SENA`, imagem base64 para S3)',
       '```',
       '',
       '### Faixas de premiação',
@@ -219,6 +222,7 @@ export function setupOpenApiDocs(
       '',
       '- Login cliente: `POST /api/auth/loja` (CPF, sem senha)',
       '- Refresh token: `POST /api/auth/refresh`',
+      '- Banners públicos: `GET /api/loja/banners`, `GET /api/loja/banners/cdp`, `GET /api/loja/banners/sena`',
     ].join('\n'),
   );
 
