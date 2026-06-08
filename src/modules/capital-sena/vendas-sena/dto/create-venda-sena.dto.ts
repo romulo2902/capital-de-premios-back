@@ -17,6 +17,16 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ModoSelecaoSena, TipoPagamento } from '@prisma/client';
+import { IsCpfValido } from '../../../../common/validators/cpf.validator';
+
+const emptyStringToUndefined = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue ? trimmedValue : undefined;
+};
 
 export class ItemCartelaSenaDto {
   @ApiPropertyOptional({
@@ -85,6 +95,7 @@ export class CreateVendaSenaDto {
   // Dados do cliente
   @ApiProperty({ example: '12345678900' })
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
+  @IsCpfValido({ message: 'CPF inválido' })
   cpf: string;
 
   @ApiProperty({ example: 'Maria Silva' })
@@ -97,6 +108,7 @@ export class CreateVendaSenaDto {
   telefone: string;
 
   @ApiPropertyOptional({ example: 'maria@email.com' })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsEmail()
   email?: string;
@@ -106,6 +118,7 @@ export class CreateVendaSenaDto {
     description:
       'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade.',
   })
+  @Transform(emptyStringToUndefined)
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'dataNascimento deve estar no formato YYYY-MM-DD',
@@ -128,9 +141,7 @@ export class CreateVendaSenaDto {
     description:
       'ID do usuário vendedor/distribuidor recebido pela URL da loja (?seller_id=...).',
   })
-  @Transform(({ value }: { value: unknown }): unknown =>
-    typeof value === 'string' && value.trim() === '' ? undefined : value,
-  )
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsUUID('4')
   seller_id?: string;

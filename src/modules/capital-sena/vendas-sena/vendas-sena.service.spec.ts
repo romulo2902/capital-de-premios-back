@@ -21,6 +21,15 @@ type ServicePrivado = VendasSenaService & {
     quantidade: number | undefined,
     quantidadeCombo: number | null,
   ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[];
+  buscarOuCriarCliente(
+    cpf: string,
+    nome: string,
+    telefone: string,
+    dataNascimentoInput: string | undefined,
+    email?: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ): Promise<unknown>;
 };
 
 describe('VendasSenaService', () => {
@@ -216,6 +225,70 @@ describe('VendasSenaService', () => {
       expect(() =>
         service.resolverCartelasDaVenda([], undefined, null),
       ).toThrow(BadRequestException);
+    });
+  });
+
+  describe('buscarOuCriarCliente', () => {
+    const gerarDataNascimento = (idade: number): string => {
+      const data = new Date();
+      data.setUTCFullYear(data.getUTCFullYear() - idade);
+      return data.toISOString().slice(0, 10);
+    };
+
+    it('bloqueia cadastro Sena de cliente menor de 18 anos', async () => {
+      await expect(
+        service.buscarOuCriarCliente(
+          '12345678900',
+          'Cliente Menor',
+          '(11) 99999-9999',
+          gerarDataNascimento(17),
+        ),
+      ).rejects.toThrow('Produto proibido para menores de 18 anos');
+
+      expect(mockPrisma.cliente.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.cliente.create).not.toHaveBeenCalled();
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('bloqueia compra Sena quando cliente existente salvo é menor de idade', async () => {
+      const dataNascimentoMenor = new Date();
+      dataNascimentoMenor.setUTCFullYear(
+        dataNascimentoMenor.getUTCFullYear() - 17,
+      );
+      mockPrisma.cliente.findUnique.mockResolvedValue({
+        id: 'cliente-menor',
+        cpf: '12345678900',
+        nome: 'Cliente Menor',
+        telefone: '(11) 99999-9999',
+        dataNascimento: dataNascimentoMenor,
+      });
+
+      await expect(
+        service.buscarOuCriarCliente(
+          '12345678900',
+          'Cliente Menor',
+          '(11) 99999-9999',
+          '1990-01-01',
+        ),
+      ).rejects.toThrow('Produto proibido para menores de 18 anos');
+
+      expect(mockPrisma.cliente.create).not.toHaveBeenCalled();
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('exige data de nascimento para concluir compra Sena', async () => {
+      await expect(
+        service.buscarOuCriarCliente(
+          '12345678900',
+          'Cliente Sem Data',
+          '(11) 99999-9999',
+          undefined,
+        ),
+      ).rejects.toThrow('dataNascimento é obrigatória para concluir a compra');
+
+      expect(mockPrisma.cliente.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.cliente.create).not.toHaveBeenCalled();
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
     });
   });
 });

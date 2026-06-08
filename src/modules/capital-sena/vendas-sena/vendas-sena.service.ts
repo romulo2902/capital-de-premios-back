@@ -717,11 +717,17 @@ export class VendasSenaService {
     cpf: string,
     nome: string,
     telefone: string,
-    dataNascimentoInput: string,
+    dataNascimentoInput: string | undefined,
     email?: string,
     vendedorId?: string,
     distribuidorId?: string,
   ) {
+    if (!dataNascimentoInput) {
+      throw new BadRequestException(
+        'dataNascimento é obrigatória para concluir a compra',
+      );
+    }
+
     const dataNascimento = parseEValidarDataNascimento(dataNascimentoInput);
     const relacionamentoMaisRecente =
       await this.resolverRelacionamentoMaisRecenteDoCliente(
