@@ -18,6 +18,7 @@ import { LoginLojaDto } from './dto/login-loja.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RedefinirSenhaPrimeiroAcessoDto } from './dto/redefinir-senha-primeiro-acesso.dto';
 import { RedefinirSenhaAdminDto } from './dto/redefinir-senha-admin.dto';
+import { EmailService } from '../../common/email/email.service';
 
 type UsuarioRow = {
   id: string;
@@ -78,6 +79,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly emailService: EmailService,
   ) {}
 
   /**
@@ -180,6 +182,14 @@ export class AuthService {
           dataNascimento,
         },
       });
+
+      if (cliente.email) {
+        const frontendUrl = this.config.get<string>('FRONTEND_LOJA_URL', '');
+        void this.emailService.enviarBoasVindas(cliente.email, {
+          nomeCliente: cliente.nome,
+          linkAcessar: frontendUrl,
+        });
+      }
     } else if (!cliente.dataNascimento) {
       if (!dto.dataNascimento) {
         throw new UnauthorizedException(
@@ -326,6 +336,13 @@ export class AuthService {
     this.logger.log(
       `Senha redefinida pelo ADMIN: ${usuario.email} [${usuario.perfil}]`,
     );
+
+    if (usuario.email) {
+      void this.emailService.enviarRecuperacaoSenha(usuario.email, {
+        nomeUsuario: usuario.email,
+        novaSenha: dto.novaSenha,
+      });
+    }
 
     return { message: 'Senha redefinida com sucesso' };
   }

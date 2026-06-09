@@ -3663,6 +3663,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/nodemailer@npm:^8.0.0":
+  version: 8.0.0
+  resolution: "@types/nodemailer@npm:8.0.0"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/e5031df5d6557f4cdb9a0dbe1a96f3f54dc59c23d47477103fd42b5c9bc925ea1b4e51be560af5620b4d0c66fcfb015ce5ca8f914ed2f3a3086be6149d5932da
+  languageName: node
+  linkType: hard
+
 "@types/passport-jwt@npm:^4.0.1":
   version: 4.0.1
   resolution: "@types/passport-jwt@npm:4.0.1"
@@ -5059,6 +5068,7 @@ __metadata:
     "@types/jest": "npm:^30.0.0"
     "@types/multer": "npm:^2.1.0"
     "@types/node": "npm:^22.19.17"
+    "@types/nodemailer": "npm:^8.0.0"
     "@types/passport-jwt": "npm:^4.0.1"
     "@types/passport-local": "npm:^1.0.38"
     "@types/pdfkit": "npm:^0.17.5"
@@ -5079,6 +5089,7 @@ __metadata:
     helmet: "npm:^8.1.0"
     ioredis: "npm:^5.9.3"
     jest: "npm:^30.2.0"
+    nodemailer: "npm:^8.0.10"
     passport: "npm:^0.7.0"
     passport-jwt: "npm:^4.0.1"
     passport-local: "npm:^1.0.0"
@@ -8843,6 +8854,13 @@ __metadata:
   version: 2.0.36
   resolution: "node-releases@npm:2.0.36"
   checksum: 10c0/85d8d7f4b6248c8372831cbcc3829ce634cb2b01dbd85e55705cefc8a9eda4ce8121bd218b9629cf2579aef8a360541bad409f3925a35675c825b9471a49d7e9
+  languageName: node
+  linkType: hard
+
+"nodemailer@npm:^8.0.10":
+  version: 8.0.10
+  resolution: "nodemailer@npm:8.0.10"
+  checksum: 10c0/b96fd2ea7146de58141219061e094509fd0f19aac5ac86ac35d9ce9c479dbf6c12b143fa7e7050a1be539a3542eb59520c33aabf5a119c8d28fc7d151bde329f
   languageName: node
   linkType: hard
 

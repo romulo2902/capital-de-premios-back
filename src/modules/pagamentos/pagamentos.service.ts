@@ -17,6 +17,7 @@ import {
   buildPaginatedResponse,
   normalizePagination,
 } from '../../common/utils/pagination.util';
+import { EmailService } from '../../common/email/email.service';
 
 type EventoPagamentoPagBank = {
   identificador: string;
@@ -56,6 +57,7 @@ export class PagamentosService {
     @Inject(forwardRef(() => VendasSenaService))
     private readonly vendasSenaService: VendasSenaService,
     private readonly distributedLock: DistributedLockService,
+    private readonly emailService: EmailService,
   ) {}
 
   // ─── WEBHOOK PIX (PagBank) ────────────────────────────
@@ -151,6 +153,7 @@ export class PagamentosService {
             confirmadoEm: new Date().toISOString(),
           });
           await this.notificarConfirmacaoPagamentoN8n(venda.id, identificador);
+          void this.enviarEmailCompraAprovada(venda.id);
           resultados.push({ gatewayId: identificador, status: 'CONFIRMADA' });
           this.logger.log(
             `Pagamento confirmado via webhook PagBank para venda ${venda.id}`,
@@ -686,5 +689,32 @@ export class PagamentosService {
       message: 'Pagamento encontrado com sucesso',
       data: venda,
     };
+  }
+
+  private async enviarEmailCompraAprovada(vendaId: string): Promise<void> {
+    const venda = await this.prisma.venda.findUnique({
+      where: { id: vendaId },
+      select: {
+        total: true,
+        createdAt: true,
+        cliente: {
+          select: { nome: true, email: true },
+        },
+      },
+    });
+
+    if (!venda?.cliente?.email) return;
+
+    const frontendUrl = `${this.config.get<string>('FRONTEND_LOJA_URL', '')}/#/consultar-numeros`;
+    const valorFormatado = `R$ ${Number(venda.total).toFixed(2).replace('.', ',')}`;
+    const dataCompra = new Date(venda.createdAt).toLocaleDateString('pt-BR');
+
+    void this.emailService.enviarCompraAprovada(venda.cliente.email, {
+      nomeCliente: venda.cliente.nome,
+      valorFormatado,
+      dataCompra,
+      formaPagamento: 'PIX',
+      linkVerNumeros: frontendUrl,
+    });
   }
 }

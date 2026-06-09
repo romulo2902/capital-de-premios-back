@@ -33,6 +33,7 @@ import { CapitalSenaModule } from './modules/capital-sena/capital-sena.module';
 import { PosModule } from './modules/pos/pos.module';
 import { ConfiguracaoComissaoModule } from './modules/configuracao-comissao/configuracao-comissao.module';
 import { BannersModule } from './modules/banners/banners.module';
+import { EmailModule } from './common/email/email.module';
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const envFilePathByEnvironment: Record<string, string[]> = {
@@ -102,6 +103,7 @@ const envFilePathByEnvironment: Record<string, string[]> = {
     ConfiguracaoComissaoModule,
     BannersModule,
     PosModule,
+    EmailModule,
   ],
 })
 export class AppModule {}

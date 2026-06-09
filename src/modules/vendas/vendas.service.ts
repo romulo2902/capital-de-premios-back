@@ -24,6 +24,7 @@ import {
   buildPaginatedResponse,
   normalizePagination,
 } from '../../common/utils/pagination.util';
+import { ConfigService } from '@nestjs/config';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { CreateVendaDto } from './dto/create-venda.dto';
 import { UpdateVendaStatusDto } from './dto/update-venda-status.dto';
@@ -48,6 +49,7 @@ import {
   parseEValidarDataNascimento,
   validarMaioridade,
 } from '../../common/utils/data-nascimento.util';
+import { EmailService } from '../../common/email/email.service';
 
 type DetalheVenda = Pick<
   EdicaoDetalhe,
@@ -102,6 +104,8 @@ export class VendasService {
     private readonly prisma: PrismaService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
     private readonly configuracaoComissaoService: ConfiguracaoComissaoService,
+    private readonly emailService: EmailService,
+    private readonly config: ConfigService,
   ) {}
 
   // ─── CREATE ────────────────────────────────────────────
@@ -270,6 +274,7 @@ export class VendasService {
       this.logger.log(
         `Venda manual ${resultadoManual.vendaAtualizada.id} criada e aprovada — ${quantidadeCartelasCompra} cartela(s) — R$ ${total.toFixed(2)}`,
       );
+      void this.enviarEmailCompraAprovada(resultadoManual.vendaAtualizada.id);
       const vendaManualComDistribuidor = await this.anexarDistribuidorNaVenda(
         resultadoManual.vendaAtualizada,
       );
@@ -2515,6 +2520,34 @@ export class VendasService {
     if (!permitidas.includes(statusNovo)) {
       throw new BadRequestException(
         `Transição de status ${statusAtual} → ${statusNovo} não é permitida`,
+      );
+    }
+  }
+
+  private async enviarEmailCompraAprovada(vendaId: string): Promise<void> {
+    try {
+      const venda = await this.prisma.venda.findUnique({
+        where: { id: vendaId },
+        select: {
+          total: true,
+          createdAt: true,
+          cliente: { select: { nome: true, email: true } },
+        },
+      });
+      if (!venda?.cliente?.email) return;
+      const linkVerNumeros = `${this.config.get<string>('FRONTEND_LOJA_URL', '')}/#/consultar-numeros`;
+      const valorFormatado = `R$ ${Number(venda.total).toFixed(2).replace('.', ',')}`;
+      const dataCompra = new Date(venda.createdAt).toLocaleDateString('pt-BR');
+      await this.emailService.enviarCompraAprovada(venda.cliente.email, {
+        nomeCliente: venda.cliente.nome,
+        valorFormatado,
+        dataCompra,
+        formaPagamento: 'PIX',
+        linkVerNumeros,
+      });
+    } catch (err) {
+      this.logger.error(
+        `Falha ao enviar e-mail de compra aprovada para venda ${vendaId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
