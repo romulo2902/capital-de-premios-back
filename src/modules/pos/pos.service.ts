@@ -134,7 +134,7 @@ export class PosService {
     return this.vendasService.listarCombosDisponiveis({
       edicaoId,
       ...filtros,
-      origemParticipacao: OrigemParticipacao.POS,
+      origemParticipacao: OrigemParticipacao.DIGITAL,
       numerosReservados,
     });
   }
