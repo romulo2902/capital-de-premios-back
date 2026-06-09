@@ -139,14 +139,12 @@ export class CreateVendaDto {
   @IsString()
   telefone: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 'romulo.valadares@email.com',
-    description: 'E-mail do cliente (opcional). String vazia é ignorada.',
+    description: 'E-mail do cliente. Obrigatório para envio do comprovante de compra.',
   })
-  @Transform(emptyStringToUndefined)
-  @IsOptional()
   @IsEmail()
-  email?: string;
+  email!: string;
 
   @ApiProperty({
     example: '1985-04-11',

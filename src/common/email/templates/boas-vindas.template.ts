@@ -1,5 +1,3 @@
-import { baseEmailTemplate } from './base.template';
-
 export interface BoasVindasParams {
   nomeCliente: string;
   linkAcessar: string;
@@ -7,66 +5,162 @@ export interface BoasVindasParams {
 }
 
 export function boasVindasTemplate(p: BoasVindasParams): string {
-  const content = `
-    <div class="card-header">
-      <div class="icon-badge" style="background:#295280;box-shadow:0 0 0 8px rgba(41,82,128,0.25),0 0 0 16px rgba(41,82,128,0.1);">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-          <circle cx="12" cy="7" r="4"/>
-        </svg>
-      </div>
-      <div class="header-title">Bem-vindo(a)!</div>
-      <div class="header-subtitle">Sua conta foi criada com sucesso</div>
-    </div>
+  const year = new Date().getFullYear();
 
-    <div class="divider-strip"></div>
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Bem-vindo(a)!</title>
+</head>
+<body style="margin:0;padding:0;background-color:#1a2f47;font-family:Arial,Helvetica,sans-serif;">
 
-    <div class="card-body">
-      <p class="greeting">
-        Ol&#225;, <strong>${p.nomeCliente}</strong>! Ficamos muito felizes em ter voc&#234; na Capital de Pr&#234;mios. Sua conta j&#225; est&#225; ativa e pronta para usar.
-      </p>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#1a2f47;">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
 
-      <div class="data-grid">
-        <div class="data-grid-title">Pr&#243;ximos passos</div>
+      <!-- Logo -->
+      ${p.logoUrl ? `<table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 24px;"><tr><td align="center"><img src="${p.logoUrl}" alt="Capital de Pr&ecirc;mios" width="200" style="display:block;max-width:200px;height:auto;" /></td></tr></table>` : ''}
 
-        <div class="data-row">
-          <div class="data-label"><div class="icon">1&#65039;&#8419;</div> Acesse a plataforma</div>
-          <div class="data-value" style="color:#436F3A;">Feito!</div>
-        </div>
+      <!-- Card -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:540px;margin:0 auto;background-color:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 32px 64px rgba(0,0,0,0.4);">
 
-        <div class="data-row">
-          <div class="data-label"><div class="icon">2&#65039;&#8419;</div> Escolha uma edi&#231;&#227;o</div>
-          <div class="data-value" style="color:#64748B;">Pendente</div>
-        </div>
+        <!-- Header -->
+        <tr>
+          <td style="background-color:#1e4470;background:linear-gradient(135deg,#1a3a5c 0%,#295280 50%,#2d5c8f 100%);padding:36px 32px 28px;border-radius:20px 20px 0 0;">
 
-        <div class="data-row">
-          <div class="data-label"><div class="icon">3&#65039;&#8419;</div> Compre seus n&#250;meros</div>
-          <div class="data-value" style="color:#64748B;">Pendente</div>
-        </div>
+            <!-- Person badge -->
+            <table cellpadding="0" cellspacing="0" border="0" style="margin-bottom:18px;">
+              <tr>
+                <td align="center" valign="middle"
+                    style="width:64px;height:64px;background-color:#295280;border:3px solid rgba(255,255,255,0.3);border-radius:50%;text-align:center;vertical-align:middle;font-size:28px;color:#ffffff;line-height:58px;padding:0;">
+                  &#128100;
+                </td>
+              </tr>
+            </table>
 
-        <div class="data-row">
-          <div class="data-label"><div class="icon">4&#65039;&#8419;</div> Torce e ganha!</div>
-          <div class="data-value" style="color:#64748B;">Em breve</div>
-        </div>
-      </div>
+            <div style="font-size:30px;font-weight:900;color:#ffffff;line-height:1.1;letter-spacing:-0.5px;margin-bottom:8px;">
+              Bem-vindo(a)!
+            </div>
+            <div style="font-size:14px;color:#a8c4e0;font-weight:500;">
+              Sua conta foi criada com sucesso
+            </div>
 
-      <div class="cta-section">
-        <p class="cta-label">Acesse agora e participe dos sorteios</p>
-        <a href="${p.linkAcessar}" class="cta-btn">Acessar Plataforma &#127919;</a>
-      </div>
+          </td>
+        </tr>
 
-      <div class="info-box info">
-        <span class="emoji">&#128276;</span>
-        <div class="info-text">Fique de olho nos pr&#243;ximos sorteios e n&#227;o perca a chance de ganhar premi&#234;s incr&#237;veis!</div>
-      </div>
-    </div>
+        <!-- Divider strip -->
+        <tr>
+          <td height="6" style="background-color:#436F3A;background:linear-gradient(90deg,#295280,#436F3A,#295280);font-size:1px;line-height:1px;">&nbsp;</td>
+        </tr>
 
-    <div class="card-footer">
-      <p class="footer-text">
-        &copy; ${new Date().getFullYear()} Capital de Pr&#234;mios &mdash; Todos os direitos reservados.
-      </p>
-    </div>
-  `;
+        <!-- Body -->
+        <tr>
+          <td style="padding:28px 32px 32px;background-color:#ffffff;">
 
-  return baseEmailTemplate(content, p.logoUrl);
+            <!-- Greeting -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+              <tr>
+                <td style="border-left:3px solid #295280;padding:4px 0 4px 14px;font-size:15px;color:#374151;line-height:1.6;">
+                  Ol&aacute;, <strong style="color:#111827;">${p.nomeCliente}</strong>! Ficamos muito felizes em ter voc&ecirc; na Capital de Pr&ecirc;mios. Sua conta j&aacute; est&aacute; ativa e pronta para usar.
+                </td>
+              </tr>
+            </table>
+
+            <!-- Steps grid -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="background-color:#F8FAFC;border:1px solid #E2E8F0;border-radius:14px;margin-bottom:24px;">
+
+              <tr>
+                <td colspan="2" style="padding:16px 20px 10px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#94A3B8;">
+                  PR&Oacute;XIMOS PASSOS
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:11px 20px;border-top:1px solid #E2E8F0;font-size:13px;color:#64748B;font-weight:500;white-space:nowrap;">
+                  1&#65039;&#8419;&nbsp;&nbsp;Acesse a plataforma
+                </td>
+                <td align="right" style="padding:11px 20px;border-top:1px solid #E2E8F0;font-size:13px;font-weight:700;color:#436F3A;">
+                  Feito!
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:11px 20px;border-top:1px solid #E2E8F0;font-size:13px;color:#64748B;font-weight:500;white-space:nowrap;">
+                  2&#65039;&#8419;&nbsp;&nbsp;Escolha uma edi&ccedil;&atilde;o
+                </td>
+                <td align="right" style="padding:11px 20px;border-top:1px solid #E2E8F0;font-size:13px;font-weight:700;color:#94A3B8;">
+                  Pendente
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:11px 20px;border-top:1px solid #E2E8F0;font-size:13px;color:#64748B;font-weight:500;white-space:nowrap;">
+                  3&#65039;&#8419;&nbsp;&nbsp;Compre seus n&uacute;meros
+                </td>
+                <td align="right" style="padding:11px 20px;border-top:1px solid #E2E8F0;font-size:13px;font-weight:700;color:#94A3B8;">
+                  Pendente
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:11px 20px 18px;border-top:1px solid #E2E8F0;font-size:13px;color:#64748B;font-weight:500;white-space:nowrap;">
+                  4&#65039;&#8419;&nbsp;&nbsp;Torce e ganha!
+                </td>
+                <td align="right" style="padding:11px 20px 18px;border-top:1px solid #E2E8F0;font-size:13px;font-weight:700;color:#94A3B8;">
+                  Em breve
+                </td>
+              </tr>
+
+            </table>
+
+            <!-- CTA -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+              <tr>
+                <td align="center" style="padding-bottom:14px;font-size:13px;color:#64748B;font-weight:500;">
+                  Acesse agora e participe dos sorteios
+                </td>
+              </tr>
+              <tr>
+                <td align="center">
+                  <a href="${p.linkAcessar}"
+                     style="display:inline-block;background-color:#295280;color:#ffffff;font-size:15px;font-weight:800;text-decoration:none;padding:16px 44px;border-radius:12px;letter-spacing:0.05em;text-transform:uppercase;">
+                    ACESSAR PLATAFORMA &nbsp;&#127919;
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Info box -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="background-color:#EFF6FF;border:1px solid #93C5FD;border-radius:12px;">
+              <tr>
+                <td width="48" valign="top" style="padding:14px 0 14px 16px;font-size:22px;vertical-align:top;line-height:1;">
+                  &#128276;
+                </td>
+                <td style="padding:14px 16px 14px 6px;font-size:13px;font-weight:600;color:#1E40AF;line-height:1.5;vertical-align:middle;">
+                  Fique de olho nos pr&oacute;ximos sorteios e n&atilde;o perca a chance de ganhar pr&ecirc;mios incr&iacute;veis!
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background-color:#F8FAFC;border-top:1px solid #E2E8F0;padding:18px 32px;text-align:center;font-size:12px;color:#94A3B8;line-height:1.7;border-radius:0 0 20px 20px;">
+            &copy; ${year} Capital de Pr&ecirc;mios &mdash; Todos os direitos reservados.
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>`;
 }

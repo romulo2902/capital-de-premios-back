@@ -107,11 +107,12 @@ export class CreateVendaSenaDto {
   @IsString()
   telefone: string;
 
-  @ApiPropertyOptional({ example: 'maria@email.com' })
-  @Transform(emptyStringToUndefined)
-  @IsOptional()
+  @ApiProperty({
+    example: 'maria@email.com',
+    description: 'E-mail do cliente. Obrigatório para envio do comprovante de compra.',
+  })
   @IsEmail()
-  email?: string;
+  email!: string;
 
   @ApiProperty({
     example: '1985-04-11',
