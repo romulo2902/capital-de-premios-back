@@ -8,7 +8,6 @@ import {
 import { StatusEdicaoSena } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { S3UploadService } from '../../../common/s3/s3-upload.service';
-import type { UploadFile } from '../../../common/types/upload-file.type';
 import { InserirResultadoSenaDto } from './dto/inserir-resultado-sena.dto';
 
 @Injectable()
@@ -25,7 +24,6 @@ export class SorteioSenaService {
   async inserirResultado(
     edicaoSenaId: string,
     dto: InserirResultadoSenaDto,
-    imagemFile?: UploadFile,
   ) {
     const edicao = await this.prisma.edicaoSena.findUnique({
       where: { id: edicaoSenaId },
@@ -43,16 +41,21 @@ export class SorteioSenaService {
 
     this.validarNumerosSorteados(dto.numerosSorteados);
 
-    // Upload da imagem do resultado para S3
-    let imagemResultadoUrl: string | null = null;
-    if (imagemFile?.buffer && imagemFile.buffer.length > 0) {
+    let imagemResultadoUrl = dto.imagemResultadoUrl?.trim() || null;
+    if (dto.imagemBase64?.trim()) {
       try {
-        imagemResultadoUrl = await this.s3UploadService.uploadImage(
-          imagemFile,
+        imagemResultadoUrl = await this.s3UploadService.uploadImageFromBase64(
+          dto.imagemBase64,
           `capital-sena/resultados/${edicaoSenaId}`,
         );
-        this.logger.log(`Imagem do resultado enviada ao S3: ${imagemResultadoUrl}`);
+        this.logger.log(
+          `Imagem do resultado enviada ao S3: ${imagemResultadoUrl}`,
+        );
       } catch (err) {
+        if (err instanceof BadRequestException) {
+          throw err;
+        }
+
         this.logger.warn(
           `Falha ao enviar imagem do resultado ao S3: ${err instanceof Error ? err.message : String(err)}`,
         );

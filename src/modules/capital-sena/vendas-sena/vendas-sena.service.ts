@@ -876,7 +876,8 @@ export class VendasSenaService {
   private buildWhere(filtros: FiltroVendasSenaDto): Record<string, unknown> {
     const where: Record<string, unknown> = {};
     if (filtros.edicaoSenaId) where.edicaoSenaId = filtros.edicaoSenaId;
-    if (filtros.clienteId) where.clienteId = filtros.clienteId;
+    const clienteId = filtros.clienteId ?? filtros.clientId;
+    if (clienteId) where.clienteId = clienteId;
     if (filtros.vendedorId) where.vendedorId = filtros.vendedorId;
     if (filtros.distribuidorId) where.distribuidorId = filtros.distribuidorId;
     if (filtros.status) where.status = filtros.status;

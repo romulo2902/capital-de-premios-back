@@ -13,7 +13,10 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../../auth/strategies/jwt.strategy';
 import { CartelasSenaService } from './cartelas-sena.service';
-import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+import {
+  FiltroCartelasSenaAdminDto,
+  FiltroCartelasSenaClienteDto,
+} from './dto/filtro-cartelas-sena.dto';
 
 @ApiTags('Sena / Loja')
 @ApiBearerAuth()
@@ -30,17 +33,16 @@ export class CartelasSenaController {
   @ApiQuery({ name: 'edicaoSenaId', required: false })
   minhasCartelas(
     @CurrentUser() user: RequestUser,
-    @Query() pagination: PaginationQueryDto,
-    @Query('edicaoSenaId') edicaoSenaId?: string,
+    @Query() filtros: FiltroCartelasSenaClienteDto,
   ) {
     if (!user.cpf) {
       return { message: 'Nenhuma cartela encontrada', data: [] };
     }
     return this.cartelasSenaService.listarCartelasCliente(
       user.cpf,
-      pagination.page,
-      pagination.limit,
-      edicaoSenaId,
+      filtros.page,
+      filtros.limit,
+      filtros.edicaoSenaId,
     );
   }
 
@@ -69,13 +71,12 @@ export class CartelasSenaAdminController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   listarPorEdicao(
-    @Query('edicaoSenaId') edicaoSenaId: string,
-    @Query() pagination: PaginationQueryDto,
+    @Query() filtros: FiltroCartelasSenaAdminDto,
   ) {
     return this.cartelasSenaService.listarPorEdicao(
-      edicaoSenaId,
-      pagination.page,
-      pagination.limit,
+      filtros.edicaoSenaId,
+      filtros.page,
+      filtros.limit,
     );
   }
 

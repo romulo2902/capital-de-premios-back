@@ -6,25 +6,19 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
-  UploadedFile,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
-  ApiConsumes,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { SorteioSenaService } from './sorteio-sena.service';
 import { InserirResultadoSenaDto } from './dto/inserir-resultado-sena.dto';
-import { InserirResultadoSenaUploadDto } from './dto/inserir-resultado-sena-upload.dto';
-import type { UploadFile } from '../../../common/types/upload-file.type';
 
 @ApiTags('Sena Admin / Sorteio')
 @ApiBearerAuth()
@@ -38,35 +32,30 @@ export class SorteioSenaController {
   @ApiOperation({
     summary: 'Inserir resultado da Mega-Sena (ADMIN)',
     description:
-      'Envie via `multipart/form-data`. O campo `numerosSorteados` deve ser enviado como JSON string array. ' +
-      'O campo `imagem` é opcional e deve ser a foto do resultado oficial.',
+      'Envie via JSON. O campo `numerosSorteados` deve ser um array de 6 números. ' +
+      'A imagem opcional do resultado oficial deve ser enviada em base64 no campo `imagemBase64`.',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ type: InserirResultadoSenaUploadDto })
-  @UseInterceptors(FileInterceptor('imagem'))
+  @ApiBody({ type: InserirResultadoSenaDto })
   inserirResultado(
     @Param('edicaoSenaId', ParseUUIDPipe) edicaoSenaId: string,
     @Body() dto: InserirResultadoSenaDto,
-    @UploadedFile() imagem?: UploadFile,
   ) {
-    return this.sorteioSenaService.inserirResultado(edicaoSenaId, dto, imagem);
+    return this.sorteioSenaService.inserirResultado(edicaoSenaId, dto);
   }
 
   @Put(':edicaoSenaId/resultado')
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Corrigir/atualizar resultado da Mega-Sena (ADMIN)',
-    description: 'Mesmo comportamento do POST. Mantém a imagem anterior se nenhuma nova for enviada.',
+    description:
+      'Mesmo comportamento do POST. Para trocar a imagem, envie uma nova `imagemBase64`; caso contrário, a imagem atual é mantida.',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ type: InserirResultadoSenaUploadDto })
-  @UseInterceptors(FileInterceptor('imagem'))
+  @ApiBody({ type: InserirResultadoSenaDto })
   atualizarResultado(
     @Param('edicaoSenaId', ParseUUIDPipe) edicaoSenaId: string,
     @Body() dto: InserirResultadoSenaDto,
-    @UploadedFile() imagem?: UploadFile,
   ) {
-    return this.sorteioSenaService.inserirResultado(edicaoSenaId, dto, imagem);
+    return this.sorteioSenaService.inserirResultado(edicaoSenaId, dto);
   }
 
   @Get(':edicaoSenaId')
