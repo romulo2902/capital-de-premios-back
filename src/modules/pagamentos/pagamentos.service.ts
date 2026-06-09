@@ -193,6 +193,7 @@ export class PagamentosService {
           pagbankPayment: eventoPagamento.payload,
           confirmadoEm: new Date().toISOString(),
         });
+        void this.enviarEmailCompraAprovadaSena(vendaSena.id);
         resultados.push({ gatewayId: identificador, status: 'CONFIRMADA_SENA' });
         this.logger.log(
           `Pagamento confirmado via webhook PagBank para venda Sena ${vendaSena.id}`,
@@ -697,15 +698,13 @@ export class PagamentosService {
       select: {
         total: true,
         createdAt: true,
-        cliente: {
-          select: { nome: true, email: true },
-        },
+        cliente: { select: { nome: true, email: true } },
       },
     });
 
     if (!venda?.cliente?.email) return;
 
-    const frontendUrl = `${this.config.get<string>('FRONTEND_LOJA_URL', '')}/#/consultar-numeros`;
+    const linkVerNumeros = `${this.config.get<string>('FRONTEND_LOJA_URL', '')}/#/consultar-numeros`;
     const valorFormatado = `R$ ${Number(venda.total).toFixed(2).replace('.', ',')}`;
     const dataCompra = new Date(venda.createdAt).toLocaleDateString('pt-BR');
 
@@ -714,7 +713,38 @@ export class PagamentosService {
       valorFormatado,
       dataCompra,
       formaPagamento: 'PIX',
-      linkVerNumeros: frontendUrl,
+      linkVerNumeros,
     });
+  }
+
+  private async enviarEmailCompraAprovadaSena(vendaSenaId: string): Promise<void> {
+    try {
+      const venda = await this.prisma.vendaSena.findUnique({
+        where: { id: vendaSenaId },
+        select: {
+          total: true,
+          createdAt: true,
+          cliente: { select: { nome: true, email: true } },
+        },
+      });
+
+      if (!venda?.cliente?.email) return;
+
+      const linkVerNumeros = `${this.config.get<string>('FRONTEND_LOJA_SENA_URL', '')}/#/consultar-numeros`;
+      const valorFormatado = `R$ ${Number(venda.total).toFixed(2).replace('.', ',')}`;
+      const dataCompra = new Date(venda.createdAt).toLocaleDateString('pt-BR');
+
+      void this.emailService.enviarCompraAprovada(venda.cliente.email, {
+        nomeCliente: venda.cliente.nome,
+        valorFormatado,
+        dataCompra,
+        formaPagamento: 'PIX',
+        linkVerNumeros,
+      });
+    } catch (err) {
+      this.logger.error(
+        `Falha ao enviar e-mail Sena para venda ${vendaSenaId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }
