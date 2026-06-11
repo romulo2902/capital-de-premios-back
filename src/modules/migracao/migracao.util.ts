@@ -24,6 +24,10 @@ export function identificarTipoPlanilha(
   if (headersNormalizados.has('nomevendedor')) return 'CLIENTES';
   if (headersNormalizados.has('totalvendedores')) return 'DISTRIBUIDORES';
 
+  const temCpf =
+    headersNormalizados.has('cpf') || headersNormalizados.has('documento');
+  if (headersNormalizados.has('nome') && temCpf) return 'CLIENTES';
+
   return 'DESCONHECIDA';
 }
 

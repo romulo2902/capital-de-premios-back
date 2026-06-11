@@ -56,6 +56,39 @@ const DISTRIBUIDOR_ALIASES: AliasesColunas = {
   email: ['email', 'e-mail', 'mail'],
 };
 
+const CLIENTE_ALIASES: AliasesColunas = {
+  nome: ['nome', 'nome completo', 'cliente'],
+  cpf: ['cpf', 'documento'],
+  telefone: ['telefone', 'celular', 'fone'],
+  dataNascimento: [
+    'data nascimento',
+    'data de nascimento',
+    'nascimento',
+    'dt nascimento',
+  ],
+  cep: ['cep'],
+  endereco: ['endereco', 'endereço', 'logradouro', 'rua'],
+  numero: ['numero', 'número', 'nº', 'num', 'numero endereco', 'número endereço'],
+  cidade: ['cidade', 'municipio', 'município'],
+  bairro: ['bairro'],
+  estado: ['estado', 'uf'],
+  email: ['email', 'e-mail', 'mail'],
+};
+
+const CLIENTE_FALLBACK_COLUNAS: readonly ColunaFallback[] = [
+  ['nome', 1],
+  ['cpf', 2],
+  ['telefone', 3],
+  ['dataNascimento', 4],
+  ['cep', 5],
+  ['endereco', 6],
+  ['numero', 7],
+  ['cidade', 8],
+  ['bairro', 9],
+  ['estado', 10],
+  ['email', 11],
+];
+
 const DISTRIBUIDOR_FALLBACK_COLUNAS: readonly ColunaFallback[] = [
   ['codigo', 1],
   ['nome', 3],
@@ -671,16 +704,12 @@ export class MigracaoService {
     worksheet: ExcelJS.Worksheet,
     relatorio: RelatorioImportacao,
   ): Promise<void> {
-    const [vendedores, distribuidores] = await Promise.all([
-      this.prisma.vendedor.findMany({
-        select: { id: true, nome: true },
-      }),
-      this.prisma.distribuidor.findMany({
-        select: { id: true, nome: true },
-      }),
-    ]);
-    const vendedorPorNome = this.mapearPorNome(vendedores);
-    const distribuidorPorNome = this.mapearPorNome(distribuidores);
+    const colunas = this.resolverColunas(
+      worksheet,
+      CLIENTE_ALIASES,
+      CLIENTE_FALLBACK_COLUNAS,
+      ['nome', 'cpf'],
+    );
 
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
       const row = worksheet.getRow(rowNumber);
@@ -688,10 +717,8 @@ export class MigracaoService {
 
       relatorio.clientes.lidos += 1;
 
-      const nome = this.texto(row.getCell(3).value);
-      const cpf = this.cpf(row.getCell(4).value);
-      const email = this.email(row.getCell(13).value);
-      const nomeVendedorOuDistribuidor = this.texto(row.getCell(14).value);
+      const nome = this.texto(this.valorColuna(row, colunas, 'nome'));
+      const cpf = this.cpf(this.valorColuna(row, colunas, 'cpf'));
 
       if (!nome || !cpf) {
         relatorio.clientes.ignorados += 1;
@@ -701,19 +728,7 @@ export class MigracaoService {
         continue;
       }
 
-      const vendedorId = nomeVendedorOuDistribuidor
-        ? this.buscarRelacionamentoPorNome(
-            nomeVendedorOuDistribuidor,
-            vendedorPorNome,
-          )
-        : null;
-      const distribuidorId =
-        !vendedorId && nomeVendedorOuDistribuidor
-          ? this.buscarRelacionamentoPorNome(
-              nomeVendedorOuDistribuidor,
-              distribuidorPorNome,
-            )
-          : null;
+      const email = this.email(this.valorColuna(row, colunas, 'email'));
 
       try {
         const existente = await this.prisma.cliente.findUnique({
@@ -724,42 +739,45 @@ export class MigracaoService {
           await this.prisma.cliente.update({
             where: { id: existente.id },
             data: {
-              vendedorId,
-              distribuidorId,
               nome,
-              telefone: this.texto(row.getCell(5).value) ?? undefined,
-              dataNascimento: this.data(row.getCell(6).value),
-              cep: this.texto(row.getCell(7).value),
-              endereco: this.texto(row.getCell(8).value),
-              numero: this.texto(row.getCell(9).value),
-              cidade: this.texto(row.getCell(10).value),
-              bairro: this.texto(row.getCell(11).value),
-              estado: this.texto(row.getCell(12).value),
-              email,
+              telefone:
+                this.texto(this.valorColuna(row, colunas, 'telefone')) ??
+                undefined,
+              dataNascimento: this.data(
+                this.valorColuna(row, colunas, 'dataNascimento'),
+              ),
+              cep: this.texto(this.valorColuna(row, colunas, 'cep')),
+              endereco: this.texto(this.valorColuna(row, colunas, 'endereco')),
+              numero: this.texto(this.valorColuna(row, colunas, 'numero')),
+              cidade: this.texto(this.valorColuna(row, colunas, 'cidade')),
+              bairro: this.texto(this.valorColuna(row, colunas, 'bairro')),
+              estado: this.texto(this.valorColuna(row, colunas, 'estado')),
+              ...(email ? { email } : {}),
             },
           });
           relatorio.clientes.atualizados += 1;
           continue;
         }
 
-        const dataCriacaoCliente: Prisma.ClienteUncheckedCreateInput = {
-          cpf,
-          nome,
-          telefone: this.texto(row.getCell(5).value) ?? '',
-          dataNascimento: this.data(row.getCell(6).value),
-          cep: this.texto(row.getCell(7).value),
-          endereco: this.texto(row.getCell(8).value),
-          numero: this.texto(row.getCell(9).value),
-          cidade: this.texto(row.getCell(10).value),
-          bairro: this.texto(row.getCell(11).value),
-          estado: this.texto(row.getCell(12).value),
-          email,
-          vendedorId,
-          distribuidorId,
-          status: StatusUsuario.ATIVO,
-        };
-
-        await this.prisma.cliente.create({ data: dataCriacaoCliente });
+        await this.prisma.cliente.create({
+          data: {
+            cpf,
+            nome,
+            telefone:
+              this.texto(this.valorColuna(row, colunas, 'telefone')) ?? '',
+            dataNascimento: this.data(
+              this.valorColuna(row, colunas, 'dataNascimento'),
+            ),
+            cep: this.texto(this.valorColuna(row, colunas, 'cep')),
+            endereco: this.texto(this.valorColuna(row, colunas, 'endereco')),
+            numero: this.texto(this.valorColuna(row, colunas, 'numero')),
+            cidade: this.texto(this.valorColuna(row, colunas, 'cidade')),
+            bairro: this.texto(this.valorColuna(row, colunas, 'bairro')),
+            estado: this.texto(this.valorColuna(row, colunas, 'estado')),
+            email,
+            status: StatusUsuario.ATIVO,
+          },
+        });
 
         relatorio.clientes.criados += 1;
       } catch (error) {
