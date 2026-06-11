@@ -52,17 +52,17 @@ export class InserirResultadoSenaDto {
     description: '6 números sorteados pela Mega-Sena (1–60, sem repetição)',
   })
   @Transform(parseNumerosSorteados)
-  @IsArray()
-  @IsInt({ each: true })
-  @Min(1, { each: true })
-  @Max(60, { each: true })
-  @ArrayMinSize(6)
-  @ArrayMaxSize(6)
+  @IsArray({ message: 'numerosSorteados deve ser um array' })
+  @IsInt({ each: true, message: 'cada número deve ser um inteiro' })
+  @Min(1, { each: true, message: 'números devem ser entre 1 e 60' })
+  @Max(60, { each: true, message: 'números devem ser entre 1 e 60' })
+  @ArrayMinSize(6, { message: 'numerosSorteados deve conter exatamente 6 números' })
+  @ArrayMaxSize(6, { message: 'numerosSorteados deve conter exatamente 6 números' })
   numerosSorteados: number[];
 
   @ApiPropertyOptional({ example: 'https://cdn.example.com/resultado.png' })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'imagemResultadoUrl deve ser um texto' })
   imagemResultadoUrl?: string;
 
   @ApiPropertyOptional({
@@ -71,6 +71,6 @@ export class InserirResultadoSenaDto {
       'Imagem do resultado em base64. Use o padrão data:image/png;base64,... ou data:image/jpeg;base64,...',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'imagemBase64 deve ser um texto' })
   imagemBase64?: string;
 }

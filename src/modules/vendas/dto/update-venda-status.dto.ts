@@ -8,7 +8,7 @@ export class UpdateVendaStatusDto {
     example: StatusVenda.CANCELADO,
     description: 'Novo status da venda.',
   })
-  @IsEnum(StatusVenda)
+  @IsEnum(StatusVenda, { message: 'status inválido' })
   status: StatusVenda;
 
   @ApiPropertyOptional({
@@ -16,6 +16,6 @@ export class UpdateVendaStatusDto {
     description: 'Motivo da alteração de status (obrigatório para cancelamento).',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'motivo deve ser um texto' })
   motivo?: string;
 }

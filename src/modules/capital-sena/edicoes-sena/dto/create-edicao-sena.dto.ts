@@ -39,17 +39,17 @@ const parseCombosInput = ({ value }: TransformFnParams): unknown =>
 
 export class CreatePremioSenaDto {
   @ApiProperty({ enum: FaixaPremiacao, example: FaixaPremiacao.QUADRA })
-  @IsEnum(FaixaPremiacao)
+  @IsEnum(FaixaPremiacao, { message: 'faixa deve ser QUADRA, QUINA, SENA ou SENA_BONUS' })
   faixa: FaixaPremiacao;
 
   @ApiProperty({ example: 'Quadra — R$ 500,00' })
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: 'descricao deve ser um texto' })
+  @IsNotEmpty({ message: 'descricao não pode ser vazio' })
   descricao: string;
 
   @ApiProperty({ example: 500.0 })
-  @IsNumber()
-  @Min(0)
+  @IsNumber({}, { message: 'valor deve ser um número' })
+  @Min(0, { message: 'valor deve ser maior ou igual a 0' })
   valor: number;
 
   @ApiPropertyOptional({
@@ -58,27 +58,27 @@ export class CreatePremioSenaDto {
       'Conteúdo da imagem do prêmio em base64 (incluindo o prefixo data:image). Se enviado, a API faz upload para o S3.',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'imagemBase64 deve ser um texto' })
   imagemBase64?: string;
 }
 
 export class CreateComboSenaDto {
   @ApiProperty({ example: 'Pacote 3 cartelas' })
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: 'nome deve ser um texto' })
+  @IsNotEmpty({ message: 'nome não pode ser vazio' })
   nome: string;
 
   @ApiProperty({ example: 3 })
-  @IsNumber()
-  @Min(2)
+  @IsNumber({}, { message: 'quantidade deve ser um número' })
+  @Min(2, { message: 'quantidade deve ser no mínimo 2' })
   quantidade: number;
 
   @ApiProperty({
     example: 12.0,
     description: 'Preço total do combo (com desconto)',
   })
-  @IsNumber()
-  @Min(0)
+  @IsNumber({}, { message: 'preco deve ser um número' })
+  @Min(0, { message: 'preco deve ser maior ou igual a 0' })
   preco: number;
 }
 
@@ -87,32 +87,32 @@ export class CreateEdicaoSenaDto {
     example: '001',
     description: 'Número identificador da edição',
   })
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: 'numero deve ser um texto' })
+  @IsNotEmpty({ message: 'numero não pode ser vazio' })
   numero: string;
 
   @ApiPropertyOptional({ example: 'Edição Especial Maio 2026' })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'descricao deve ser um texto' })
   descricao?: string;
 
   @ApiProperty({
     example: '2026-06-07T20:00',
     description: 'Data e hora do sorteio oficial da Mega-Sena (ISO 8601)',
   })
-  @IsDateString()
+  @IsDateString({}, { message: 'dataSorteioMegaSena deve ser uma data válida no formato ISO 8601' })
   dataSorteioMegaSena: string;
 
   @ApiProperty({
     example: '2026-06-07T19:00',
     description: 'Data e hora de encerramento das compras',
   })
-  @IsDateString()
+  @IsDateString({}, { message: 'dataEncerramento deve ser uma data válida no formato ISO 8601' })
   dataEncerramento: string;
 
   @ApiProperty({ example: 5.0, description: 'Valor unitário da cartela (R$)' })
-  @IsNumber()
-  @Min(0.01)
+  @IsNumber({}, { message: 'valorCartela deve ser um número' })
+  @Min(0.01, { message: 'valorCartela deve ser no mínimo 0.01' })
   valorCartela: number;
 
   @ApiPropertyOptional({
@@ -121,7 +121,7 @@ export class CreateEdicaoSenaDto {
       'Conteúdo da imagem principal da edição em base64 (incluindo o prefixo data:image).',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'imagemBase64 deve ser um texto' })
   imagemBase64?: string;
 
   @ApiProperty({
@@ -129,7 +129,7 @@ export class CreateEdicaoSenaDto {
     description: 'Faixas de premiação (QUADRA, QUINA, SENA, SENA_BONUS)',
   })
   @Transform(parsePremiosInput)
-  @IsArray()
+  @IsArray({ message: 'premios deve ser um array' })
   @ValidateNested({ each: true })
   @Type(() => CreatePremioSenaDto)
   premios: CreatePremioSenaDto[];
@@ -137,7 +137,7 @@ export class CreateEdicaoSenaDto {
   @ApiPropertyOptional({ type: [CreateComboSenaDto] })
   @Transform(parseCombosInput)
   @IsOptional()
-  @IsArray()
+  @IsArray({ message: 'combos deve ser um array' })
   @ValidateNested({ each: true })
   @Type(() => CreateComboSenaDto)
   combos?: CreateComboSenaDto[];

@@ -41,13 +41,13 @@ export class CreateEdicaoComboDto {
       combo.quantidadeCartelas !== undefined || combo.tipoCartela === undefined,
   )
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'quantidadeCartelas deve ser um número inteiro' })
+  @Min(1, { message: 'quantidadeCartelas deve ser no mínimo 1' })
   quantidadeCartelas?: number;
 
   @ApiHideProperty()
   @IsOptional()
-  @IsEnum(TipoCartela)
+  @IsEnum(TipoCartela, { message: 'tipoCartela inválido' })
   tipoCartela?: TipoCartela;
 
   @ApiProperty({

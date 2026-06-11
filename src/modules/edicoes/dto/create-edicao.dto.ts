@@ -50,7 +50,7 @@ export class CreateEdicaoDto {
     description:
       'Identificador de exibição da edição/sorteio (texto livre, não é o ID interno da entidade).',
   })
-  @IsString()
+  @IsString({ message: 'numero deve ser um texto' })
   numero: string;
 
   @ApiProperty({
@@ -58,7 +58,7 @@ export class CreateEdicaoDto {
     description:
       'Data e hora do sorteio com precisão de minuto. Aceita `YYYY-MM-DDTHH:mm`, `DD/MM/YYYY HH:mm` ou ISO com fuso e segundos zerados.',
   })
-  @IsString()
+  @IsString({ message: 'dataSorteio deve ser um texto' })
   dataSorteio: string;
 
   @ApiPropertyOptional({
@@ -67,7 +67,7 @@ export class CreateEdicaoDto {
       'Data e hora de encerramento das vendas com precisão de minuto. Se omitida, assume a mesma data/hora do sorteio.',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'dataEncerramento deve ser um texto' })
   dataEncerramento?: string;
 
   @ApiPropertyOptional({
@@ -76,7 +76,7 @@ export class CreateEdicaoDto {
       'Valor unitário da cartela única. Quando omitido, a API só deriva a partir de um combo de 1 cartela.',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'valorCartela deve ser um texto' })
   @Matches(VALOR_CARTELA_REGEX, {
     message: 'valorCartela deve ser um valor monetário válido',
   })
@@ -89,7 +89,7 @@ export class CreateEdicaoDto {
       'Destino da edição/cartela: site, loja física ou ambos. Se omitido, a API infere a partir dos detalhes enviados.',
   })
   @IsOptional()
-  @IsEnum(DestinoEdicao)
+  @IsEnum(DestinoEdicao, { message: 'destino deve ser SITE, FISICO ou AMBOS' })
   destino?: DestinoEdicao;
 
   @ApiProperty({
@@ -97,7 +97,7 @@ export class CreateEdicaoDto {
     description: 'Indica se a cartela possui raspadinha.',
   })
   @Transform(parseBooleanInput)
-  @IsBoolean()
+  @IsBoolean({ message: 'raspadinha deve ser verdadeiro ou falso' })
   raspadinha: boolean;
 
   @ApiPropertyOptional({
@@ -105,7 +105,7 @@ export class CreateEdicaoDto {
     description: 'Frase exibida na cartela/sorteio no painel administrativo.',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'frase deve ser um texto' })
   frase?: string;
 
   @ApiPropertyOptional({
@@ -115,7 +115,7 @@ export class CreateEdicaoDto {
   })
   @IsOptional()
   @Transform(parseBooleanInput)
-  @IsBoolean()
+  @IsBoolean({ message: 'manutencaoAtiva deve ser verdadeiro ou falso' })
   manutencaoAtiva?: boolean;
 
   @ApiPropertyOptional({
@@ -124,7 +124,7 @@ export class CreateEdicaoDto {
       'Mensagem exibida ao frontend e retornada nos endpoints de venda bloqueados pela manutenção da edição.',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'manutencaoMensagem deve ser um texto' })
   manutencaoMensagem?: string;
 
   @ApiProperty({
@@ -161,8 +161,8 @@ export class CreateEdicaoDto {
   })
   @Transform(parseDetalhesInput)
   @Type(() => CreateEdicaoDetalheDto)
-  @IsArray()
-  @ArrayMinSize(1)
+  @IsArray({ message: 'detalhes deve ser um array' })
+  @ArrayMinSize(1, { message: 'detalhes deve ter no mínimo 1 item' })
   @ValidateNested({ each: true })
   detalhes: CreateEdicaoDetalheDto[];
 
@@ -185,8 +185,8 @@ export class CreateEdicaoDto {
   })
   @Transform(parseCombosInput)
   @Type(() => CreateEdicaoComboDto)
-  @IsArray()
-  @ArrayMinSize(1)
+  @IsArray({ message: 'combos deve ser um array' })
+  @ArrayMinSize(1, { message: 'combos deve ter no mínimo 1 item' })
   @ValidateNested({ each: true })
   combos: CreateEdicaoComboDto[];
 
@@ -197,8 +197,8 @@ export class CreateEdicaoDto {
   })
   @Transform(parsePremiosInput)
   @Type(() => CreateEdicaoPremioDto)
-  @IsArray()
-  @ArrayMinSize(1)
+  @IsArray({ message: 'premios deve ser um array' })
+  @ArrayMinSize(1, { message: 'premios deve ter no mínimo 1 item' })
   @ValidateNested({ each: true })
   premios: CreateEdicaoPremioDto[];
 
@@ -208,6 +208,6 @@ export class CreateEdicaoDto {
       'Conteúdo da imagem principal da edição em base64 (incluindo o prefixo data:image).',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'imagemBase64 deve ser um texto' })
   imagemBase64?: string;
 }

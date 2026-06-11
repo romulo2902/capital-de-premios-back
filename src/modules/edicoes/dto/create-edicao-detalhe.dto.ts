@@ -33,8 +33,8 @@ export class CreateEdicaoDetalheDto {
   })
   @Type(() => Number)
   @IsOptional()
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'indiceRange deve ser um número inteiro' })
+  @Min(1, { message: 'indiceRange deve ser no mínimo 1' })
   indiceRange?: number;
 
   @ApiProperty({

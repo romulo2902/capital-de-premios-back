@@ -24,14 +24,14 @@ export class FiltroCartelasSenaClienteDto extends PaginationQueryDto {
   @ApiPropertyOptional({ example: 'uuid-da-edicao-sena' })
   @Transform(emptyQueryToUndefined)
   @IsOptional()
-  @IsUUID('4')
+  @IsUUID('4', { message: 'edicaoSenaId deve ser um UUID válido' })
   edicaoSenaId?: string;
 }
 
 export class FiltroCartelasSenaAdminDto extends PaginationQueryDto {
   @ApiProperty({ example: 'uuid-da-edicao-sena' })
   @Transform(emptyQueryToUndefined)
-  @IsNotEmpty()
-  @IsUUID('4')
+  @IsNotEmpty({ message: 'edicaoSenaId não pode ser vazio' })
+  @IsUUID('4', { message: 'edicaoSenaId deve ser um UUID válido' })
   edicaoSenaId: string;
 }
