@@ -8,6 +8,7 @@ import {
 import { Perfil, Prisma, StatusUsuario, StatusVenda } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { QrcodeService } from '../qrcode/qrcode.service';
 import { CreateVendedorDto } from './dto/create-vendedor.dto';
 import { UpdateVendedorDto } from './dto/update-vendedor.dto';
 import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
@@ -22,7 +23,10 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
 export class VendedoresService {
   private readonly logger = new Logger(VendedoresService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly qrcodeService: QrcodeService,
+  ) {}
 
   private normalizarCpf(cpf: string): string {
     return cpf.replace(/\D/g, '');
@@ -173,6 +177,15 @@ export class VendedoresService {
       this.logger.log(
         `Vendedor criado: ${vendedor.nome} (${vendedor.codigo}) → dist ${distribuidor.codigo}`,
       );
+      return vendedor;
+    }).then(async (vendedor) => {
+      try {
+        await this.qrcodeService.gerarQrcodeVendedor(vendedor.id);
+      } catch (err) {
+        this.logger.warn(
+          `Falha ao gerar QR Code para vendedor ${vendedor.id}: ${(err as Error).message}`,
+        );
+      }
       return vendedor;
     });
   }

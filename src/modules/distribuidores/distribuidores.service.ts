@@ -7,6 +7,7 @@ import {
 import { Perfil, Prisma, StatusUsuario, StatusVenda } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { QrcodeService } from '../qrcode/qrcode.service';
 import { CreateDistribuidorDto } from './dto/create-distribuidor.dto';
 import { UpdateDistribuidorDto } from './dto/update-distribuidor.dto';
 import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
@@ -20,7 +21,10 @@ import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.u
 export class DistribuidoresService {
   private readonly logger = new Logger(DistribuidoresService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly qrcodeService: QrcodeService,
+  ) {}
 
   private normalizarCpf(cpf: string): string {
     return cpf.replace(/\D/g, '');
@@ -128,6 +132,15 @@ export class DistribuidoresService {
       this.logger.log(
         `Distribuidor criado: ${distribuidor.nome} (${distribuidor.codigo})`,
       );
+      return distribuidor;
+    }).then(async (distribuidor) => {
+      try {
+        await this.qrcodeService.gerarQrcodeDistribuidor(distribuidor.id);
+      } catch (err) {
+        this.logger.warn(
+          `Falha ao gerar QR Code para distribuidor ${distribuidor.id}: ${(err as Error).message}`,
+        );
+      }
       return distribuidor;
     });
   }
