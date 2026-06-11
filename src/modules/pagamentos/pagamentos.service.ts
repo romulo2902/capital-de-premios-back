@@ -734,7 +734,7 @@ export class PagamentosService {
       const valorFormatado = `R$ ${Number(venda.total).toFixed(2).replace('.', ',')}`;
       const dataCompra = new Date(venda.createdAt).toLocaleDateString('pt-BR');
 
-      void this.emailService.enviarCompraAprovada(venda.cliente.email, {
+      void this.emailService.enviarCompraAprovadaSena(venda.cliente.email, {
         nomeCliente: venda.cliente.nome,
         valorFormatado,
         dataCompra,

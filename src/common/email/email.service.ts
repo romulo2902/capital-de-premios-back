@@ -6,6 +6,10 @@ import {
   type CompraAprovadaParams,
 } from './templates/compra-aprovada.template';
 import {
+  compraAprovadaSenaTemplate,
+  type CompraAprovadaSenaParams,
+} from './templates/compra-aprovada-sena.template';
+import {
   boasVindasTemplate,
   type BoasVindasParams,
 } from './templates/boas-vindas.template';
@@ -20,6 +24,7 @@ export class EmailService {
   private readonly transporter: nodemailer.Transporter;
   private readonly fromAddress: string;
   private readonly logoUrl: string;
+  private readonly logoSenaUrl: string;
 
   constructor(private readonly config: ConfigService) {
     this.fromAddress = this.config.get<string>(
@@ -30,6 +35,11 @@ export class EmailService {
     this.logoUrl = this.config.get<string>(
       'EMAIL_LOGO_URL',
       'https://s3-capital-premios.s3.amazonaws.com/logo/logo-email.png',
+    );
+
+    this.logoSenaUrl = this.config.get<string>(
+      'EMAIL_LOGO_SENA_URL',
+      'https://s3-capital-premios.s3.us-east-1.amazonaws.com/logo_sena_OF.png',
     );
 
     this.transporter = nodemailer.createTransport({
@@ -51,6 +61,18 @@ export class EmailService {
     await this.enviar({
       para,
       assunto: `Seus números estão confirmados! Boa sorte 🍀`,
+      html,
+    });
+  }
+
+  async enviarCompraAprovadaSena(
+    para: string,
+    params: Omit<CompraAprovadaSenaParams, 'logoUrl'>,
+  ): Promise<void> {
+    const html = compraAprovadaSenaTemplate({ ...params, logoUrl: this.logoSenaUrl });
+    await this.enviar({
+      para,
+      assunto: `Seus números estão confirmados! Boa sorte na Sena 🍀`,
       html,
     });
   }
