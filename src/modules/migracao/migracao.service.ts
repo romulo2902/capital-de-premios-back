@@ -711,6 +711,24 @@ export class MigracaoService {
       ['nome', 'cpf'],
     );
 
+    interface LinhaCliente {
+      rowNumber: number;
+      cpf: string;
+      nome: string;
+      telefone: string;
+      dataNascimento: Date | undefined;
+      cep: string | null;
+      endereco: string | null;
+      numero: string | null;
+      cidade: string | null;
+      bairro: string | null;
+      estado: string | null;
+      email: string | null;
+    }
+
+    const linhas: LinhaCliente[] = [];
+    const cpfsVistos = new Set<string>();
+
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
       const row = worksheet.getRow(rowNumber);
       if (!row.hasValues) continue;
@@ -728,62 +746,60 @@ export class MigracaoService {
         continue;
       }
 
-      const email = this.email(this.valorColuna(row, colunas, 'email'));
-
-      try {
-        const existente = await this.prisma.cliente.findUnique({
-          where: { cpf },
-        });
-
-        if (existente) {
-          await this.prisma.cliente.update({
-            where: { id: existente.id },
-            data: {
-              nome,
-              telefone:
-                this.texto(this.valorColuna(row, colunas, 'telefone')) ??
-                undefined,
-              dataNascimento: this.data(
-                this.valorColuna(row, colunas, 'dataNascimento'),
-              ),
-              cep: this.texto(this.valorColuna(row, colunas, 'cep')),
-              endereco: this.texto(this.valorColuna(row, colunas, 'endereco')),
-              numero: this.texto(this.valorColuna(row, colunas, 'numero')),
-              cidade: this.texto(this.valorColuna(row, colunas, 'cidade')),
-              bairro: this.texto(this.valorColuna(row, colunas, 'bairro')),
-              estado: this.texto(this.valorColuna(row, colunas, 'estado')),
-              ...(email ? { email } : {}),
-            },
-          });
-          relatorio.clientes.atualizados += 1;
-          continue;
-        }
-
-        await this.prisma.cliente.create({
-          data: {
-            cpf,
-            nome,
-            telefone:
-              this.texto(this.valorColuna(row, colunas, 'telefone')) ?? '',
-            dataNascimento: this.data(
-              this.valorColuna(row, colunas, 'dataNascimento'),
-            ),
-            cep: this.texto(this.valorColuna(row, colunas, 'cep')),
-            endereco: this.texto(this.valorColuna(row, colunas, 'endereco')),
-            numero: this.texto(this.valorColuna(row, colunas, 'numero')),
-            cidade: this.texto(this.valorColuna(row, colunas, 'cidade')),
-            bairro: this.texto(this.valorColuna(row, colunas, 'bairro')),
-            estado: this.texto(this.valorColuna(row, colunas, 'estado')),
-            email,
-            status: StatusUsuario.ATIVO,
-          },
-        });
-
-        relatorio.clientes.criados += 1;
-      } catch (error) {
-        relatorio.clientes.erros += 1;
+      if (cpfsVistos.has(cpf)) {
+        relatorio.clientes.ignorados += 1;
         relatorio.erros.push(
-          `[${worksheet.name} linha ${rowNumber}] Falha ao importar cliente CPF ${cpf}: ${(error as Error).message}`,
+          `[${worksheet.name} linha ${rowNumber}] Cliente ignorado: CPF duplicado no arquivo (${cpf})`,
+        );
+        continue;
+      }
+      cpfsVistos.add(cpf);
+
+      linhas.push({
+        rowNumber,
+        cpf,
+        nome,
+        telefone: this.texto(this.valorColuna(row, colunas, 'telefone')) ?? '',
+        dataNascimento: this.data(this.valorColuna(row, colunas, 'dataNascimento')),
+        cep: this.texto(this.valorColuna(row, colunas, 'cep')),
+        endereco: this.texto(this.valorColuna(row, colunas, 'endereco')),
+        numero: this.texto(this.valorColuna(row, colunas, 'numero')),
+        cidade: this.texto(this.valorColuna(row, colunas, 'cidade')),
+        bairro: this.texto(this.valorColuna(row, colunas, 'bairro')),
+        estado: this.texto(this.valorColuna(row, colunas, 'estado')),
+        email: this.email(this.valorColuna(row, colunas, 'email')),
+      });
+    }
+
+    if (!linhas.length) return;
+
+    const paraCriar: Prisma.ClienteUncheckedCreateInput[] = linhas.map((l) => ({
+      cpf: l.cpf,
+      nome: l.nome,
+      telefone: l.telefone,
+      dataNascimento: l.dataNascimento,
+      cep: l.cep,
+      endereco: l.endereco,
+      numero: l.numero,
+      cidade: l.cidade,
+      bairro: l.bairro,
+      estado: l.estado,
+      email: l.email,
+      status: StatusUsuario.ATIVO,
+    }));
+
+    for (const lote of this.quebrarEmLotes(paraCriar, 500)) {
+      try {
+        const { count } = await this.prisma.cliente.createMany({
+          data: lote,
+          skipDuplicates: true,
+        });
+        relatorio.clientes.criados += count;
+        relatorio.clientes.ignorados += lote.length - count;
+      } catch (error) {
+        relatorio.clientes.erros += lote.length;
+        relatorio.erros.push(
+          `Falha em lote ao criar clientes: ${(error as Error).message}`,
         );
       }
     }
