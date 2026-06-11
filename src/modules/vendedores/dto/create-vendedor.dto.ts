@@ -136,8 +136,9 @@ export class CreateVendedorDto {
   comissaoPercent?: number;
 
   @ApiPropertyOptional({
-    example: 'Vend@123',
-    description: 'Senha de acesso à loja. Se omitida, usa "Vend@123" como padrão.',
+    example: '045143',
+    description:
+      'Senha de acesso à loja. Se omitida, usa os 6 primeiros dígitos do CPF normalizado.',
     minLength: 6,
   })
   @IsOptional()

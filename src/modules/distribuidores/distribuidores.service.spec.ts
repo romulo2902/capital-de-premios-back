@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import * as bcrypt from 'bcrypt';
 import { DistribuidoresService } from './distribuidores.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConflictException } from '@nestjs/common';
@@ -90,6 +91,11 @@ describe('DistribuidoresService', () => {
         }),
       }),
     );
+    const usuarioCreatePayload = mockPrisma.usuario.create.mock.calls[0][0] as {
+      data: { senhaHash: string };
+    };
+    expect(await bcrypt.compare('033638', usuarioCreatePayload.data.senhaHash))
+      .toBe(true);
   });
 
   it('create should reject cpf already present in usuario table', async () => {

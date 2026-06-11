@@ -32,6 +32,10 @@ export class VendedoresService {
     return email.trim().toLowerCase();
   }
 
+  private gerarSenhaPadraoPorCpf(cpf: string): string {
+    return cpf.slice(0, 6);
+  }
+
   private buildHierarchyWhere(user?: RequestUser): Prisma.VendedorWhereInput {
     if (!user || user.perfil === 'ADMIN') {
       return {};
@@ -125,7 +129,7 @@ export class VendedoresService {
 
     const senhaHash = dto.senha
       ? await bcrypt.hash(dto.senha, 10)
-      : await bcrypt.hash('Vend@123', 10);
+      : await bcrypt.hash(this.gerarSenhaPadraoPorCpf(cpf), 10);
 
     return this.prisma.$transaction(async (tx) => {
       const usuario = await tx.usuario.create({

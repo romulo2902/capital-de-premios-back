@@ -121,8 +121,9 @@ export class CreateDistribuidorDto {
   comissaoPercent?: number;
 
   @ApiPropertyOptional({
-    example: 'Senha@123',
-    description: 'Senha de acesso ao painel admin. Se omitida, usa "Dist@123" como padrão.',
+    example: '045143',
+    description:
+      'Senha de acesso ao painel admin. Se omitida, usa os 6 primeiros dígitos do CPF normalizado.',
     minLength: 6,
   })
   @IsOptional()

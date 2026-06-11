@@ -30,6 +30,10 @@ export class DistribuidoresService {
     return email.trim().toLowerCase();
   }
 
+  private gerarSenhaPadraoPorCpf(cpf: string): string {
+    return cpf.slice(0, 6);
+  }
+
   private async validarCpfDisponivel(
     cpf: string,
     distribuidorId?: string,
@@ -82,7 +86,7 @@ export class DistribuidoresService {
 
     const senhaHash = dto.senha
       ? await bcrypt.hash(dto.senha, 10)
-      : await bcrypt.hash('Dist@123', 10);
+      : await bcrypt.hash(this.gerarSenhaPadraoPorCpf(cpf), 10);
 
     return this.prisma.$transaction(async (tx) => {
       const usuario = await tx.usuario.create({

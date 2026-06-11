@@ -3,6 +3,8 @@ import { Perfil } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { ContagemImportacao, TipoPlanilha } from './migracao.types';
 
+export type AliasesColunas = Record<string, readonly string[]>;
+
 export function identificarTipoPlanilha(
   worksheet: ExcelJS.Worksheet,
 ): TipoPlanilha {
@@ -37,6 +39,41 @@ export function mapearPorNome(
     mapa.set(chave, atual);
   }
   return mapa;
+}
+
+export function mapearColunasPorCabecalho(
+  worksheet: ExcelJS.Worksheet,
+  aliases: AliasesColunas,
+): Map<string, number> {
+  const campoPorAlias = new Map<string, string>();
+  for (const [campo, nomes] of Object.entries(aliases)) {
+    for (const nome of nomes) {
+      campoPorAlias.set(normalizar(nome), campo);
+    }
+  }
+
+  const colunas = new Map<string, number>();
+  const header = worksheet.getRow(1);
+  for (let col = 1; col <= header.cellCount; col += 1) {
+    const valor = texto(header.getCell(col).value);
+    if (!valor) continue;
+
+    const campo = campoPorAlias.get(normalizar(valor));
+    if (campo && !colunas.has(campo)) {
+      colunas.set(campo, col);
+    }
+  }
+
+  return colunas;
+}
+
+export function valorColuna(
+  row: ExcelJS.Row,
+  colunas: Map<string, number>,
+  campo: string,
+): ExcelJS.CellValue {
+  const coluna = colunas.get(campo);
+  return coluna ? row.getCell(coluna).value : null;
 }
 
 export function buscarRelacionamentoPorNome(
@@ -102,8 +139,31 @@ export function cpf(value: ExcelJS.CellValue): string | null {
 export function data(value: ExcelJS.CellValue): Date | undefined {
   if (!value) return undefined;
   if (value instanceof Date) return value;
+  if (typeof value === 'number') {
+    const excelEpoch = Date.UTC(1899, 11, 30);
+    return new Date(excelEpoch + value * 24 * 60 * 60 * 1000);
+  }
+
   const txt = texto(value);
   if (!txt) return undefined;
+
+  const dataBrasileira = txt.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (dataBrasileira) {
+    const dia = Number(dataBrasileira[1]);
+    const mes = Number(dataBrasileira[2]);
+    const anoTexto = dataBrasileira[3];
+    const ano =
+      anoTexto.length === 2 ? Number(`19${anoTexto}`) : Number(anoTexto);
+
+    const parsed = new Date(Date.UTC(ano, mes - 1, dia));
+    const dataValida =
+      parsed.getUTCFullYear() === ano &&
+      parsed.getUTCMonth() === mes - 1 &&
+      parsed.getUTCDate() === dia;
+
+    return dataValida ? parsed : undefined;
+  }
+
   const parsed = new Date(txt);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }

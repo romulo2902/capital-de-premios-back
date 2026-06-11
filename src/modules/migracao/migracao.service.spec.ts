@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
+import * as ExcelJS from 'exceljs';
 import { Perfil, StatusUsuario } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MigracaoService } from './migracao.service';
@@ -15,7 +16,27 @@ describe('MigracaoService', () => {
     },
   };
 
-  const mockPrisma = {};
+  const txImportacao = {
+    usuario: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+    },
+    distribuidor: {
+      create: jest.fn(),
+    },
+  };
+
+  const mockPrisma = {
+    distribuidor: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    usuario: {
+      update: jest.fn(),
+    },
+    $transaction: jest.fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -200,5 +221,83 @@ describe('MigracaoService', () => {
     ).rejects.toThrow(
       'Conflito de identidade para CPF 12345678901 e email vend@test.com: registros de usuário distintos',
     );
+  });
+
+  it('deve importar distribuidores pelo cabeçalho da planilha atual', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Distribuidor');
+    worksheet.addRow([
+      'Nome',
+      'CPF',
+      'Telefone',
+      'Data Nascimento',
+      'Cep',
+      'Endereço',
+      'Cidade',
+      'Bairro',
+      'Estado',
+      'E-mail',
+    ]);
+    worksheet.addRow([
+      'Milton Moyses Filho',
+      '04514396192',
+      '(64) 99923-7379',
+      '14/9/1992',
+      '75372-723',
+      'Rua AR-18',
+      'Goianira',
+      'Residencial Araguaia',
+      'GO',
+      'milton@example.com',
+    ]);
+
+    mockPrisma.distribuidor.findUnique.mockResolvedValue(null);
+    txImportacao.usuario.findUnique.mockResolvedValue(null);
+    txImportacao.usuario.create.mockResolvedValue({ id: 'usuario-1' });
+    txImportacao.distribuidor.create.mockResolvedValue({ id: 'dist-1' });
+    mockPrisma.$transaction.mockImplementation(
+      async (
+        callback: (transaction: typeof txImportacao) => Promise<unknown>,
+      ) => callback(txImportacao),
+    );
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const result = await service.importarXlsx({
+      buffer,
+      originalname: 'distribuidores.xlsx',
+      mimetype:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      size: buffer.byteLength,
+    });
+
+    expect(result.data.distribuidores).toMatchObject({
+      lidos: 1,
+      criados: 1,
+      atualizados: 0,
+      ignorados: 0,
+      erros: 0,
+    });
+    expect(result.data.erros).toEqual([]);
+    const usuarioCreatePayload =
+      txImportacao.usuario.create.mock.calls[0][0] as {
+        data: { senhaHash: string };
+      };
+    expect(await bcrypt.compare('045143', usuarioCreatePayload.data.senhaHash))
+      .toBe(true);
+    expect(txImportacao.distribuidor.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        usuarioId: 'usuario-1',
+        nome: 'Milton Moyses Filho',
+        cpf: '04514396192',
+        telefone: '(64) 99923-7379',
+        cep: '75372-723',
+        endereco: 'Rua AR-18',
+        cidade: 'Goianira',
+        bairro: 'Residencial Araguaia',
+        estado: 'GO',
+        email: 'milton@example.com',
+        status: StatusUsuario.ATIVO,
+      }),
+    });
   });
 });

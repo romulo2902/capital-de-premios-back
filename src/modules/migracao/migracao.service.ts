@@ -14,6 +14,7 @@ import {
   extrairNomeRelacionamento as extrairNomeRelacionamentoUtil,
   gerarEmailUsuarioMigradoConflito as gerarEmailUsuarioMigradoConflitoUtil,
   gerarEmailUsuarioVendedorImportacao as gerarEmailUsuarioVendedorImportacaoUtil,
+  mapearColunasPorCabecalho as mapearColunasPorCabecalhoUtil,
   identificarTipoPlanilha as identificarTipoPlanilhaUtil,
   isEmail as isEmailUtil,
   mapearPorNome as mapearPorNomeUtil,
@@ -22,6 +23,8 @@ import {
   numero as numeroUtil,
   quebrarEmLotes as quebrarEmLotesUtil,
   texto as textoUtil,
+  valorColuna as valorColunaUtil,
+  type AliasesColunas,
 } from './migracao.util';
 import type {
   ArquivoXlsxUpload,
@@ -31,11 +34,46 @@ import type {
   TipoPlanilha,
 } from './migracao.types';
 
+type ColunaFallback = readonly [string, number];
+
+const DISTRIBUIDOR_ALIASES: AliasesColunas = {
+  codigo: ['codigo', 'código', 'cod', 'id'],
+  nome: ['nome', 'nome completo', 'distribuidor', 'nome distribuidor'],
+  cpf: ['cpf', 'documento'],
+  telefone: ['telefone', 'celular', 'fone'],
+  dataNascimento: [
+    'data nascimento',
+    'data de nascimento',
+    'nascimento',
+    'dt nascimento',
+  ],
+  cep: ['cep'],
+  endereco: ['endereco', 'endereço', 'logradouro', 'rua'],
+  numero: ['numero', 'número', 'nº', 'num'],
+  cidade: ['cidade', 'municipio', 'município'],
+  bairro: ['bairro'],
+  estado: ['estado', 'uf'],
+  email: ['email', 'e-mail', 'mail'],
+};
+
+const DISTRIBUIDOR_FALLBACK_COLUNAS: readonly ColunaFallback[] = [
+  ['codigo', 1],
+  ['nome', 3],
+  ['cpf', 4],
+  ['telefone', 5],
+  ['dataNascimento', 6],
+  ['cep', 7],
+  ['endereco', 8],
+  ['numero', 9],
+  ['cidade', 10],
+  ['bairro', 11],
+  ['estado', 12],
+  ['email', 13],
+];
+
 @Injectable()
 export class MigracaoService {
   private readonly logger = new Logger(MigracaoService.name);
-  private readonly senhaDistribuidorDefault = 'Dist@123';
-  private readonly senhaVendedorDefault = 'Vend@123';
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -124,15 +162,22 @@ export class MigracaoService {
     worksheet: ExcelJS.Worksheet,
     relatorio: RelatorioImportacao,
   ): Promise<void> {
+    const colunas = this.resolverColunas(
+      worksheet,
+      DISTRIBUIDOR_ALIASES,
+      DISTRIBUIDOR_FALLBACK_COLUNAS,
+      ['nome', 'cpf', 'email'],
+    );
+
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
       const row = worksheet.getRow(rowNumber);
       if (!row.hasValues) continue;
 
       relatorio.distribuidores.lidos += 1;
 
-      const nome = this.texto(row.getCell(3).value);
-      const cpf = this.cpf(row.getCell(4).value);
-      const email = this.email(row.getCell(13).value);
+      const nome = this.texto(this.valorColuna(row, colunas, 'nome'));
+      const cpf = this.cpf(this.valorColuna(row, colunas, 'cpf'));
+      const email = this.email(this.valorColuna(row, colunas, 'email'));
 
       if (!nome || !cpf || !email) {
         relatorio.distribuidores.ignorados += 1;
@@ -144,7 +189,7 @@ export class MigracaoService {
 
       try {
         const codigo = await this.resolverCodigoDistribuidor(
-          this.numero(row.getCell(1).value),
+          this.numero(this.valorColuna(row, colunas, 'codigo')),
         );
         const existente = await this.prisma.distribuidor.findUnique({
           where: { cpf },
@@ -155,14 +200,18 @@ export class MigracaoService {
             where: { id: existente.id },
             data: {
               nome,
-              telefone: this.texto(row.getCell(5).value) ?? undefined,
-              dataNascimento: this.data(row.getCell(6).value),
-              cep: this.texto(row.getCell(7).value),
-              endereco: this.texto(row.getCell(8).value),
-              numero: this.texto(row.getCell(9).value),
-              cidade: this.texto(row.getCell(10).value),
-              bairro: this.texto(row.getCell(11).value),
-              estado: this.texto(row.getCell(12).value),
+              telefone:
+                this.texto(this.valorColuna(row, colunas, 'telefone')) ??
+                undefined,
+              dataNascimento: this.data(
+                this.valorColuna(row, colunas, 'dataNascimento'),
+              ),
+              cep: this.texto(this.valorColuna(row, colunas, 'cep')),
+              endereco: this.texto(this.valorColuna(row, colunas, 'endereco')),
+              numero: this.texto(this.valorColuna(row, colunas, 'numero')),
+              cidade: this.texto(this.valorColuna(row, colunas, 'cidade')),
+              bairro: this.texto(this.valorColuna(row, colunas, 'bairro')),
+              estado: this.texto(this.valorColuna(row, colunas, 'estado')),
               email,
             },
           });
@@ -186,7 +235,7 @@ export class MigracaoService {
             cpf,
             email,
             perfil: Perfil.DISTRIBUIDOR,
-            senhaPadrao: this.senhaDistribuidorDefault,
+            senhaPadrao: this.gerarSenhaPadraoPorCpf(cpf),
           });
 
           await tx.distribuidor.create({
@@ -195,14 +244,17 @@ export class MigracaoService {
               usuarioId: usuario.id,
               nome,
               cpf,
-              telefone: this.texto(row.getCell(5).value) ?? '',
-              dataNascimento: this.data(row.getCell(6).value),
-              cep: this.texto(row.getCell(7).value),
-              endereco: this.texto(row.getCell(8).value),
-              numero: this.texto(row.getCell(9).value),
-              cidade: this.texto(row.getCell(10).value),
-              bairro: this.texto(row.getCell(11).value),
-              estado: this.texto(row.getCell(12).value),
+              telefone:
+                this.texto(this.valorColuna(row, colunas, 'telefone')) ?? '',
+              dataNascimento: this.data(
+                this.valorColuna(row, colunas, 'dataNascimento'),
+              ),
+              cep: this.texto(this.valorColuna(row, colunas, 'cep')),
+              endereco: this.texto(this.valorColuna(row, colunas, 'endereco')),
+              numero: this.texto(this.valorColuna(row, colunas, 'numero')),
+              cidade: this.texto(this.valorColuna(row, colunas, 'cidade')),
+              bairro: this.texto(this.valorColuna(row, colunas, 'bairro')),
+              estado: this.texto(this.valorColuna(row, colunas, 'estado')),
               email,
               status: StatusUsuario.ATIVO,
             },
@@ -355,7 +407,6 @@ export class MigracaoService {
     const indiceCriacaoPorUsuarioId = new Map<string, number>();
     const usuarioIdsNovos = new Set<string>();
 
-    const senhaVendedorHash = await bcrypt.hash(this.senhaVendedorDefault, 10);
     const usuariosParaCriar: Prisma.UsuarioCreateManyInput[] = [];
     const vendedoresParaCriar: Prisma.VendedorCreateManyInput[] = [];
     const vendedoresParaAtualizar: Array<{
@@ -420,12 +471,16 @@ export class MigracaoService {
           linha.cpf,
           linha.rowNumber,
         );
+        const senhaHash = await bcrypt.hash(
+          this.gerarSenhaPadraoPorCpf(linha.cpf),
+          10,
+        );
 
         usuariosParaCriar.push({
           id: usuarioId,
           cpf: null,
           email: emailUsuarioVendedor,
-          senhaHash: senhaVendedorHash,
+          senhaHash,
           perfil: Perfil.VENDEDOR,
           deveRedefinirSenha: true,
           status: StatusUsuario.ATIVO,
@@ -436,7 +491,7 @@ export class MigracaoService {
           cpf: null,
           email: emailUsuarioVendedor,
           perfil: Perfil.VENDEDOR,
-          senhaHash: senhaVendedorHash,
+          senhaHash,
         });
       } else if (usuarioExistente) {
         usuarioId = usuarioExistente.id;
@@ -471,7 +526,12 @@ export class MigracaoService {
             status: StatusUsuario.ATIVO,
             ...(usuarioExistente.senhaHash
               ? {}
-              : { senhaHash: senhaVendedorHash }),
+              : {
+                  senhaHash: await bcrypt.hash(
+                    this.gerarSenhaPadraoPorCpf(linha.cpf),
+                    10,
+                  ),
+                }),
           });
           continue;
         }
@@ -486,16 +546,25 @@ export class MigracaoService {
             status: StatusUsuario.ATIVO,
             ...(usuarioExistente.senhaHash
               ? {}
-              : { senhaHash: senhaVendedorHash }),
+              : {
+                  senhaHash: await bcrypt.hash(
+                    this.gerarSenhaPadraoPorCpf(linha.cpf),
+                    10,
+                  ),
+                }),
           });
         }
       } else {
         usuarioId = randomUUID();
+        const senhaHash = await bcrypt.hash(
+          this.gerarSenhaPadraoPorCpf(linha.cpf),
+          10,
+        );
         usuariosParaCriar.push({
           id: usuarioId,
           cpf: linha.cpf,
           email: linha.email,
-          senhaHash: senhaVendedorHash,
+          senhaHash,
           perfil: Perfil.VENDEDOR,
           deveRedefinirSenha: true,
           status: StatusUsuario.ATIVO,
@@ -507,7 +576,7 @@ export class MigracaoService {
           email: linha.email,
           perfil: Perfil.VENDEDOR,
           deveRedefinirSenha: true,
-          senhaHash: senhaVendedorHash,
+          senhaHash,
         };
         usuarioIdsNovos.add(usuarioId);
         usuarioPorCpf.set(linha.cpf, novoUsuario);
@@ -791,6 +860,38 @@ export class MigracaoService {
 
   private novaContagem(): ContagemImportacao {
     return novaContagemUtil();
+  }
+
+  private resolverColunas(
+    worksheet: ExcelJS.Worksheet,
+    aliases: AliasesColunas,
+    fallback: readonly ColunaFallback[],
+    obrigatorias: readonly string[],
+  ): Map<string, number> {
+    const colunasPorCabecalho = mapearColunasPorCabecalhoUtil(
+      worksheet,
+      aliases,
+    );
+
+    const possuiColunasObrigatorias = obrigatorias.every((campo) =>
+      colunasPorCabecalho.has(campo),
+    );
+
+    return possuiColunasObrigatorias
+      ? colunasPorCabecalho
+      : new Map<string, number>(fallback);
+  }
+
+  private valorColuna(
+    row: ExcelJS.Row,
+    colunas: Map<string, number>,
+    campo: string,
+  ): ExcelJS.CellValue {
+    return valorColunaUtil(row, colunas, campo);
+  }
+
+  private gerarSenhaPadraoPorCpf(cpf: string): string {
+    return cpf.slice(0, 6);
   }
 
   private texto(value: ExcelJS.CellValue): string | null {
