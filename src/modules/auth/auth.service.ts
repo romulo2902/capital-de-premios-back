@@ -111,17 +111,18 @@ export class AuthService {
       throw new UnauthorizedException('Usuário inativo');
     }
 
-    if (usuario.deveRedefinirSenha) {
-      throw new ForbiddenException(
-        'Usuário deve redefinir a senha antes de acessar',
-      );
-    }
-
     // Apenas perfis do painel admin podem logar aqui (ADMIN, DISTRIBUIDOR, VENDEDOR)
     if (!AuthService.PERFIS_ADMIN.has(usuario.perfil)) {
       throw new UnauthorizedException(
         'Acesso restrito ao painel administrativo',
       );
+    }
+
+    if (usuario.deveRedefinirSenha) {
+      await this.prisma.usuario.update({
+        where: { id: usuario.id },
+        data: { deveRedefinirSenha: false },
+      });
     }
 
     const tokens = this.gerarTokens(usuario as unknown as UsuarioRow);

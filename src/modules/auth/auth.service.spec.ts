@@ -9,6 +9,7 @@ import {
 import { AuthService } from './auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { EmailService } from '../../common/email/email.service';
 
 jest.mock('bcrypt');
 
@@ -50,6 +51,11 @@ describe('AuthService', () => {
     }),
   };
 
+  const mockEmailService = {
+    enviarBoasVindas: jest.fn(),
+    enviarRecuperacaoSenha: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -57,6 +63,7 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwt },
         { provide: ConfigService, useValue: mockConfig },
+        { provide: EmailService, useValue: mockEmailService },
       ],
     }).compile();
 
@@ -169,7 +176,7 @@ describe('AuthService', () => {
       );
     });
 
-    it('deve lançar ForbiddenException para deveRedefinirSenha=true', async () => {
+    it('deve limpar deveRedefinirSenha e permitir login com credenciais válidas', async () => {
       mockPrisma.usuario.findUnique.mockResolvedValue({
         id: 'cuid-1',
         email: 'admin@test.com',
@@ -179,9 +186,17 @@ describe('AuthService', () => {
         deveRedefinirSenha: true,
       });
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
-      await expect(service.login({ email: 'admin@test.com', senha: 'Admin@123' })).rejects.toThrow(
-        ForbiddenException,
-      );
+
+      const result = await service.login({
+        email: 'admin@test.com',
+        senha: 'Admin@123',
+      });
+
+      expect(mockPrisma.usuario.update).toHaveBeenCalledWith({
+        where: { id: 'cuid-1' },
+        data: { deveRedefinirSenha: false },
+      });
+      expect(result.data).toHaveProperty('accessToken');
     });
 
     it('deve lançar UnauthorizedException para perfil CLIENTE tentando logar no admin', async () => {

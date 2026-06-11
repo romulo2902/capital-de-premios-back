@@ -222,7 +222,7 @@ export class MigracaoService {
               cpf,
               email,
               perfil: Perfil.DISTRIBUIDOR,
-              deveRedefinirSenha: true,
+              deveRedefinirSenha: false,
             },
           });
 
@@ -444,7 +444,7 @@ export class MigracaoService {
           cpf: linha.cpf,
           email: linha.email,
           perfil: Perfil.VENDEDOR,
-          deveRedefinirSenha: true,
+          deveRedefinirSenha: false,
           status: StatusUsuario.ATIVO,
         });
         continue;
@@ -482,7 +482,7 @@ export class MigracaoService {
           email: emailUsuarioVendedor,
           senhaHash,
           perfil: Perfil.VENDEDOR,
-          deveRedefinirSenha: true,
+          deveRedefinirSenha: false,
           status: StatusUsuario.ATIVO,
         });
         usuarioIdsNovos.add(usuarioId);
@@ -522,7 +522,7 @@ export class MigracaoService {
             cpf: linha.cpf,
             email: linha.email,
             perfil: Perfil.VENDEDOR,
-            deveRedefinirSenha: true,
+            deveRedefinirSenha: false,
             status: StatusUsuario.ATIVO,
             ...(usuarioExistente.senhaHash
               ? {}
@@ -542,7 +542,7 @@ export class MigracaoService {
             cpf: linha.cpf,
             email: linha.email,
             perfil: Perfil.VENDEDOR,
-            deveRedefinirSenha: true,
+            deveRedefinirSenha: false,
             status: StatusUsuario.ATIVO,
             ...(usuarioExistente.senhaHash
               ? {}
@@ -566,7 +566,7 @@ export class MigracaoService {
           email: linha.email,
           senhaHash,
           perfil: Perfil.VENDEDOR,
-          deveRedefinirSenha: true,
+          deveRedefinirSenha: false,
           status: StatusUsuario.ATIVO,
         });
 
@@ -575,7 +575,7 @@ export class MigracaoService {
           cpf: linha.cpf,
           email: linha.email,
           perfil: Perfil.VENDEDOR,
-          deveRedefinirSenha: true,
+          deveRedefinirSenha: false,
           senhaHash,
         };
         usuarioIdsNovos.add(usuarioId);
@@ -809,7 +809,7 @@ export class MigracaoService {
                 )
               : payload.email,
             perfil: payload.perfil,
-            deveRedefinirSenha: true,
+            deveRedefinirSenha: false,
             status: StatusUsuario.ATIVO,
             senhaHash: await bcrypt.hash(payload.senhaPadrao, 10),
           },
@@ -826,7 +826,7 @@ export class MigracaoService {
           cpf: payload.cpf,
           email: payload.email,
           perfil: payload.perfil,
-          deveRedefinirSenha: true,
+          deveRedefinirSenha: false,
           status: StatusUsuario.ATIVO,
           ...(senhaHash ? { senhaHash } : {}),
         },
@@ -838,7 +838,7 @@ export class MigracaoService {
         cpf: payload.cpf,
         email: payload.email,
         perfil: payload.perfil,
-        deveRedefinirSenha: true,
+        deveRedefinirSenha: false,
         status: StatusUsuario.ATIVO,
         senhaHash: await bcrypt.hash(payload.senhaPadrao, 10),
       },

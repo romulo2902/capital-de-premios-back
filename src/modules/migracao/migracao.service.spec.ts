@@ -94,7 +94,7 @@ describe('MigracaoService', () => {
         cpf: '12345678901',
         email: 'vend@test.com',
         perfil: Perfil.VENDEDOR,
-        deveRedefinirSenha: true,
+        deveRedefinirSenha: false,
         status: StatusUsuario.ATIVO,
       },
     });
@@ -136,7 +136,7 @@ describe('MigracaoService', () => {
     expect(result.cpf).toBeNull();
     expect(result.email).toBe('vend@test.com');
     expect(result.perfil).toBe(Perfil.VENDEDOR);
-    expect(result.deveRedefinirSenha).toBe(true);
+    expect(result.deveRedefinirSenha).toBe(false);
     expect(result.status).toBe(StatusUsuario.ATIVO);
     expect(typeof result.senhaHash).toBe('string');
     expect(await bcrypt.compare('Vend@123', result.senhaHash as string)).toBe(
