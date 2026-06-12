@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OrigemParticipacao, StatusVenda, TipoCartela } from '@prisma/client';
+import {
+  OrigemParticipacao,
+  StatusVenda,
+  StatusVendaSena,
+  TipoCartela,
+} from '@prisma/client';
 import type { Response } from 'express';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
@@ -694,6 +699,7 @@ export class RelatoriosService {
           '/relatorios/distribuidores/pdf',
           '/relatorios/clientes/xlsx',
           '/relatorios/clientes/pdf',
+          '/relatorios/vendas/sena',
         ],
       },
     };
@@ -794,6 +800,101 @@ export class RelatoriosService {
     const nomeArquivo = `relatorio-cdp-${edicao.numero}-${Date.now()}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
+    res.send(conteudo);
+  }
+
+  async exportarRelatorioSena(
+    res: Response,
+    edicaoSenaId: string,
+    dataInicio?: string,
+    dataFim?: string,
+  ): Promise<void> {
+    this.logger.log(`Gerando relatório Sena para edição ${edicaoSenaId}`);
+
+    const edicao = await this.prisma.edicaoSena.findUniqueOrThrow({
+      where: { id: edicaoSenaId },
+      select: { numero: true, valorCartela: true },
+    });
+
+    const cartelas = await this.prisma.cartelaSena.findMany({
+      where: {
+        edicaoSenaId,
+        vendaSena: { status: StatusVendaSena.APROVADO },
+      },
+      include: {
+        vendaSena: {
+          include: {
+            cliente: true,
+            vendedor: { select: { nome: true } },
+          },
+        },
+      },
+      orderBy: [
+        { vendaSena: { createdAt: 'asc' } },
+        { createdAt: 'asc' },
+      ],
+    });
+
+    const hoje = new Date();
+    const dataInicioFmt = this.formatarDataArquivoSena(
+      dataInicio ? this.parseDataRelatorio(dataInicio, 'inicio') : hoje,
+    );
+    const dataFimFmt = this.formatarDataArquivoSena(
+      dataFim ? this.parseDataRelatorio(dataFim, 'fim') : hoje,
+    );
+    const valorCartela = this.formatarValorRelatorioSena(edicao.valorCartela);
+
+    const linhas: string[] = [
+      `H;CAPDF;${dataInicioFmt};${dataFimFmt};${edicao.numero}`,
+    ];
+
+    for (const cartela of cartelas) {
+      const venda = cartela.vendaSena;
+      const cliente = venda.cliente;
+      const telefone = this.separarTelefoneRelatorioSena(cliente.telefone);
+      const numeros = [
+        ...cartela.numerosEscolhidos,
+        cartela.setimoNumero,
+      ].filter((numero): numero is number => typeof numero === 'number');
+      const numerosFormatados = numeros
+        .map((numero) => this.formatarNumeroRelatorioSena(numero))
+        .join(',');
+      const numeroBase = cartela.numerosEscolhidos[0]?.toString() ?? '';
+      const origemAquisicao = this.resolverOrigemAquisicaoSena(venda);
+
+      linhas.push(
+        [
+          'D3',
+          venda.id.replace(/-/g, ''),
+          numerosFormatados,
+          valorCartela,
+          this.formatarCampoNumericoCdp(cliente.cpf, 11),
+          cliente.nome,
+          '',
+          '',
+          '',
+          telefone.ddd,
+          telefone.numero,
+          (cliente.estado ?? '').toUpperCase().trim(),
+          this.formatarCampoNumericoCdp(cliente.cep, 8),
+          cliente.cidade ?? '',
+          cliente.endereco ?? '',
+          cliente.bairro ?? '',
+          numeroBase,
+          origemAquisicao,
+          'V',
+          '',
+        ].join(';'),
+      );
+    }
+
+    linhas.push(`T;${cartelas.length};`);
+
+    const conteudo = linhas.join('\r\n');
+    const nomeArquivo = `capital_sena_${edicao.numero}_${Date.now()}.txt`;
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
     res.send(conteudo);
   }
@@ -1176,6 +1277,62 @@ export class RelatoriosService {
     }
 
     return 'Adquirido pela Web';
+  }
+
+  private resolverOrigemAquisicaoSena(venda: {
+    origemParticipacao: OrigemParticipacao;
+    gatewayPayload?: unknown;
+    vendedor?: { nome: string } | null;
+  }): string {
+    if (venda.vendedor?.nome) {
+      return `Link ${venda.vendedor.nome}`;
+    }
+
+    if (this.gatewayPayloadTemOrigem(venda.gatewayPayload, 'WHATSAPP')) {
+      return 'WhatsApp';
+    }
+
+    if (venda.origemParticipacao === OrigemParticipacao.POS) {
+      return 'POS';
+    }
+
+    return 'Compra no Site';
+  }
+
+  private formatarDataArquivoSena(data: Date): string {
+    const dia = String(data.getDate()).padStart(2, '0');
+    const mes = String(data.getMonth() + 1).padStart(2, '0');
+    return `${dia}/${mes}/${data.getFullYear()}`;
+  }
+
+  private formatarValorRelatorioSena(value: unknown): string {
+    const valor = Number(value);
+    if (!Number.isFinite(valor)) {
+      return '';
+    }
+
+    return Number.isInteger(valor)
+      ? valor.toString()
+      : valor.toFixed(2).replace(/0$/, '');
+  }
+
+  private formatarNumeroRelatorioSena(value: number): string {
+    return value.toString().padStart(2, '0');
+  }
+
+  private separarTelefoneRelatorioSena(telefone: string | null | undefined): {
+    ddd: string;
+    numero: string;
+  } {
+    let digits = (telefone ?? '').replace(/\D/g, '');
+    if (digits.startsWith('55') && digits.length > 11) {
+      digits = digits.slice(2);
+    }
+
+    return {
+      ddd: digits.slice(0, 2),
+      numero: digits.slice(2),
+    };
   }
 
   private gatewayPayloadTemOrigem(

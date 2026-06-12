@@ -82,4 +82,40 @@ export class RelatoriosVendasController {
       dataFim,
     );
   }
+
+  @Get('sena')
+  @ApiOperation({
+    summary:
+      'Exportar relatório Sena de vendas (arquivo TXT) por edição (ADMIN)',
+  })
+  @ApiQuery({
+    name: 'edicaoSenaId',
+    required: true,
+    description: 'ID da edição Sena',
+  })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description: 'Data início do período no cabeçalho (YYYY-MM-DD). Padrão: hoje.',
+    example: '2026-06-09',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description: 'Data fim do período no cabeçalho (YYYY-MM-DD). Padrão: hoje.',
+    example: '2026-06-09',
+  })
+  async exportarSena(
+    @Res() res: Response,
+    @Query('edicaoSenaId') edicaoSenaId: string,
+    @Query('dataInicio') dataInicio?: string,
+    @Query('dataFim') dataFim?: string,
+  ) {
+    return this.relatoriosService.exportarRelatorioSena(
+      res,
+      edicaoSenaId,
+      dataInicio,
+      dataFim,
+    );
+  }
 }

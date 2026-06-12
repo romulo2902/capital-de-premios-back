@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import { OrigemParticipacao } from '@prisma/client';
+import { OrigemParticipacao, StatusVendaSena } from '@prisma/client';
 import { RelatoriosService } from './relatorios.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -27,6 +27,12 @@ describe('RelatoriosService', () => {
       findUniqueOrThrow: jest.fn(),
     },
     bilhete: {
+      findMany: jest.fn(),
+    },
+    edicaoSena: {
+      findUniqueOrThrow: jest.fn(),
+    },
+    cartelaSena: {
       findMany: jest.fn(),
     },
   };
@@ -60,6 +66,7 @@ describe('RelatoriosService', () => {
         '/relatorios/distribuidores/pdf',
         '/relatorios/clientes/xlsx',
         '/relatorios/clientes/pdf',
+        '/relatorios/vendas/sena',
       ],
     });
   });
@@ -324,6 +331,72 @@ describe('RelatoriosService', () => {
     );
     expect(res.send).toHaveBeenCalledWith(
       expect.stringContaining('T;3;0980000;0983000;'),
+    );
+  });
+
+  it('deve exportar relatorio Sena no formato TXT esperado', async () => {
+    mockPrisma.edicaoSena.findUniqueOrThrow.mockResolvedValue({
+      numero: '12',
+      valorCartela: '5.00',
+    });
+    mockPrisma.cartelaSena.findMany.mockResolvedValue([
+      {
+        numerosEscolhidos: [2, 6, 12, 26, 48, 1],
+        setimoNumero: 51,
+        createdAt: new Date('2026-06-09T10:00:00Z'),
+        vendaSena: {
+          id: '05348c79-2df5-43c0-a6f4-93ed9cb64159',
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          gatewayPayload: { origem: 'WEB' },
+          vendedor: { nome: 'Brunna costa' },
+          cliente: {
+            cpf: '9392814115',
+            nome: 'Andreia Cristina Moreira',
+            telefone: '+5561995094000',
+            estado: 'DF',
+            cep: null,
+            cidade: 'Ceilândia Norte',
+            endereco: 'Quadra QNO 19 Conjunto E',
+            bairro: 'Ceilândia Norte',
+          },
+        },
+      },
+    ]);
+
+    const res = {
+      setHeader: jest.fn(),
+      send: jest.fn(),
+    };
+
+    await service.exportarRelatorioSena(
+      res as never,
+      'edicao-sena-1',
+      '2026-06-09',
+      '2026-06-09',
+    );
+
+    expect(mockPrisma.edicaoSena.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 'edicao-sena-1' },
+      select: { numero: true, valorCartela: true },
+    });
+    expect(mockPrisma.cartelaSena.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          edicaoSenaId: 'edicao-sena-1',
+          vendaSena: { status: StatusVendaSena.APROVADO },
+        },
+      }),
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'text/plain; charset=utf-8',
+    );
+    expect(res.send).toHaveBeenCalledWith(
+      [
+        'H;CAPDF;09/06/2026;09/06/2026;12',
+        'D3;05348c792df543c0a6f493ed9cb64159;02,06,12,26,48,01,51;5;09392814115;Andreia Cristina Moreira;;;;61;995094000;DF;;Ceilândia Norte;Quadra QNO 19 Conjunto E;Ceilândia Norte;2;Link Brunna costa;V;',
+        'T;1;',
+      ].join('\r\n'),
     );
   });
 
