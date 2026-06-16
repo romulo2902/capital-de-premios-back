@@ -179,6 +179,34 @@ describe('PosService', () => {
     });
   });
 
+  it('confirma venda POS unitária reaproveitando ranges DIGITAL', async () => {
+    mockPrisma.venda.findUnique.mockResolvedValue({
+      id: 'venda-1',
+      status: StatusVenda.PENDENTE,
+      origemParticipacao: OrigemParticipacao.POS,
+      tipoPagamento: TipoPagamento.PIX,
+      vendedorId: 'vend-1',
+      distribuidorId: null,
+      gatewayId: 'ORDE_1',
+      total: { toString: () => '10.00' },
+      createdAt: new Date('2026-05-28T14:30:00.000Z'),
+    });
+    mockPaymentGatewayFactory.getGateway.mockReturnValue({
+      consultarCobranca: jest.fn().mockResolvedValue({
+        status: 'APROVADO',
+        payload: { orderId: 'ORDE_1' },
+      }),
+    });
+    mockVendas.confirmarPagamento.mockResolvedValue({
+      data: { id: 'venda-1', status: StatusVenda.APROVADO },
+    });
+
+    const result = await service.consultarStatusPagamento('venda-1', vendedor);
+
+    expect(mockVendas.confirmarPagamento).toHaveBeenCalled();
+    expect(result.data.status).toBe(StatusVenda.APROVADO);
+  });
+
   it('rejeita consulta de status de venda que não é POS', async () => {
     mockPrisma.venda.findUnique.mockResolvedValue({
       id: 'venda-1',

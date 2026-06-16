@@ -1944,8 +1944,11 @@ export class VendasService {
       }
       matrizDisponiveis = linhas;
     } else if (venda.tipoCartela === TipoCartela.UMA_CHANCE) {
+      const origemRanges = this.resolverOrigemDosRangesParaCombo(
+        venda.origemParticipacao,
+      );
       const detalhesOrigem = edicao.detalhes
-        .filter((d) => d.origemParticipacao === venda.origemParticipacao)
+        .filter((d) => d.origemParticipacao === origemRanges)
         .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
 
       if (detalhesOrigem.length === 0) {
