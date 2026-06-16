@@ -258,6 +258,10 @@ export class PagamentosService {
       return true;
     }
 
+    this.logger.debug(
+      `MERCADOPAGO_WEBHOOK_SECRET em uso: ${secret.slice(0, 4)}...${secret.slice(-4)} (length=${secret.length})`,
+    );
+
     const xSignature = this.lerHeader(headers, 'x-signature');
     const xRequestId = this.lerHeader(headers, 'x-request-id');
 
