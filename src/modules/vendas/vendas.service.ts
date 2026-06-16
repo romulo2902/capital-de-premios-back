@@ -695,22 +695,75 @@ export class VendasService {
 
   async findOne(id: string, user?: RequestUser) {
     const venda = await this.buscarVendaComContextoEdicao(id, user);
-    const vendaComDistribuidor = await this.anexarDistribuidorNaVenda(venda);
+    const vendaSincronizada = await this.sincronizarVendaPosPendente(
+      venda,
+      VENDA_INCLUDE_DETALHES,
+    );
 
     return {
       message: 'Venda encontrada com sucesso',
-      data: this.serializarVendaParaResposta(vendaComDistribuidor),
+      data: this.serializarVendaParaResposta(
+        await this.anexarDistribuidorNaVenda(vendaSincronizada),
+      ),
     };
   }
 
   async consultarStatus(id: string, user?: RequestUser) {
     const venda = await this.buscarVendaComContextoEdicao(id, user);
-    const vendaComDistribuidor = await this.anexarDistribuidorNaVenda(venda);
+    const vendaSincronizada = await this.sincronizarVendaPosPendente(
+      venda,
+      VENDA_INCLUDE_DETALHES,
+    );
+    const vendaComDistribuidor =
+      await this.anexarDistribuidorNaVenda(vendaSincronizada);
 
     return {
       message: 'Status da venda consultado com sucesso',
       data: this.serializarVendaParaResposta(vendaComDistribuidor),
     };
+  }
+
+  async reconciliarVendasPosPendentes(
+    limite = 20,
+    janelaMinutos = 60,
+  ): Promise<number> {
+    const createdAtGte = new Date(Date.now() - janelaMinutos * 60 * 1000);
+
+    const vendasPendentes = await this.prisma.venda.findMany({
+      where: {
+        origemParticipacao: OrigemParticipacao.POS,
+        status: StatusVenda.PENDENTE,
+        gatewayId: { not: null },
+        createdAt: { gte: createdAtGte },
+      },
+      select: {
+        id: true,
+        status: true,
+        origemParticipacao: true,
+        tipoPagamento: true,
+        gatewayId: true,
+      },
+      orderBy: { createdAt: 'asc' },
+      take: limite,
+    });
+
+    let confirmadas = 0;
+
+    for (const venda of vendasPendentes) {
+      const vendaSincronizada = await this.sincronizarVendaPosPendente(
+        venda,
+        VENDA_INCLUDE,
+      );
+
+      if (
+        venda.status === StatusVenda.PENDENTE &&
+        vendaSincronizada.status === StatusVenda.APROVADO
+      ) {
+        confirmadas += 1;
+      }
+    }
+
+    return confirmadas;
   }
 
   async update(id: string, dto: UpdateVendaDto, user?: RequestUser) {
@@ -1251,6 +1304,62 @@ export class VendasService {
           : null,
       } as T;
     });
+  }
+
+  private async sincronizarVendaPosPendente<
+    T extends {
+      id: string;
+      status?: StatusVenda;
+      origemParticipacao?: OrigemParticipacao;
+      tipoPagamento?: TipoPagamento;
+      gatewayId?: string | null;
+    },
+  >(venda: T, include: Prisma.VendaInclude): Promise<T> {
+    if (
+      venda.status !== StatusVenda.PENDENTE ||
+      venda.origemParticipacao !== OrigemParticipacao.POS ||
+      !venda.gatewayId ||
+      !venda.tipoPagamento
+    ) {
+      return venda;
+    }
+
+    try {
+      const gateway = this.paymentGatewayFactory.getGateway(venda.tipoPagamento);
+      const cobranca = await gateway.consultarCobranca(venda.gatewayId);
+
+      if (cobranca.status !== 'APROVADO') {
+        return venda;
+      }
+
+      await this.confirmarPagamento(venda.id, {
+        gatewayPolling: cobranca.payload,
+        confirmadoEm:
+          cobranca.paidAt?.toISOString() ?? new Date().toISOString(),
+      });
+
+      const vendaAtualizada = await this.prisma.venda.findUnique({
+        where: { id: venda.id },
+        include,
+      });
+
+      return (vendaAtualizada as T | null) ?? venda;
+    } catch (error) {
+      if (!(error instanceof ConflictException)) {
+        this.logger.warn(
+          `Falha ao sincronizar venda POS ${venda.id} com o gateway: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+
+      const vendaAtualizada = await this.prisma.venda.findUnique({
+        where: { id: venda.id },
+        include,
+      });
+
+      return (vendaAtualizada as T | null) ?? venda;
+    }
   }
 
   private normalizarDadosClienteParaEdicao(

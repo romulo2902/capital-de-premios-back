@@ -16,6 +16,8 @@ import { VendasService } from './vendas.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
+import { EmailService } from '../../common/email/email.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('VendasService', () => {
   let service: VendasService;
@@ -32,6 +34,18 @@ describe('VendasService', () => {
 
   const mockConfiguracaoComissaoService = {
     obterConfiguracaoAtiva: jest.fn(),
+    obterConfiguracaoGlobal: jest.fn().mockResolvedValue({
+      percentualDistribuidor: 0,
+      percentualVendedor: 0,
+    }),
+  };
+
+  const mockEmailService = {
+    enviarCompraAprovada: jest.fn(),
+  };
+
+  const mockConfigService = {
+    get: jest.fn(),
   };
 
   const mockPrisma = {
@@ -84,6 +98,8 @@ describe('VendasService', () => {
           provide: ConfiguracaoComissaoService,
           useValue: mockConfiguracaoComissaoService,
         },
+        { provide: EmailService, useValue: mockEmailService },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 
@@ -208,6 +224,56 @@ describe('VendasService', () => {
           id: 'venda-1',
           total: '60.00',
           totalFormatado: 'R$ 60,00',
+        }),
+      ]);
+    });
+
+    it('should synchronize POS pending sale with gateway when already paid', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([
+        {
+          id: 'venda-pos-1',
+          total: new Prisma.Decimal('10.00'),
+          quantidade: 2,
+          status: StatusVenda.PENDENTE,
+          origemParticipacao: OrigemParticipacao.POS,
+          tipoPagamento: TipoPagamento.PIX,
+          gatewayId: 'ORDE_123',
+        },
+      ]);
+      mockPrisma.venda.count.mockResolvedValue(1);
+      mockGateway.consultarCobranca.mockResolvedValue({
+        status: 'APROVADO',
+        paidAt: new Date('2026-06-16T10:00:00.000Z'),
+        payload: { orderId: 'ORDE_123' },
+      });
+      jest.spyOn(service, 'confirmarPagamento').mockResolvedValue({
+        message: 'Pagamento confirmado com sucesso',
+        data: { id: 'venda-pos-1', status: StatusVenda.APROVADO },
+      });
+      mockPrisma.venda.findUnique.mockResolvedValue({
+        id: 'venda-pos-1',
+        total: new Prisma.Decimal('10.00'),
+        quantidade: 2,
+        status: StatusVenda.APROVADO,
+        origemParticipacao: OrigemParticipacao.POS,
+        tipoPagamento: TipoPagamento.PIX,
+        gatewayId: 'ORDE_123',
+      });
+
+      const result = await service.findAll();
+
+      expect(mockGateway.consultarCobranca).toHaveBeenCalledWith('ORDE_123');
+      expect(service.confirmarPagamento).toHaveBeenCalledWith(
+        'venda-pos-1',
+        expect.objectContaining({
+          gatewayPolling: { orderId: 'ORDE_123' },
+        }),
+      );
+      expect(result.data).toEqual([
+        expect.objectContaining({
+          id: 'venda-pos-1',
+          status: StatusVenda.APROVADO,
+          total: '10.00',
         }),
       ]);
     });
