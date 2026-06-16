@@ -30,6 +30,7 @@ describe('VendasService', () => {
 
   const mockPaymentGatewayFactory = {
     getGateway: jest.fn().mockReturnValue(mockGateway),
+    getGatewayParaConsulta: jest.fn().mockReturnValue(mockGateway),
   };
 
   const mockConfiguracaoComissaoService = {

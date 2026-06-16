@@ -35,7 +35,7 @@ describe('PosService', () => {
   };
 
   const mockPaymentGatewayFactory = {
-    getGateway: jest.fn().mockReturnValue({
+    getGatewayParaConsulta: jest.fn().mockReturnValue({
       consultarCobranca: jest.fn().mockResolvedValue({ status: 'PENDENTE' }),
     }),
   };
@@ -129,8 +129,9 @@ describe('PosService', () => {
 
     const result = await service.consultarStatusPagamento('venda-1', vendedor);
 
-    expect(mockPaymentGatewayFactory.getGateway).toHaveBeenCalledWith(
+    expect(mockPaymentGatewayFactory.getGatewayParaConsulta).toHaveBeenCalledWith(
       TipoPagamento.PIX,
+      undefined,
     );
     expect(result.data).toMatchObject({
       vendaId: 'venda-1',
@@ -152,7 +153,7 @@ describe('PosService', () => {
       total: { toString: () => '20.00' },
       createdAt: new Date('2026-05-28T14:30:00.000Z'),
     });
-    mockPaymentGatewayFactory.getGateway.mockReturnValue({
+    mockPaymentGatewayFactory.getGatewayParaConsulta.mockReturnValue({
       consultarCobranca: jest.fn().mockResolvedValue({
         status: 'APROVADO',
         paidAt: new Date('2026-05-28T14:35:00.000Z'),
@@ -191,7 +192,7 @@ describe('PosService', () => {
       total: { toString: () => '10.00' },
       createdAt: new Date('2026-05-28T14:30:00.000Z'),
     });
-    mockPaymentGatewayFactory.getGateway.mockReturnValue({
+    mockPaymentGatewayFactory.getGatewayParaConsulta.mockReturnValue({
       consultarCobranca: jest.fn().mockResolvedValue({
         status: 'APROVADO',
         payload: { orderId: 'ORDE_1' },

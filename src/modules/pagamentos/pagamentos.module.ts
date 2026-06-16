@@ -3,6 +3,7 @@ import { PagamentosController } from './pagamentos.controller';
 import { PagamentosService } from './pagamentos.service';
 import { PagBankPixGateway } from './gateways/pagbank-pix.gateway';
 import { PagBankCartaoGateway } from './gateways/pagbank-cartao.gateway';
+import { MercadoPagoPixGateway } from './gateways/mercadopago-pix.gateway';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { MockPixGateway } from './gateways/mock-pix.gateway';
 import { VendasModule } from '../vendas/vendas.module';
@@ -17,6 +18,7 @@ import { VendasSenaModule } from '../capital-sena/vendas-sena/vendas-sena.module
   providers: [
     PagamentosService,
     PagBankPixGateway,
+    MercadoPagoPixGateway,
     MockPixGateway,
     PagBankCartaoGateway,
     PaymentGatewayFactory,

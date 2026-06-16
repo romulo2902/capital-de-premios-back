@@ -219,6 +219,7 @@ export class PosService {
         vendedorId: true,
         distribuidorId: true,
         gatewayId: true,
+        gatewayPayload: true,
         total: true,
         createdAt: true,
       },
@@ -232,6 +233,7 @@ export class PosService {
     const cobrancaGateway = await this.consultarGatewaySePossivel(
       venda.gatewayId,
       venda.tipoPagamento,
+      venda.gatewayPayload,
     );
     const statusGateway = cobrancaGateway?.status;
     const statusVenda =
@@ -308,6 +310,7 @@ export class PosService {
         vendedorId: true,
         distribuidorId: true,
         gatewayId: true,
+        gatewayPayload: true,
         total: true,
         createdAt: true,
       },
@@ -321,6 +324,7 @@ export class PosService {
     const cobrancaGateway = await this.consultarGatewaySePossivel(
       venda.gatewayId,
       venda.tipoPagamento,
+      venda.gatewayPayload,
     );
     const statusGateway = cobrancaGateway?.status;
     const statusVenda =
@@ -548,6 +552,7 @@ export class PosService {
   private async consultarGatewaySePossivel(
     gatewayId: string | null,
     tipoPagamento: TipoPagamento,
+    gatewayPayload?: unknown,
   ): Promise<
     | {
         status: string;
@@ -561,7 +566,10 @@ export class PosService {
     }
 
     try {
-      const gateway = this.paymentGatewayFactory.getGateway(tipoPagamento);
+      const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
+        tipoPagamento,
+        gatewayPayload,
+      );
       return await gateway.consultarCobranca(gatewayId);
     } catch (error) {
       this.logger.warn(

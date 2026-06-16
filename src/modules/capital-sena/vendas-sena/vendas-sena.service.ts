@@ -487,8 +487,9 @@ export class VendasSenaService {
       // Cancelar no gateway
       if (venda.gatewayId) {
         try {
-          const gateway = this.paymentGatewayFactory.getGateway(
+          const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
             venda.tipoPagamento,
+            venda.gatewayPayload,
           );
           await gateway.cancelarCobranca(venda.gatewayId);
         } catch (err) {

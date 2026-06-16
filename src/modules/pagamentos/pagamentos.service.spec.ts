@@ -1,10 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { createHmac } from 'crypto';
 import { PagamentosService } from './pagamentos.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
+import { MercadoPagoPixGateway } from './gateways/mercadopago-pix.gateway';
 import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import { DistributedLockService } from '../../common/redis/distributed-lock.service';
+import { EmailService } from '../../common/email/email.service';
 import { ConfigService } from '@nestjs/config';
 
 describe('PagamentosService', () => {
@@ -18,6 +21,13 @@ describe('PagamentosService', () => {
 
   const mockPaymentGatewayFactory = {
     getGateway: jest.fn().mockReturnValue(mockGateway),
+    getGatewayParaConsulta: jest.fn().mockReturnValue(mockGateway),
+  };
+
+  const mockMercadoPagoPixGateway = {
+    criarCobranca: jest.fn(),
+    consultarCobranca: jest.fn(),
+    cancelarCobranca: jest.fn(),
   };
 
   const mockVendasService = {
@@ -26,6 +36,11 @@ describe('PagamentosService', () => {
 
   const mockVendasSenaService = {
     confirmarPagamento: jest.fn(),
+  };
+
+  const mockEmailService = {
+    enviarCompraAprovada: jest.fn(),
+    enviarCompraAprovadaSena: jest.fn(),
   };
 
   const mockPrisma = {
@@ -60,12 +75,14 @@ describe('PagamentosService', () => {
           useValue: { get: jest.fn().mockReturnValue('') },
         },
         { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
+        { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
         { provide: VendasService, useValue: mockVendasService },
         { provide: VendasSenaService, useValue: mockVendasSenaService },
         {
           provide: DistributedLockService,
           useValue: mockDistributedLockService,
         },
+        { provide: EmailService, useValue: mockEmailService },
       ],
     }).compile();
 
@@ -173,12 +190,14 @@ describe('PagamentosService', () => {
             provide: PaymentGatewayFactory,
             useValue: mockPaymentGatewayFactory,
           },
+          { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
           { provide: VendasService, useValue: mockVendasService },
           { provide: VendasSenaService, useValue: mockVendasSenaService },
           {
             provide: DistributedLockService,
             useValue: mockDistributedLockService,
           },
+          { provide: EmailService, useValue: mockEmailService },
         ],
       }).compile();
 
@@ -197,6 +216,144 @@ describe('PagamentosService', () => {
       expect(result.data![0].status).toBe('CONFIRMADA');
       expect(fetchMock).toHaveBeenCalled();
       fetchMock.mockRestore();
+    });
+  });
+
+  describe('processarWebhookMercadoPago', () => {
+    it('should return message when order id is missing', async () => {
+      const result = await service.processarWebhookMercadoPago({}, {}, {});
+      expect(result.message).toContain('sem dados');
+    });
+
+    it('should ignore order that is not yet approved', async () => {
+      mockMercadoPagoPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'PENDENTE',
+        payload: {},
+      });
+
+      const result = await service.processarWebhookMercadoPago(
+        {},
+        {},
+        { data: { id: 'ORD01' } },
+      );
+
+      expect(result.data).toEqual({
+        gatewayId: 'ORD01',
+        status: 'IGNORADO_PENDENTE',
+      });
+      expect(mockVendasService.confirmarPagamento).not.toHaveBeenCalled();
+    });
+
+    it('should confirm payment when order is approved and venda is pending', async () => {
+      mockMercadoPagoPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'APROVADO',
+        payload: { id: 'ORD01' },
+      });
+      mockPrisma.venda.findFirst.mockResolvedValue({
+        id: 'venda-1',
+        status: 'PENDENTE',
+      });
+      mockVendasService.confirmarPagamento.mockResolvedValue({});
+
+      const result = await service.processarWebhookMercadoPago(
+        {},
+        {},
+        { data: { id: 'ORD01' } },
+      );
+
+      expect(result.data).toEqual({ gatewayId: 'ORD01', status: 'CONFIRMADA' });
+      expect(mockVendasService.confirmarPagamento).toHaveBeenCalledWith(
+        'venda-1',
+        expect.any(Object),
+      );
+    });
+
+    it('should reject webhook with invalid signature when secret is configured', async () => {
+      const configGet = jest.fn((key: string) => {
+        if (key === 'MERCADOPAGO_WEBHOOK_SECRET') return 'meu-segredo';
+        return '';
+      });
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PagamentosService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: ConfigService, useValue: { get: configGet } },
+          {
+            provide: PaymentGatewayFactory,
+            useValue: mockPaymentGatewayFactory,
+          },
+          { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
+          { provide: VendasService, useValue: mockVendasService },
+          { provide: VendasSenaService, useValue: mockVendasSenaService },
+          {
+            provide: DistributedLockService,
+            useValue: mockDistributedLockService,
+          },
+          { provide: EmailService, useValue: mockEmailService },
+        ],
+      }).compile();
+
+      const serviceComSecret = module.get<PagamentosService>(PagamentosService);
+
+      await expect(
+        serviceComSecret.processarWebhookMercadoPago(
+          { 'x-signature': 'ts=123,v1=assinatura-invalida', 'x-request-id': 'req-1' },
+          {},
+          { data: { id: 'ORD01' } },
+        ),
+      ).rejects.toThrow('Assinatura do webhook inválida');
+    });
+
+    it('should accept webhook with a valid signature', async () => {
+      const secret = 'meu-segredo';
+      const configGet = jest.fn((key: string) => {
+        if (key === 'MERCADOPAGO_WEBHOOK_SECRET') return secret;
+        return '';
+      });
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PagamentosService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: ConfigService, useValue: { get: configGet } },
+          {
+            provide: PaymentGatewayFactory,
+            useValue: mockPaymentGatewayFactory,
+          },
+          { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
+          { provide: VendasService, useValue: mockVendasService },
+          { provide: VendasSenaService, useValue: mockVendasSenaService },
+          {
+            provide: DistributedLockService,
+            useValue: mockDistributedLockService,
+          },
+          { provide: EmailService, useValue: mockEmailService },
+        ],
+      }).compile();
+
+      const serviceComSecret = module.get<PagamentosService>(PagamentosService);
+
+      mockMercadoPagoPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'PENDENTE',
+        payload: {},
+      });
+
+      const ts = '1700000000000';
+      const requestId = 'req-1';
+      const manifest = `id:ord01;request-id:${requestId};ts:${ts};`;
+      const v1 = createHmac('sha256', secret).update(manifest).digest('hex');
+
+      const result = await serviceComSecret.processarWebhookMercadoPago(
+        { 'x-signature': `ts=${ts},v1=${v1}`, 'x-request-id': requestId },
+        {},
+        { data: { id: 'ORD01' } },
+      );
+
+      expect(result.data).toEqual({
+        gatewayId: 'ORD01',
+        status: 'IGNORADO_PENDENTE',
+      });
     });
   });
 

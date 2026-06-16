@@ -960,8 +960,9 @@ export class VendasService {
       // 3. Cancelar cobrança no gateway
       if (venda.gatewayId) {
         try {
-          const gateway = this.paymentGatewayFactory.getGateway(
+          const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
             venda.tipoPagamento,
+            venda.gatewayPayload,
           );
           await gateway.cancelarCobranca(venda.gatewayId);
         } catch (error) {
@@ -1334,7 +1335,10 @@ export class VendasService {
     }
 
     try {
-      const gateway = this.paymentGatewayFactory.getGateway(venda.tipoPagamento);
+      const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
+        venda.tipoPagamento,
+        venda.gatewayPayload,
+      );
       const cobranca = await gateway.consultarCobranca(venda.gatewayId);
 
       if (cobranca.status !== 'APROVADO') {

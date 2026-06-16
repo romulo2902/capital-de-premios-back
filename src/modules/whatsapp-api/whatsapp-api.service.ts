@@ -447,6 +447,7 @@ export class WhatsappApiService {
         id: true,
         status: true,
         gatewayId: true,
+        gatewayPayload: true,
         tipoPagamento: true,
         total: true,
         createdAt: true,
@@ -471,8 +472,9 @@ export class WhatsappApiService {
     // Polling no gateway se pendente e com gatewayId
     if (venda.status === StatusVenda.PENDENTE && venda.gatewayId) {
       try {
-        const gateway = this.paymentGatewayFactory.getGateway(
+        const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
           venda.tipoPagamento,
+          venda.gatewayPayload,
         );
         const resultado = await gateway.consultarCobranca(venda.gatewayId);
         statusGateway = resultado.status;

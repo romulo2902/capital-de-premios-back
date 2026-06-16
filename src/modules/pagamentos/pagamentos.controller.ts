@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Post,
@@ -26,6 +27,7 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
  * Rotas:
  *   - POST /pagamentos/webhook/pix           → Callback PIX PagBank (sem auth)
  *   - POST /pagamentos/webhook/cartao        → Callback Cartão PagBank (sem auth)
+ *   - POST /pagamentos/webhook/mercadopago   → Callback PIX Mercado Pago (sem auth)
  *   - GET  /admin/pagamentos                  → Listar pagamentos (ADMIN)
  *   - GET  /admin/pagamentos/:id              → Detalhes de pagamento (ADMIN)
  *   - GET  /admin/pagamentos/vendas/:id/status → Consultar status no gateway (ADMIN)
@@ -52,6 +54,23 @@ export class PagamentosController {
   })
   webhookCartao(@Body() body: Record<string, unknown>) {
     return this.pagamentosService.processarWebhookCartao(body);
+  }
+
+  @Post('pagamentos/webhook/mercadopago')
+  @ApiOperation({
+    summary:
+      'Webhook PIX do Mercado Pago (Orders API) — Notificação de pagamento (sem auth)',
+  })
+  webhookMercadoPago(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Query() query: Record<string, unknown>,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.pagamentosService.processarWebhookMercadoPago(
+      headers,
+      query,
+      body,
+    );
   }
 
   // ─── ADMIN ROUTES ─────────────────────────────────────
