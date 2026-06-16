@@ -285,28 +285,16 @@ export class PagamentosService {
       return false;
     }
 
-    // DEBUG TEMPORÁRIO: testando duas variantes do manifest (id minúsculo vs
-    // id como veio na notificação) até confirmar qual a Mercado Pago usa de
-    // fato para assinar — remover a variante errada após validar em produção.
-    const calcularHash = (idParaManifest: string): string => {
-      const manifest = `id:${idParaManifest};request-id:${xRequestId};ts:${ts};`;
-      return createHmac('sha256', secret).update(manifest).digest('hex');
-    };
+    const manifest = `id:${orderId.toLowerCase()};request-id:${xRequestId};ts:${ts};`;
+    const hashEsperado = createHmac('sha256', secret)
+      .update(manifest)
+      .digest('hex');
 
-    const hashMinusculo = calcularHash(orderId.toLowerCase());
-    const hashOriginal = calcularHash(orderId);
-
-    if (hashMinusculo !== v1 && hashOriginal !== v1) {
+    if (hashEsperado !== v1) {
       this.logger.warn(
-        `Hash não confere (nenhuma variante bateu) — orderId=${orderId} requestId=${xRequestId} ts=${ts} hashMinusculo=${hashMinusculo} hashOriginal=${hashOriginal} recebido=${v1} secretLength=${secret.length}`,
+        `Hash não confere — manifest="${manifest}" esperado=${hashEsperado} recebido=${v1}`,
       );
       return false;
-    }
-
-    if (hashOriginal === v1 && hashMinusculo !== v1) {
-      this.logger.log(
-        `Assinatura Mercado Pago validada com id em case ORIGINAL (não minúsculo) — ajustar implementação.`,
-      );
     }
 
     return true;
