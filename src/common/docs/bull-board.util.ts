@@ -10,6 +10,7 @@ import { Queue } from 'bullmq';
 const BULL_BOARD_PATH = '/api/admin/filas';
 const BULL_BOARD_FALLBACK_PATH = '/admin/filas';
 const AUTO_ENCERRAMENTO_QUEUE_NAME = 'edicoes-auto-encerramento';
+const VENDAS_POS_RECONCILIACAO_QUEUE_NAME = 'vendas-pos-reconciliacao';
 
 export function setupBullBoard(
   app: Express,
@@ -36,16 +37,21 @@ export function setupBullBoard(
     return;
   }
 
-  const queue = new Queue(AUTO_ENCERRAMENTO_QUEUE_NAME, {
-    connection: { url: redisUrl },
-  });
+  const queues = [
+    new Queue(AUTO_ENCERRAMENTO_QUEUE_NAME, {
+      connection: { url: redisUrl },
+    }),
+    new Queue(VENDAS_POS_RECONCILIACAO_QUEUE_NAME, {
+      connection: { url: redisUrl },
+    }),
+  ];
   const authMiddleware = buildBasicAuthMiddleware(user, pass);
   const port = config.get<number>('PORT', 3000);
 
   const primaryAdapter = new ExpressAdapter();
   primaryAdapter.setBasePath(BULL_BOARD_PATH);
   createBullBoard({
-    queues: [new BullMQAdapter(queue)],
+    queues: queues.map((queue) => new BullMQAdapter(queue)),
     serverAdapter: primaryAdapter,
   });
   app.use(BULL_BOARD_PATH, authMiddleware);
@@ -54,7 +60,7 @@ export function setupBullBoard(
   const fallbackAdapter = new ExpressAdapter();
   fallbackAdapter.setBasePath(BULL_BOARD_FALLBACK_PATH);
   createBullBoard({
-    queues: [new BullMQAdapter(queue)],
+    queues: queues.map((queue) => new BullMQAdapter(queue)),
     serverAdapter: fallbackAdapter,
   });
   app.use(BULL_BOARD_FALLBACK_PATH, authMiddleware);
