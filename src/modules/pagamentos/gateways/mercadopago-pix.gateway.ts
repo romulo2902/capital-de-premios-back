@@ -134,7 +134,7 @@ export class MercadoPagoPixGateway implements PaymentGateway {
     };
 
     this.logger.log(
-      `Criando cobrança PIX Mercado Pago: vendaId=${input.vendaId} valor=${input.valorCentavos}¢`,
+      `Criando cobrança PIX Mercado Pago: vendaId=${input.vendaId} valor=${input.valorCentavos}¢ payerEmail=${body.payer.email}`,
     );
 
     const response = await this.request<MercadoPagoOrderResponse>(
