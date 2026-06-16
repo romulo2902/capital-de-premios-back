@@ -2234,13 +2234,9 @@ export class VendasService {
       return comboUmaChance;
     }
 
-    if (combosDaOrigem.length === 1) {
-      return combosDaOrigem[0];
-    }
-
-    throw new BadRequestException(
-      `Informe quantidadeCartelas para a origem ${origemParticipacao} desta edição`,
-    );
+    // Sem tipo especificado e múltiplos combos: retorna o primeiro (menor quantidade de cartelas).
+    // Isso suporta navegação sem filtro no POS e outros canais.
+    return combosDaOrigem[0];
   }
 
   private resolverConfiguracaoDaVendaLegado(

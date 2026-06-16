@@ -1,5 +1,7 @@
 # Capital de Prêmios API — Guia de Rotas e Testes no Swagger
 
+> **Guia completo do POS (terminal físico):** [docs/POS_TESTE.md](POS_TESTE.md)
+
 > **Swagger disponível em:** `http://localhost:3000/api/docs` (apenas em desenvolvimento)
 
 ---
