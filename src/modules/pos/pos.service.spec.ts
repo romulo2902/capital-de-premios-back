@@ -140,6 +140,45 @@ describe('PosService', () => {
     });
   });
 
+  it('confirma a venda POS no polling quando o gateway já aprovou', async () => {
+    mockPrisma.venda.findUnique.mockResolvedValue({
+      id: 'venda-1',
+      status: StatusVenda.PENDENTE,
+      origemParticipacao: OrigemParticipacao.POS,
+      tipoPagamento: TipoPagamento.PIX,
+      vendedorId: 'vend-1',
+      distribuidorId: null,
+      gatewayId: 'ORDE_1',
+      total: { toString: () => '20.00' },
+      createdAt: new Date('2026-05-28T14:30:00.000Z'),
+    });
+    mockPaymentGatewayFactory.getGateway.mockReturnValue({
+      consultarCobranca: jest.fn().mockResolvedValue({
+        status: 'APROVADO',
+        paidAt: new Date('2026-05-28T14:35:00.000Z'),
+        payload: { orderId: 'ORDE_1' },
+      }),
+    });
+    mockVendas.confirmarPagamento.mockResolvedValue({
+      data: { id: 'venda-1', status: StatusVenda.APROVADO },
+    });
+
+    const result = await service.consultarStatusPagamento('venda-1', vendedor);
+
+    expect(mockVendas.confirmarPagamento).toHaveBeenCalledWith(
+      'venda-1',
+      expect.objectContaining({
+        gatewayPolling: { orderId: 'ORDE_1' },
+      }),
+    );
+    expect(result.data).toMatchObject({
+      vendaId: 'venda-1',
+      status: StatusVenda.APROVADO,
+      statusGateway: 'APROVADO',
+      pago: true,
+    });
+  });
+
   it('rejeita consulta de status de venda que não é POS', async () => {
     mockPrisma.venda.findUnique.mockResolvedValue({
       id: 'venda-1',

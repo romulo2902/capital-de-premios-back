@@ -229,21 +229,32 @@ export class PosService {
     }
     this.garantirPropriedadeVenda(venda, user);
 
-    const statusGateway = await this.consultarGatewaySePossivel(
+    const cobrancaGateway = await this.consultarGatewaySePossivel(
       venda.gatewayId,
       venda.tipoPagamento,
     );
+    const statusGateway = cobrancaGateway?.status;
+    const statusVenda =
+      venda.status === StatusVenda.PENDENTE &&
+      statusGateway === 'APROVADO' &&
+      venda.gatewayId
+        ? await this.confirmarVendaPosPendente(venda.id, venda.gatewayId, {
+            gatewayPolling: cobrancaGateway?.payload,
+            confirmadoEm:
+              cobrancaGateway?.paidAt?.toISOString() ?? new Date().toISOString(),
+          })
+        : venda.status;
 
     return {
       message: 'Status do pagamento POS consultado',
       data: {
         vendaId: venda.id,
-        status: venda.status,
-        statusLabel: this.statusVendaLabel(venda.status),
+        status: statusVenda,
+        statusLabel: this.statusVendaLabel(statusVenda),
         statusGateway,
         total: venda.total.toString(),
         criadoEm: venda.createdAt,
-        pago: venda.status === StatusVenda.APROVADO,
+        pago: statusVenda === StatusVenda.APROVADO,
       },
     };
   }
@@ -307,21 +318,37 @@ export class PosService {
     }
     this.garantirPropriedadeVenda(venda, user);
 
-    const statusGateway = await this.consultarGatewaySePossivel(
+    const cobrancaGateway = await this.consultarGatewaySePossivel(
       venda.gatewayId,
       venda.tipoPagamento,
     );
+    const statusGateway = cobrancaGateway?.status;
+    const statusVenda =
+      venda.status === StatusVendaSena.PENDENTE &&
+      statusGateway === 'APROVADO' &&
+      venda.gatewayId
+        ? await this.confirmarVendaSenaPosPendente(
+            venda.id,
+            venda.gatewayId,
+            {
+              gatewayPolling: cobrancaGateway?.payload,
+              confirmadoEm:
+                cobrancaGateway?.paidAt?.toISOString() ??
+                new Date().toISOString(),
+            },
+          )
+        : venda.status;
 
     return {
       message: 'Status do pagamento POS Sena consultado',
       data: {
         vendaId: venda.id,
-        status: venda.status,
-        statusLabel: this.statusVendaSenaLabel(venda.status),
+        status: statusVenda,
+        statusLabel: this.statusVendaSenaLabel(statusVenda),
         statusGateway,
         total: venda.total.toString(),
         criadoEm: venda.createdAt,
-        pago: venda.status === StatusVendaSena.APROVADO,
+        pago: statusVenda === StatusVendaSena.APROVADO,
       },
     };
   }
@@ -521,15 +548,21 @@ export class PosService {
   private async consultarGatewaySePossivel(
     gatewayId: string | null,
     tipoPagamento: TipoPagamento,
-  ): Promise<string | undefined> {
+  ): Promise<
+    | {
+        status: string;
+        paidAt?: Date;
+        payload?: Record<string, unknown>;
+      }
+    | undefined
+  > {
     if (!gatewayId) {
       return undefined;
     }
 
     try {
       const gateway = this.paymentGatewayFactory.getGateway(tipoPagamento);
-      const resultado = await gateway.consultarCobranca(gatewayId);
-      return resultado.status;
+      return await gateway.consultarCobranca(gatewayId);
     } catch (error) {
       this.logger.warn(
         `Erro ao consultar gateway POS (${gatewayId}): ${
@@ -537,6 +570,52 @@ export class PosService {
         }`,
       );
       return undefined;
+    }
+  }
+
+  private async confirmarVendaPosPendente(
+    vendaId: string,
+    gatewayId: string,
+    gatewayPayload: Record<string, unknown>,
+  ): Promise<StatusVenda> {
+    try {
+      await this.vendasService.confirmarPagamento(vendaId, gatewayPayload);
+      this.logger.log(
+        `Venda POS ${vendaId} confirmada via polling do gateway (${gatewayId})`,
+      );
+      return StatusVenda.APROVADO;
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        this.logger.log(
+          `Venda POS ${vendaId} já havia sido confirmada durante o polling`,
+        );
+        return StatusVenda.APROVADO;
+      }
+
+      throw error;
+    }
+  }
+
+  private async confirmarVendaSenaPosPendente(
+    vendaId: string,
+    gatewayId: string,
+    gatewayPayload: Record<string, unknown>,
+  ): Promise<StatusVendaSena> {
+    try {
+      await this.vendasSenaService.confirmarPagamento(vendaId, gatewayPayload);
+      this.logger.log(
+        `Venda Sena POS ${vendaId} confirmada via polling do gateway (${gatewayId})`,
+      );
+      return StatusVendaSena.APROVADO;
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        this.logger.log(
+          `Venda Sena POS ${vendaId} já havia sido confirmada durante o polling`,
+        );
+        return StatusVendaSena.APROVADO;
+      }
+
+      throw error;
     }
   }
 
