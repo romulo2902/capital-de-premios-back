@@ -7,7 +7,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import { Prisma, StatusVenda, StatusVendaSena } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
@@ -258,8 +258,9 @@ export class PagamentosService {
       return true;
     }
 
+    const fingerprint = createHash('sha256').update(secret).digest('hex').slice(0, 16);
     this.logger.debug(
-      `MERCADOPAGO_WEBHOOK_SECRET em uso: ${secret.slice(0, 4)}...${secret.slice(-4)} (length=${secret.length})`,
+      `MERCADOPAGO_WEBHOOK_SECRET em uso: fingerprint=${fingerprint} length=${secret.length}`,
     );
 
     const xSignature = this.lerHeader(headers, 'x-signature');
