@@ -262,6 +262,9 @@ export class PagamentosService {
     const xRequestId = this.lerHeader(headers, 'x-request-id');
 
     if (!xSignature || !xRequestId) {
+      this.logger.warn(
+        `Assinatura Mercado Pago ausente: x-signature=${xSignature ?? 'N/A'} x-request-id=${xRequestId ?? 'N/A'}`,
+      );
       return false;
     }
 
@@ -276,6 +279,9 @@ export class PagamentosService {
     const v1 = partes['v1'];
 
     if (!ts || !v1) {
+      this.logger.warn(
+        `x-signature em formato inesperado: "${xSignature}" (ts=${ts ?? 'N/A'} v1=${v1 ?? 'N/A'})`,
+      );
       return false;
     }
 
@@ -283,6 +289,12 @@ export class PagamentosService {
     const hashEsperado = createHmac('sha256', secret)
       .update(manifest)
       .digest('hex');
+
+    if (hashEsperado !== v1) {
+      this.logger.warn(
+        `Hash não confere — manifest="${manifest}" esperado=${hashEsperado} recebido=${v1} secretLength=${secret.length}`,
+      );
+    }
 
     return hashEsperado === v1;
   }
