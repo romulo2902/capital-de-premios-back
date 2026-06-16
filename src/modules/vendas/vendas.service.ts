@@ -96,6 +96,9 @@ interface CreateVendaOptions {
   requireGateway?: boolean;
 }
 
+const RECONCILIACAO_POS_COOLDOWN_PADRAO_SEGUNDOS = 300;
+const RECONCILIACAO_POS_COOLDOWN_CONFIG_SEGUNDOS = 3600;
+
 @Injectable()
 export class VendasService {
   private readonly logger = new Logger(VendasService.name);
@@ -742,14 +745,19 @@ export class VendasService {
         origemParticipacao: true,
         tipoPagamento: true,
         gatewayId: true,
+        gatewayPayload: true,
       },
-      orderBy: { createdAt: 'asc' },
-      take: limite,
+      orderBy: { createdAt: 'desc' },
+      take: limite * 3,
     });
 
     let confirmadas = 0;
+    const agora = new Date();
+    const vendasElegiveis = vendasPendentes
+      .filter((venda) => !this.estaEmCooldownDeReconciliacao(venda, agora))
+      .slice(0, limite);
 
-    for (const venda of vendasPendentes) {
+    for (const venda of vendasElegiveis) {
       const vendaSincronizada = await this.sincronizarVendaPosPendente(
         venda,
         VENDA_INCLUDE,
@@ -1313,6 +1321,7 @@ export class VendasService {
       origemParticipacao?: OrigemParticipacao;
       tipoPagamento?: TipoPagamento;
       gatewayId?: string | null;
+      gatewayPayload?: Prisma.JsonValue | null;
     },
   >(venda: T, include: Prisma.VendaInclude): Promise<T> {
     if (
@@ -1337,6 +1346,7 @@ export class VendasService {
         confirmadoEm:
           cobranca.paidAt?.toISOString() ?? new Date().toISOString(),
       });
+      await this.registrarSucessoReconciliacaoPos(venda.id, venda.gatewayPayload);
 
       const vendaAtualizada = await this.prisma.venda.findUnique({
         where: { id: venda.id },
@@ -1346,6 +1356,11 @@ export class VendasService {
       return (vendaAtualizada as T | null) ?? venda;
     } catch (error) {
       if (!(error instanceof ConflictException)) {
+        await this.registrarFalhaReconciliacaoPos(
+          venda.id,
+          venda.gatewayPayload,
+          error,
+        );
         this.logger.warn(
           `Falha ao sincronizar venda POS ${venda.id} com o gateway: ${
             error instanceof Error ? error.message : String(error)
@@ -1360,6 +1375,104 @@ export class VendasService {
 
       return (vendaAtualizada as T | null) ?? venda;
     }
+  }
+
+  private estaEmCooldownDeReconciliacao(
+    venda: { gatewayPayload?: Prisma.JsonValue | null },
+    agora: Date,
+  ): boolean {
+    const payload = this.gatewayPayloadAsObject(venda.gatewayPayload);
+    const ultimaFalha = this.objetoSeguro(payload?.ultimaFalhaReconciliacao);
+    const proximaTentativaEm = ultimaFalha?.proximaTentativaEm;
+
+    if (typeof proximaTentativaEm !== 'string') {
+      return false;
+    }
+
+    const data = new Date(proximaTentativaEm);
+    return !Number.isNaN(data.getTime()) && data > agora;
+  }
+
+  private async registrarFalhaReconciliacaoPos(
+    vendaId: string,
+    gatewayPayload: Prisma.JsonValue | null | undefined,
+    error: unknown,
+  ): Promise<void> {
+    const payloadAtual = this.gatewayPayloadAsObject(gatewayPayload) ?? {};
+    const mensagem = error instanceof Error ? error.message : String(error);
+    const cooldownSegundos = this.obterCooldownReconciliacaoPos(mensagem);
+    const agora = new Date();
+    const proximaTentativa = new Date(agora.getTime() + cooldownSegundos * 1000);
+
+    await this.prisma.venda.update({
+      where: { id: vendaId },
+      data: {
+        gatewayPayload: {
+          ...payloadAtual,
+          ultimaFalhaReconciliacao: {
+            mensagem,
+            cooldownSegundos,
+            falhouEm: agora.toISOString(),
+            proximaTentativaEm: proximaTentativa.toISOString(),
+          },
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  private async registrarSucessoReconciliacaoPos(
+    vendaId: string,
+    gatewayPayload: Prisma.JsonValue | null | undefined,
+  ): Promise<void> {
+    const payloadAtual = this.gatewayPayloadAsObject(gatewayPayload) ?? {};
+    const { ultimaFalhaReconciliacao: _ultimaFalhaReconciliacao, ...restante } =
+      payloadAtual;
+
+    await this.prisma.venda.update({
+      where: { id: vendaId },
+      data: {
+        gatewayPayload: {
+          ...restante,
+          ultimaReconciliacaoSucessoEm: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  private obterCooldownReconciliacaoPos(mensagem: string): number {
+    const mensagemNormalizada = mensagem.toLowerCase();
+
+    if (
+      mensagemNormalizada.includes('edição sem ranges configurados') ||
+      mensagemNormalizada.includes('não possui range base') ||
+      mensagemNormalizada.includes('não há cartelas suficientes')
+    ) {
+      return RECONCILIACAO_POS_COOLDOWN_CONFIG_SEGUNDOS;
+    }
+
+    return RECONCILIACAO_POS_COOLDOWN_PADRAO_SEGUNDOS;
+  }
+
+  private gatewayPayloadAsObject(
+    gatewayPayload: Prisma.JsonValue | null | undefined,
+  ): Record<string, unknown> | null {
+    if (
+      !gatewayPayload ||
+      typeof gatewayPayload !== 'object' ||
+      Array.isArray(gatewayPayload)
+    ) {
+      return null;
+    }
+
+    return gatewayPayload as Record<string, unknown>;
+  }
+
+  private objetoSeguro(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    return value as Record<string, unknown>;
   }
 
   private normalizarDadosClienteParaEdicao(
