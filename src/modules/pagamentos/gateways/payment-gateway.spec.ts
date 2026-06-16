@@ -334,6 +334,63 @@ describe('PaymentGateway', () => {
       expect(resultado.paidAt).toEqual(new Date('2026-01-01T10:00:00Z'));
     });
 
+    it('should override payer email with MERCADOPAGO_SANDBOX_PAYER_EMAIL when configured', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          MercadoPagoPixGateway,
+          {
+            provide: ConfigService,
+            useValue: {
+              get: jest
+                .fn()
+                .mockImplementation(
+                  (key: string, defaultValue?: string) =>
+                    ({
+                      MERCADOPAGO_API_URL: 'https://api.mercadopago.com',
+                      MERCADOPAGO_ACCESS_TOKEN: 'test-access-token',
+                      MERCADOPAGO_SANDBOX_PAYER_EMAIL: 'test_user_123@testuser.com',
+                    })[key] ?? defaultValue ?? '',
+                ),
+            },
+          },
+        ],
+      }).compile();
+
+      const gatewaySandbox =
+        module.get<MercadoPagoPixGateway>(MercadoPagoPixGateway);
+
+      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        text: jest.fn().mockResolvedValue(
+          JSON.stringify({
+            id: 'ORD01',
+            status: 'action_required',
+            transactions: {
+              payments: [
+                {
+                  id: 'PAY01',
+                  payment_method: { id: 'pix', type: 'bank_transfer', qr_code: 'abc' },
+                },
+              ],
+            },
+          }),
+        ),
+      } as unknown as Response);
+
+      await gatewaySandbox.criarCobranca({
+        vendaId: 'venda-uuid-1',
+        valorCentavos: 6000,
+        descricao: 'Teste PIX Mercado Pago',
+        cpfPagador: '12345678900',
+        nomePagador: 'João Teste',
+        emailPagador: 'cliente.real@gmail.com',
+      });
+
+      const [, options] = fetchMock.mock.calls[0];
+      const body = JSON.parse(options!.body as string);
+      expect(body.payer.email).toBe('test_user_123@testuser.com');
+    });
+
     it('should throw when MERCADOPAGO_ACCESS_TOKEN is not configured', async () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [

@@ -88,6 +88,24 @@ export class MercadoPagoPixGateway implements PaymentGateway {
     this.accessToken = this.config.get<string>('MERCADOPAGO_ACCESS_TOKEN', '');
   }
 
+  /**
+   * Em contas de teste, a Orders API rejeita qualquer e-mail que não termine
+   * em "@testuser.com" (erro `invalid_email_for_sandbox`). Quando configurado,
+   * `MERCADOPAGO_SANDBOX_PAYER_EMAIL` substitui o e-mail real do cliente pelo
+   * e-mail do usuário de teste comprador. Deve ficar VAZIO em produção.
+   */
+  private resolverEmailPagador(emailPagador?: string): string {
+    const emailSandbox = this.config
+      .get<string>('MERCADOPAGO_SANDBOX_PAYER_EMAIL', '')
+      .trim();
+
+    if (emailSandbox) {
+      return emailSandbox;
+    }
+
+    return emailPagador || 'cliente.sem.email@capitaldepremios.com.br';
+  }
+
   async criarCobranca(input: CriarCobrancaInput): Promise<CriarCobrancaOutput> {
     const expiracaoSegundos = input.expiracaoSegundos ?? 1800;
     const valorTotal = this.centavosParaDecimal(input.valorCentavos);
@@ -107,8 +125,7 @@ export class MercadoPagoPixGateway implements PaymentGateway {
         ],
       },
       payer: {
-        email:
-          input.emailPagador || 'cliente.sem.email@capitaldepremios.com.br',
+        email: this.resolverEmailPagador(input.emailPagador),
         identification: {
           type: 'CPF',
           number: input.cpfPagador.replace(/\D/g, ''),
