@@ -1,8 +1,23 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsArray, IsISO8601, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsEnum, IsISO8601, IsOptional, IsString } from 'class-validator';
+
+export enum DashboardDataTipo {
+  CDP = 'CDP',
+  SENA = 'SENA',
+}
 
 export class DashboardFilterDto {
+  @ApiPropertyOptional({
+    enum: DashboardDataTipo,
+    example: DashboardDataTipo.SENA,
+    description:
+      'Origem dos dados do dashboard. Quando omitido, usa CDP. Envie SENA para consultar os dados do Capital Sena.',
+  })
+  @IsOptional()
+  @IsEnum(DashboardDataTipo)
+  tipo?: DashboardDataTipo;
+
   @ApiPropertyOptional({
     example: 'uuid-da-edicao1,uuid-da-edicao2',
     description: 'Array ou string separada por vírgula de IDs de edições.',

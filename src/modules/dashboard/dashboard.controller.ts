@@ -28,15 +28,17 @@ export class DashboardController {
     description:
       'Endpoint de uso exclusivo do Admin. Retorna contadores globais sem qualquer limite de rede ou hierarquia.',
   })
-  getAdminVisaoGeral() {
-    return this.dashboardService.getAdminVisaoGeral();
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
+  getAdminVisaoGeral(@Query() filtros: DashboardFilterDto) {
+    return this.dashboardService.getAdminVisaoGeral(filtros);
   }
 
   @Get('vendas-por-edicao')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Faturamento agregado por edição (ADMIN)' })
-  getAdminVendasPorEdicao() {
-    return this.dashboardService.getAdminVendasPorEdicao();
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
+  getAdminVendasPorEdicao(@Query() filtros: DashboardFilterDto) {
+    return this.dashboardService.getAdminVendasPorEdicao(filtros);
   }
 
   @Get('analise')
@@ -45,6 +47,7 @@ export class DashboardController {
     summary: 'Análise de vendas combinadas e timeline diária (ADMIN)',
   })
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getAdminAnaliseTimeline(@Query() filtros: DashboardFilterDto) {
     return this.dashboardService.getAdminAnaliseTimeline(filtros);
   }
@@ -56,8 +59,12 @@ export class DashboardController {
     description:
       'Retorna somente id, número, nome, status e datas das edições com vendas aprovadas vinculadas ao usuário autenticado.',
   })
-  getEdicoesDisponiveis(@Req() req: { user: RequestUser }) {
-    return this.dashboardService.getEdicoesDisponiveis(req.user);
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
+  getEdicoesDisponiveis(
+    @Req() req: { user: RequestUser },
+    @Query() filtros: DashboardFilterDto,
+  ) {
+    return this.dashboardService.getEdicoesDisponiveis(req.user, filtros);
   }
 
   // ─── DISTRIBUIDOR ──────────────────────────────────────────
@@ -72,6 +79,7 @@ export class DashboardController {
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getDistribuidorTimeline(
     @Req() req: any,
     @Query() filtros: DashboardFilterDto,
@@ -87,6 +95,7 @@ export class DashboardController {
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getDistribuidorVendasPorVendedor(
     @Req() req: any,
     @Query() filtros: DashboardFilterDto,
@@ -105,6 +114,7 @@ export class DashboardController {
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getDistribuidorClientesPorVendedor(
     @Req() req: any,
     @Query() filtros: DashboardFilterDto,
@@ -125,6 +135,7 @@ export class DashboardController {
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getDistribuidorComissoes(
     @Req() req: any,
     @Query() filtros: DashboardFilterDto,
@@ -144,6 +155,7 @@ export class DashboardController {
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getVendedorTimeline(@Req() req: any, @Query() filtros: DashboardFilterDto) {
     return this.dashboardService.getVendedorTimeline(req.user, filtros);
   }
@@ -158,6 +170,7 @@ export class DashboardController {
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getVendedorComissoes(@Req() req: any, @Query() filtros: DashboardFilterDto) {
     return this.dashboardService.getVendedorComissoes(req.user, filtros);
   }
@@ -168,6 +181,7 @@ export class DashboardController {
   @ApiQuery({ name: 'edicaoIds', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
+  @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getVendedorTotalClientes(
     @Req() req: any,
     @Query() filtros: DashboardFilterDto,

@@ -2,14 +2,27 @@ import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import {
   Perfil,
   Prisma,
-  StatusVenda,
   StatusComissao,
+  StatusVenda,
+  StatusVendaSena,
   TipoCartela,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DashboardFilterDto } from './dto/filtro-dashboard.dto';
+import {
+  DashboardDataTipo,
+  DashboardFilterDto,
+} from './dto/filtro-dashboard.dto';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
+
+type DashboardModo = 'CDP' | 'SENA';
+
+type TimelineVenda = {
+  createdAt: Date;
+  quantidade: number;
+  tipoCartela?: TipoCartela | null;
+  total: Prisma.Decimal;
+};
 
 @Injectable()
 export class DashboardService {
@@ -17,10 +30,82 @@ export class DashboardService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  // ─── ADMIN DASHBOARD ────────────────────────────────────────────
+  async getAdminVisaoGeral(filtros: DashboardFilterDto = {}) {
+    const modo = this.resolveModo(filtros);
+    this.logger.log(`Buscando visão geral (ADMIN) — modo ${modo}`);
 
-  async getAdminVisaoGeral() {
-    this.logger.log('Buscando visão geral (ADMIN)');
+    if (modo === 'SENA') {
+      const [totalClientes, totalVendedores, totalDistribuidores, vendedores] =
+        await Promise.all([
+          this.prisma.cliente.count({
+            where: { vendasSena: { some: { status: StatusVendaSena.APROVADO } } },
+          }),
+          this.prisma.vendedor.count({
+            where: { vendasSena: { some: { status: StatusVendaSena.APROVADO } } },
+          }),
+          this.prisma.distribuidor.count({
+            where: {
+              vendedores: {
+                some: {
+                  vendasSena: { some: { status: StatusVendaSena.APROVADO } },
+                },
+              },
+            },
+          }),
+          this.prisma.vendedor.findMany({
+            select: {
+              id: true,
+              nome: true,
+              vendasSena: {
+                where: { status: StatusVendaSena.APROVADO },
+                select: { total: true, quantidade: true },
+              },
+            },
+          }),
+        ]);
+
+      const rankingVendedores = vendedores
+        .map((vendedor) => ({
+          vendedorId: vendedor.id,
+          nome: vendedor.nome,
+          totalVendas: vendedor.vendasSena.length,
+          totalCartelas: vendedor.vendasSena.reduce(
+            (acumulado, venda) =>
+              acumulado +
+              calcularQuantidadeCartelasDaVenda({
+                quantidade: venda.quantidade,
+                tipoCartela: null,
+              }),
+            0,
+          ),
+          totalVendasValor: Number(
+            vendedor.vendasSena
+              .reduce((acumulado, venda) => acumulado + Number(venda.total), 0)
+              .toFixed(2),
+          ),
+        }))
+        .filter((vendedor) => vendedor.totalVendas > 0)
+        .sort((a, b) => {
+          if (b.totalVendasValor !== a.totalVendasValor) {
+            return b.totalVendasValor - a.totalVendasValor;
+          }
+
+          if (b.totalCartelas !== a.totalCartelas) {
+            return b.totalCartelas - a.totalCartelas;
+          }
+
+          return a.nome.localeCompare(b.nome, 'pt-BR');
+        })
+        .slice(0, 10);
+
+      return {
+        totalClientes,
+        totalVendedores,
+        totalDistribuidores,
+        rankingVendedores,
+      };
+    }
+
     const [totalClientes, totalVendedores, totalDistribuidores, vendedores] =
       await Promise.all([
         this.prisma.cliente.count(),
@@ -80,8 +165,34 @@ export class DashboardService {
     };
   }
 
-  async getAdminVendasPorEdicao() {
-    this.logger.log('Buscando faturamento por edição (ADMIN)');
+  async getAdminVendasPorEdicao(filtros: DashboardFilterDto = {}) {
+    const modo = this.resolveModo(filtros);
+    this.logger.log(`Buscando faturamento por edição (ADMIN) — modo ${modo}`);
+
+    if (modo === 'SENA') {
+      const edicoes = await this.prisma.edicaoSena.findMany({
+        orderBy: { numero: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          numero: true,
+          vendas: {
+            where: { status: StatusVendaSena.APROVADO },
+            select: { total: true },
+          },
+        },
+      });
+
+      return edicoes.map((edicao) => ({
+        id: edicao.id,
+        nome: `Edição ${String(edicao.numero).padStart(3, '0')}`,
+        totalFaturamento: edicao.vendas.reduce(
+          (acc, venda) => acc + Number(venda.total),
+          0,
+        ),
+      }));
+    }
+
     const edicoes = await this.prisma.edicao.findMany({
       orderBy: { numero: 'desc' },
       take: 10,
@@ -95,24 +206,36 @@ export class DashboardService {
       },
     });
 
-    const faturamentoAgregado = edicoes.map((e) => {
-      const soma = e.vendas.reduce((acc, v) => acc + Number(v.total), 0);
-      return {
-        id: e.id,
-        nome: `Edição ${String(e.numero).padStart(3, '0')}`,
-        totalFaturamento: soma,
-      };
-    });
-
-    return faturamentoAgregado;
+    return edicoes.map((edicao) => ({
+      id: edicao.id,
+      nome: `Edição ${String(edicao.numero).padStart(3, '0')}`,
+      totalFaturamento: edicao.vendas.reduce(
+        (acc, venda) => acc + Number(venda.total),
+        0,
+      ),
+    }));
   }
 
   async getAdminAnaliseTimeline(filtros: DashboardFilterDto) {
-    this.logger.log('Buscando análise/timeline (ADMIN)');
-    const vendaWhere = this.buildTimelineWhereSemPeriodo(filtros);
+    const modo = this.resolveModo(filtros);
+    this.logger.log(`Buscando análise/timeline (ADMIN) — modo ${modo}`);
+
+    if (modo === 'SENA') {
+      const vendas = await this.prisma.vendaSena.findMany({
+        where: this.buildTimelineWhereSemPeriodoSena(filtros),
+        select: {
+          createdAt: true,
+          quantidade: true,
+          total: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      return this.aggregateTimeline(vendas);
+    }
 
     const vendas = await this.prisma.venda.findMany({
-      where: vendaWhere,
+      where: this.buildTimelineWhereSemPeriodoCdp(filtros),
       select: {
         createdAt: true,
         quantidade: true,
@@ -125,10 +248,80 @@ export class DashboardService {
     return this.aggregateTimeline(vendas);
   }
 
-  async getEdicoesDisponiveis(user: RequestUser) {
+  async getEdicoesDisponiveis(
+    user: RequestUser,
+    filtros: DashboardFilterDto = {},
+  ) {
+    const modo = this.resolveModo(filtros);
     this.logger.log(
-      `Buscando edições disponíveis no dashboard para perfil ${user.perfil}`,
+      `Buscando edições disponíveis no dashboard para perfil ${user.perfil} — modo ${modo}`,
     );
+
+    if (modo === 'SENA') {
+      if (user.perfil === Perfil.DISTRIBUIDOR) {
+        const edicoes = await this.prisma.edicaoSena.findMany({
+          where: {
+            vendas: {
+              some: {
+                status: StatusVendaSena.APROVADO,
+                distribuidorId: user.distribuidorId,
+              },
+            },
+          },
+          orderBy: [{ dataSorteioMegaSena: 'desc' }, { numero: 'desc' }],
+          select: {
+            id: true,
+            numero: true,
+            status: true,
+            dataSorteioMegaSena: true,
+            dataEncerramento: true,
+          },
+        });
+
+        return edicoes.map((edicao) =>
+          this.mapEdicaoFiltro({
+            id: edicao.id,
+            numero: edicao.numero,
+            status: edicao.status,
+            dataSorteio: edicao.dataSorteioMegaSena,
+            dataEncerramento: edicao.dataEncerramento,
+          }),
+        );
+      }
+
+      if (user.perfil !== Perfil.VENDEDOR) {
+        throw new ForbiddenException('Perfil sem acesso às edições do dashboard');
+      }
+
+      const edicoes = await this.prisma.edicaoSena.findMany({
+        where: {
+          vendas: {
+            some: {
+              status: StatusVendaSena.APROVADO,
+              vendedorId: user.vendedorId,
+            },
+          },
+        },
+        orderBy: [{ dataSorteioMegaSena: 'desc' }, { numero: 'desc' }],
+        select: {
+          id: true,
+          numero: true,
+          status: true,
+          dataSorteioMegaSena: true,
+          dataEncerramento: true,
+        },
+      });
+
+      return edicoes.map((edicao) =>
+        this.mapEdicaoFiltro({
+          id: edicao.id,
+          numero: edicao.numero,
+          status: edicao.status,
+          dataSorteio: edicao.dataSorteioMegaSena,
+          dataEncerramento: edicao.dataEncerramento,
+        }),
+      );
+    }
 
     if (user.perfil === Perfil.DISTRIBUIDOR) {
       const edicoes = await this.prisma.edicao.findMany({
@@ -179,16 +372,33 @@ export class DashboardService {
     return edicoes.map((edicao) => this.mapEdicaoFiltro(edicao));
   }
 
-  // ─── DISTRIBUIDOR DASHBOARD ──────────────────────────────────────
-
   async getDistribuidorTimeline(
     user: RequestUser,
     filtros: DashboardFilterDto,
   ) {
+    const modo = this.resolveModo(filtros);
     this.logger.log(
-      `Buscando timeline de vendas para Distribuidor ${user.distribuidorId}`,
+      `Buscando timeline de vendas para Distribuidor ${user.distribuidorId} — modo ${modo}`,
     );
-    const where = this.buildTimelineWhere(filtros);
+
+    if (modo === 'SENA') {
+      const where = this.buildTimelineWhereSena(filtros);
+      where.distribuidorId = user.distribuidorId;
+
+      const vendas = await this.prisma.vendaSena.findMany({
+        where,
+        select: {
+          createdAt: true,
+          quantidade: true,
+          total: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      return this.aggregateTimeline(vendas);
+    }
+
+    const where = this.buildTimelineWhereCdp(filtros);
     where.distribuidorId = user.distribuidorId;
 
     const vendas = await this.prisma.venda.findMany({
@@ -209,10 +419,47 @@ export class DashboardService {
     user: RequestUser,
     filtros: DashboardFilterDto,
   ) {
+    const modo = this.resolveModo(filtros);
     this.logger.log(
-      `Buscando vendas por vendedor para Distribuidor ${user.distribuidorId}`,
+      `Buscando vendas por vendedor para Distribuidor ${user.distribuidorId} — modo ${modo}`,
     );
-    const vendasWhere = this.buildTimelineWhere(filtros);
+
+    if (modo === 'SENA') {
+      const vendasWhere = this.buildTimelineWhereSena(filtros);
+      const vendedores = await this.prisma.vendedor.findMany({
+        where: { distribuidorId: user.distribuidorId },
+        select: {
+          id: true,
+          nome: true,
+          vendasSena: {
+            where: vendasWhere,
+            select: { total: true, quantidade: true },
+          },
+        },
+      });
+
+      return vendedores
+        .map((vendedor) => ({
+          vendedorId: vendedor.id,
+          nome: vendedor.nome,
+          quantidadeVendas: vendedor.vendasSena.reduce(
+            (acc, venda) =>
+              acc +
+              calcularQuantidadeCartelasDaVenda({
+                quantidade: venda.quantidade,
+                tipoCartela: null,
+              }),
+            0,
+          ),
+          totalFaturamento: vendedor.vendasSena.reduce(
+            (acc, venda) => acc + Number(venda.total),
+            0,
+          ),
+        }))
+        .sort((a, b) => b.totalFaturamento - a.totalFaturamento);
+    }
+
+    const vendasWhere = this.buildTimelineWhereCdp(filtros);
     const vendedores = await this.prisma.vendedor.findMany({
       where: { distribuidorId: user.distribuidorId },
       select: {
@@ -226,10 +473,10 @@ export class DashboardService {
     });
 
     return vendedores
-      .map((v) => ({
-        vendedorId: v.id,
-        nome: v.nome,
-        quantidadeVendas: v.vendas.reduce(
+      .map((vendedor) => ({
+        vendedorId: vendedor.id,
+        nome: vendedor.nome,
+        quantidadeVendas: vendedor.vendas.reduce(
           (acc, venda) =>
             acc +
             calcularQuantidadeCartelasDaVenda({
@@ -238,7 +485,7 @@ export class DashboardService {
             }),
           0,
         ),
-        totalFaturamento: v.vendas.reduce(
+        totalFaturamento: vendedor.vendas.reduce(
           (acc, venda) => acc + Number(venda.total),
           0,
         ),
@@ -250,13 +497,64 @@ export class DashboardService {
     user: RequestUser,
     filtros: DashboardFilterDto,
   ) {
+    const modo = this.resolveModo(filtros);
     this.logger.log(
-      `Buscando clientes por vendedor para Distribuidor ${user.distribuidorId}`,
+      `Buscando clientes por vendedor para Distribuidor ${user.distribuidorId} — modo ${modo}`,
     );
     const possuiFiltros =
       Boolean(filtros.edicaoIds?.length) ||
       Boolean(filtros.dataInicio) ||
       Boolean(filtros.dataFim);
+
+    if (modo === 'SENA') {
+      const vendedores = await this.prisma.vendedor.findMany({
+        where: { distribuidorId: user.distribuidorId },
+        select: {
+          id: true,
+          nome: true,
+          ...(possuiFiltros
+            ? {
+                vendasSena: {
+                  where: this.buildTimelineWhereSena(filtros),
+                  select: { clienteId: true },
+                },
+              }
+            : {
+                _count: { select: { clientes: true } },
+              }),
+        },
+        orderBy: { nome: 'asc' },
+      });
+
+      if (possuiFiltros) {
+        const vendedoresComVendas = vendedores as Array<{
+          id: string;
+          nome: string;
+          vendasSena: Array<{ clienteId: string }>;
+        }>;
+
+        return vendedoresComVendas.map((vendedor) => ({
+          vendedorId: vendedor.id,
+          nome: vendedor.nome,
+          totalClientes: new Set(
+            vendedor.vendasSena.map((venda) => venda.clienteId),
+          ).size,
+        }));
+      }
+
+      const vendedoresComCount = vendedores as Array<{
+        id: string;
+        nome: string;
+        _count: { clientes: number };
+      }>;
+
+      return vendedoresComCount.map((vendedor) => ({
+        vendedorId: vendedor.id,
+        nome: vendedor.nome,
+        totalClientes: vendedor._count.clientes,
+      }));
+    }
+
     const vendedores = await this.prisma.vendedor.findMany({
       where: { distribuidorId: user.distribuidorId },
       select: {
@@ -265,7 +563,7 @@ export class DashboardService {
         ...(possuiFiltros
           ? {
               vendas: {
-                where: this.buildTimelineWhere(filtros),
+                where: this.buildTimelineWhereCdp(filtros),
                 select: { clienteId: true },
               },
             }
@@ -308,46 +606,70 @@ export class DashboardService {
     user: RequestUser,
     filtros: DashboardFilterDto,
   ) {
+    const modo = this.resolveModo(filtros);
     this.logger.log(
-      `Buscando comissões para Distribuidor ${user.distribuidorId}`,
+      `Buscando comissões para Distribuidor ${user.distribuidorId} — modo ${modo}`,
     );
+
+    if (modo === 'SENA') {
+      const [vendas, comissoes] = await Promise.all([
+        this.prisma.vendaSena.findMany({
+          where: {
+            ...this.buildTimelineWhereSena(filtros),
+            distribuidorId: user.distribuidorId,
+          },
+          select: { total: true },
+        }),
+        this.prisma.comissaoDistribuidorSena.findMany({
+          where: this.buildDistribuidorComissaoWhereSena(user, filtros),
+          select: { valor: true },
+        }),
+      ]);
+
+      return this.mapTotaisVendasEComissoes(vendas, comissoes);
+    }
+
     const [vendas, comissoes] = await Promise.all([
       this.prisma.venda.findMany({
         where: {
-          ...this.buildTimelineWhere(filtros),
+          ...this.buildTimelineWhereCdp(filtros),
           distribuidorId: user.distribuidorId,
         },
         select: { total: true },
       }),
       this.prisma.comissaoDistribuidor.findMany({
-        where: this.buildDistribuidorComissaoWhere(user, filtros),
+        where: this.buildDistribuidorComissaoWhereCdp(user, filtros),
         select: { valor: true },
       }),
     ]);
 
-    const totalVendasValor = vendas.reduce(
-      (acc, venda) => acc + Number(venda.total),
-      0,
-    );
-    const totalComissao = comissoes.reduce(
-      (acc: number, comissao: { valor: Prisma.Decimal }) =>
-        acc + Number(comissao.valor),
-      0,
-    );
-
-    return {
-      totalVendasValor: Number(totalVendasValor.toFixed(2)),
-      totalComissao: Number(totalComissao.toFixed(2)),
-    };
+    return this.mapTotaisVendasEComissoes(vendas, comissoes);
   }
 
-  // ─── VENDEDOR DASHBOARD ──────────────────────────────────────────
-
   async getVendedorTimeline(user: RequestUser, filtros: DashboardFilterDto) {
+    const modo = this.resolveModo(filtros);
     this.logger.log(
-      `Buscando timeline de vendas para Vendedor ${user.vendedorId}`,
+      `Buscando timeline de vendas para Vendedor ${user.vendedorId} — modo ${modo}`,
     );
-    const where = this.buildTimelineWhere(filtros);
+
+    if (modo === 'SENA') {
+      const where = this.buildTimelineWhereSena(filtros);
+      where.vendedorId = user.vendedorId;
+
+      const vendas = await this.prisma.vendaSena.findMany({
+        where,
+        select: {
+          createdAt: true,
+          quantidade: true,
+          total: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      return this.aggregateTimeline(vendas);
+    }
+
+    const where = this.buildTimelineWhereCdp(filtros);
     where.vendedorId = user.vendedorId;
 
     const vendas = await this.prisma.venda.findMany({
@@ -365,48 +687,93 @@ export class DashboardService {
   }
 
   async getVendedorComissoes(user: RequestUser, filtros: DashboardFilterDto) {
-    this.logger.log(`Buscando comissões para Vendedor ${user.vendedorId}`);
+    const modo = this.resolveModo(filtros);
+    this.logger.log(
+      `Buscando comissões para Vendedor ${user.vendedorId} — modo ${modo}`,
+    );
+
+    if (modo === 'SENA') {
+      const [vendas, comissoes] = await Promise.all([
+        this.prisma.vendaSena.findMany({
+          where: {
+            ...this.buildTimelineWhereSena(filtros),
+            vendedorId: user.vendedorId,
+          },
+          select: { total: true },
+        }),
+        this.prisma.comissaoSena.findMany({
+          where: this.buildVendedorComissaoWhereSena(user, filtros),
+          select: { valor: true },
+        }),
+      ]);
+
+      return this.mapTotaisVendasEComissoes(vendas, comissoes);
+    }
+
     const [vendas, comissoes] = await Promise.all([
       this.prisma.venda.findMany({
         where: {
-          ...this.buildTimelineWhere(filtros),
+          ...this.buildTimelineWhereCdp(filtros),
           vendedorId: user.vendedorId,
         },
         select: { total: true },
       }),
       this.prisma.comissao.findMany({
-        where: this.buildVendedorComissaoWhere(user, filtros),
+        where: this.buildVendedorComissaoWhereCdp(user, filtros),
         select: { valor: true },
       }),
     ]);
 
-    const totalVendasValor = vendas.reduce(
-      (acc, venda) => acc + Number(venda.total),
-      0,
-    );
-    const totalComissao = comissoes.reduce(
-      (acc: number, comissao: { valor: Prisma.Decimal }) =>
-        acc + Number(comissao.valor),
-      0,
-    );
-
-    return {
-      totalVendasValor: Number(totalVendasValor.toFixed(2)),
-      totalComissao: Number(totalComissao.toFixed(2)),
-    };
+    return this.mapTotaisVendasEComissoes(vendas, comissoes);
   }
 
   async getVendedorTotalClientes(
     user: RequestUser,
     filtros: DashboardFilterDto,
   ) {
+    const modo = this.resolveModo(filtros);
     this.logger.log(
-      `Buscando total de clientes para Vendedor ${user.vendedorId}`,
+      `Buscando total de clientes para Vendedor ${user.vendedorId} — modo ${modo}`,
     );
     const possuiFiltros =
       Boolean(filtros.edicaoIds?.length) ||
       Boolean(filtros.dataInicio) ||
       Boolean(filtros.dataFim);
+
+    if (modo === 'SENA') {
+      const [totalClientes, vendas, comissoes] = await Promise.all([
+        this.prisma.cliente.count({
+          where: possuiFiltros
+            ? {
+                vendedorId: user.vendedorId,
+                vendasSena: {
+                  some: {
+                    ...this.buildTimelineWhereSena(filtros),
+                    vendedorId: user.vendedorId,
+                  },
+                },
+              }
+            : { vendedorId: user.vendedorId },
+        }),
+        this.prisma.vendaSena.findMany({
+          where: {
+            ...this.buildTimelineWhereSena(filtros),
+            vendedorId: user.vendedorId,
+          },
+          select: { total: true },
+        }),
+        this.prisma.comissaoSena.findMany({
+          where: this.buildVendedorComissaoWhereSena(user, filtros),
+          select: { valor: true },
+        }),
+      ]);
+
+      const totais = this.mapTotaisVendasEComissoes(vendas, comissoes);
+      return {
+        totalClientes,
+        ...totais,
+      };
+    }
 
     const [totalClientes, vendas, comissoes] = await Promise.all([
       this.prisma.cliente.count({
@@ -415,7 +782,7 @@ export class DashboardService {
               vendedorId: user.vendedorId,
               vendas: {
                 some: {
-                  ...this.buildTimelineWhere(filtros),
+                  ...this.buildTimelineWhereCdp(filtros),
                   vendedorId: user.vendedorId,
                 },
               },
@@ -424,46 +791,35 @@ export class DashboardService {
       }),
       this.prisma.venda.findMany({
         where: {
-          ...this.buildTimelineWhere(filtros),
+          ...this.buildTimelineWhereCdp(filtros),
           vendedorId: user.vendedorId,
         },
         select: { total: true },
       }),
       this.prisma.comissao.findMany({
-        where: this.buildVendedorComissaoWhere(user, filtros),
+        where: this.buildVendedorComissaoWhereCdp(user, filtros),
         select: { valor: true },
       }),
     ]);
 
-    const totalVendasValor = vendas.reduce(
-      (acc, venda) => acc + Number(venda.total),
-      0,
-    );
-    const totalComissao = comissoes.reduce(
-      (acc: number, comissao: { valor: Prisma.Decimal }) =>
-        acc + Number(comissao.valor),
-      0,
-    );
-
+    const totais = this.mapTotaisVendasEComissoes(vendas, comissoes);
     return {
       totalClientes,
-      totalVendasValor: Number(totalVendasValor.toFixed(2)),
-      totalComissao: Number(totalComissao.toFixed(2)),
+      ...totais,
     };
   }
 
-  // ─── HELPERS ───────────────────────────────────────────────────
+  private resolveModo(filtros?: DashboardFilterDto): DashboardModo {
+    return filtros?.tipo === DashboardDataTipo.SENA ? 'SENA' : 'CDP';
+  }
 
-  private buildTimelineWhere(
+  private buildTimelineWhereCdp(
     filtros: DashboardFilterDto,
   ): Prisma.VendaWhereInput {
     const where: Prisma.VendaWhereInput = { status: StatusVenda.APROVADO };
 
-    if (filtros.edicaoIds) {
-      const ids = filtros.edicaoIds;
-      if (ids.length > 0) {
-        where.edicaoId = { in: ids };
-      }
+    if (filtros.edicaoIds?.length) {
+      where.edicaoId = { in: filtros.edicaoIds };
     }
 
     if (filtros.dataInicio || filtros.dataFim) {
@@ -481,22 +837,59 @@ export class DashboardService {
     return where;
   }
 
-  private buildTimelineWhereSemPeriodo(
+  private buildTimelineWhereSemPeriodoCdp(
     filtros: DashboardFilterDto,
   ): Prisma.VendaWhereInput {
     const where: Prisma.VendaWhereInput = { status: StatusVenda.APROVADO };
 
-    if (filtros.edicaoIds) {
-      const ids = filtros.edicaoIds;
-      if (ids.length > 0) {
-        where.edicaoId = { in: ids };
+    if (filtros.edicaoIds?.length) {
+      where.edicaoId = { in: filtros.edicaoIds };
+    }
+
+    return where;
+  }
+
+  private buildTimelineWhereSena(
+    filtros: DashboardFilterDto,
+  ): Prisma.VendaSenaWhereInput {
+    const where: Prisma.VendaSenaWhereInput = {
+      status: StatusVendaSena.APROVADO,
+    };
+
+    if (filtros.edicaoIds?.length) {
+      where.edicaoSenaId = { in: filtros.edicaoIds };
+    }
+
+    if (filtros.dataInicio || filtros.dataFim) {
+      where.createdAt = {};
+      if (filtros.dataInicio) {
+        where.createdAt.gte = new Date(filtros.dataInicio);
+      }
+      if (filtros.dataFim) {
+        const dataFim = new Date(filtros.dataFim);
+        dataFim.setHours(23, 59, 59, 999);
+        where.createdAt.lte = dataFim;
       }
     }
 
     return where;
   }
 
-  private buildDistribuidorComissaoWhere(
+  private buildTimelineWhereSemPeriodoSena(
+    filtros: DashboardFilterDto,
+  ): Prisma.VendaSenaWhereInput {
+    const where: Prisma.VendaSenaWhereInput = {
+      status: StatusVendaSena.APROVADO,
+    };
+
+    if (filtros.edicaoIds?.length) {
+      where.edicaoSenaId = { in: filtros.edicaoIds };
+    }
+
+    return where;
+  }
+
+  private buildDistribuidorComissaoWhereCdp(
     user: RequestUser,
     filtros: DashboardFilterDto,
   ): Prisma.ComissaoDistribuidorWhereInput {
@@ -524,7 +917,35 @@ export class DashboardService {
     return where;
   }
 
-  private buildVendedorComissaoWhere(
+  private buildDistribuidorComissaoWhereSena(
+    user: RequestUser,
+    filtros: DashboardFilterDto,
+  ): Prisma.ComissaoDistribuidorSenaWhereInput {
+    const where: Prisma.ComissaoDistribuidorSenaWhereInput = {
+      distribuidorId: user.distribuidorId,
+      status: StatusComissao.PENDENTE,
+    };
+
+    if (filtros.edicaoIds?.length) {
+      where.vendaSena = { edicaoSenaId: { in: filtros.edicaoIds } };
+    }
+
+    if (filtros.dataInicio || filtros.dataFim) {
+      where.createdAt = {};
+      if (filtros.dataInicio) {
+        where.createdAt.gte = new Date(filtros.dataInicio);
+      }
+      if (filtros.dataFim) {
+        const dataFim = new Date(filtros.dataFim);
+        dataFim.setHours(23, 59, 59, 999);
+        where.createdAt.lte = dataFim;
+      }
+    }
+
+    return where;
+  }
+
+  private buildVendedorComissaoWhereCdp(
     user: RequestUser,
     filtros: DashboardFilterDto,
   ): Prisma.ComissaoWhereInput {
@@ -552,14 +973,54 @@ export class DashboardService {
     return where;
   }
 
-  private aggregateTimeline(
-    vendas: {
-      createdAt: Date;
-      quantidade: number;
-      tipoCartela?: TipoCartela | null;
-      total: Prisma.Decimal;
-    }[],
+  private buildVendedorComissaoWhereSena(
+    user: RequestUser,
+    filtros: DashboardFilterDto,
+  ): Prisma.ComissaoSenaWhereInput {
+    const where: Prisma.ComissaoSenaWhereInput = {
+      vendedorId: user.vendedorId,
+      status: StatusComissao.PENDENTE,
+    };
+
+    if (filtros.edicaoIds?.length) {
+      where.vendaSena = { edicaoSenaId: { in: filtros.edicaoIds } };
+    }
+
+    if (filtros.dataInicio || filtros.dataFim) {
+      where.createdAt = {};
+      if (filtros.dataInicio) {
+        where.createdAt.gte = new Date(filtros.dataInicio);
+      }
+      if (filtros.dataFim) {
+        const dataFim = new Date(filtros.dataFim);
+        dataFim.setHours(23, 59, 59, 999);
+        where.createdAt.lte = dataFim;
+      }
+    }
+
+    return where;
+  }
+
+  private mapTotaisVendasEComissoes(
+    vendas: Array<{ total: Prisma.Decimal }>,
+    comissoes: Array<{ valor: Prisma.Decimal }>,
   ) {
+    const totalVendasValor = vendas.reduce(
+      (acc, venda) => acc + Number(venda.total),
+      0,
+    );
+    const totalComissao = comissoes.reduce(
+      (acc, comissao) => acc + Number(comissao.valor),
+      0,
+    );
+
+    return {
+      totalVendasValor: Number(totalVendasValor.toFixed(2)),
+      totalComissao: Number(totalComissao.toFixed(2)),
+    };
+  }
+
+  private aggregateTimeline(vendas: TimelineVenda[]) {
     const dailyMap = new Map<
       string,
       { dia: string; cartelas: number; totalR$: number }
@@ -567,17 +1028,15 @@ export class DashboardService {
     let totalAcumuladoR$ = 0;
     let totalCartelasAcumulado = 0;
 
-    for (const v of vendas) {
-      // Usar a string YYYY-MM-DD
-      const diaStr = v.createdAt.toISOString().slice(0, 10);
-
+    for (const venda of vendas) {
+      const diaStr = venda.createdAt.toISOString().slice(0, 10);
       const cartelas = calcularQuantidadeCartelasDaVenda({
-        quantidade: v.quantidade,
-        tipoCartela: v.tipoCartela ?? null,
+        quantidade: venda.quantidade,
+        tipoCartela: venda.tipoCartela ?? null,
       });
-      const t = Number(v.total);
+      const total = Number(venda.total);
 
-      totalAcumuladoR$ += t;
+      totalAcumuladoR$ += total;
       totalCartelasAcumulado += cartelas;
 
       if (!dailyMap.has(diaStr)) {
@@ -586,13 +1045,13 @@ export class DashboardService {
 
       const dayData = dailyMap.get(diaStr)!;
       dayData.cartelas += cartelas;
-      dayData.totalR$ += t;
+      dayData.totalR$ += total;
     }
 
-    const timeline = Array.from(dailyMap.values()).map((d) => ({
-      dia: d.dia,
-      cartelas: d.cartelas,
-      totalRS: Number(d.totalR$.toFixed(2)),
+    const timeline = Array.from(dailyMap.values()).map((day) => ({
+      dia: day.dia,
+      cartelas: day.cartelas,
+      totalRS: Number(day.totalR$.toFixed(2)),
     }));
 
     return {
