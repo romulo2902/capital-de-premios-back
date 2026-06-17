@@ -238,13 +238,14 @@ export class PosService {
     await this.garantirReservasSelecionadas(dto, user);
     const vendaDto: CreateVendaDto = {
       ...dto,
-      tipoPagamento: TipoPagamento.PIX,
+      tipoPagamento: dto.tipoPagamento ?? TipoPagamento.PIX,
       vendedorId: user.vendedorId,
       distribuidorId: user.distribuidorId,
     };
     const result = await this.vendasService.create(vendaDto, user, {
       origemParticipacao: OrigemParticipacao.POS,
-      requireGateway: true,
+      requireGateway:
+        (dto.tipoPagamento ?? TipoPagamento.PIX) === TipoPagamento.PIX,
     });
     await this.estenderReservasSelecionadas(dto, user);
     return result;
@@ -402,9 +403,13 @@ export class PosService {
   // ─── Helpers ──────────────────────────────────────────────────────
 
   private validarDadosPagamento(tipoPagamento: TipoPagamento | undefined): void {
-    if (tipoPagamento && tipoPagamento !== TipoPagamento.PIX) {
+    if (
+      tipoPagamento &&
+      tipoPagamento !== TipoPagamento.PIX &&
+      tipoPagamento !== TipoPagamento.MANUAL
+    ) {
       throw new BadRequestException(
-        'O POS aceita apenas tipoPagamento PIX por enquanto',
+        'O POS aceita apenas tipoPagamento PIX ou MANUAL',
       );
     }
   }

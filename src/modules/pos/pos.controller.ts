@@ -61,6 +61,18 @@ const POS_PREMIOS_VENDA_COMBO_REQUEST_EXAMPLE = {
   dataNascimento: '1985-04-11',
 };
 
+const POS_PREMIOS_VENDA_MANUAL_REQUEST_EXAMPLE = {
+  edicaoId: '8f52a4b8-1c4f-4e0b-8df6-95522f47a111',
+  quantidadeCartelas: 2,
+  tipoPagamento: 'MANUAL',
+  cartelasSelecionadas: ['0276145', '0276146'],
+  cpf: '98765432100',
+  nome: 'Maria Cliente',
+  telefone: '(11) 99999-9999',
+  email: 'maria.cliente@email.com',
+  dataNascimento: '1985-04-11',
+};
+
 const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
   tipoPagamento: 'PIX',
@@ -697,18 +709,19 @@ estende a reserva durante a cobrança PIX.
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
     summary:
-      '8. 🔒 Criar venda POS e gerar cobrança — Prêmios (VENDEDOR + DISTRIBUIDOR)',
+      '8. 🔒 Criar venda POS — Prêmios (VENDEDOR + DISTRIBUIDOR)',
     description: `
-Cria a venda com origem **POS**, status **PENDENTE** e gera a cobrança no gateway
-pela própria API, igual ao fluxo WhatsApp. O vendedor/distribuidor é definido
-pelo token (não envie no corpo).
+Cria a venda com origem **POS**. O vendedor/distribuidor é definido pelo token
+(não envie no corpo).
 
 **Compra unitária:** informe \`quantidadeCartelas\` (e opcionalmente
 \`cartelasSelecionadas\`).
 **Combo:** informe \`comboId\` ou \`combosSelecionados\`.
-**Pagamento:** somente \`PIX\` por enquanto; retorna \`pixCopiaECola\`/QR Code em \`pagamento\`.
+**Pagamento PIX:** cria a venda como \`PENDENTE\` e gera a cobrança no gateway,
+retornando \`pixCopiaECola\`/QR Code em \`pagamento\`.
+**Pagamento MANUAL:** aprova a venda imediatamente, sem passar pelo gateway.
 
-Guarde o \`id\` retornado: ele é usado para consultar status em
+Guarde o \`id\` retornado: ele pode ser usado para consultar status em
 \`GET /pos/vendas/{id}/pagamento\`. O terminal deve fazer polling a cada
 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`, \`RECUSADO\`,
 \`CANCELADO\` }.
@@ -727,24 +740,48 @@ Guarde o \`id\` retornado: ele é usado para consultar status em
         summary: 'Venda por combo selecionado',
         value: POS_PREMIOS_VENDA_COMBO_REQUEST_EXAMPLE,
       },
+      vendaManual: {
+        summary: 'Venda manual já paga na maquininha',
+        value: POS_PREMIOS_VENDA_MANUAL_REQUEST_EXAMPLE,
+      },
     },
   })
   @ApiResponse({
     status: 201,
-    description: 'Venda criada (PENDENTE), aguardando confirmação de pagamento.',
+    description:
+      'Venda criada com sucesso. Em PIX fica PENDENTE; em MANUAL já retorna APROVADO.',
     schema: {
-      example: {
-        statusCode: 201,
-        message: 'Venda criada com sucesso',
-        data: {
-          id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
-          status: 'PENDENTE',
-          origemParticipacao: 'POS',
-          total: '20.00',
-          pagamento: {
-            pixCopiaECola: '00020126580014br.gov.bcb.pix0136...',
-            qrCodeBase64: 'https://assets.pagseguro.com.br/qrcode/...',
-            urlPagamento: 'https://assets.pagseguro.com.br/qrcode/...',
+      examples: {
+        pix: {
+          summary: 'Venda PIX pendente',
+          value: {
+            statusCode: 201,
+            message: 'Venda criada com sucesso',
+            data: {
+              id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+              status: 'PENDENTE',
+              origemParticipacao: 'POS',
+              total: '20.00',
+              pagamento: {
+                pixCopiaECola: '00020126580014br.gov.bcb.pix0136...',
+                qrCodeBase64: 'https://assets.pagseguro.com.br/qrcode/...',
+                urlPagamento: 'https://assets.pagseguro.com.br/qrcode/...',
+              },
+            },
+          },
+        },
+        manual: {
+          summary: 'Venda manual aprovada na hora',
+          value: {
+            statusCode: 201,
+            message: 'Venda criada com sucesso',
+            data: {
+              id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+              status: 'APROVADO',
+              origemParticipacao: 'POS',
+              total: '20.00',
+              pagamento: {},
+            },
           },
         },
       },

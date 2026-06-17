@@ -99,6 +99,35 @@ describe('PosService', () => {
     );
   });
 
+  it('cria venda manual no POS sem exigir gateway', async () => {
+    mockVendas.create.mockResolvedValue({ data: { id: 'venda-manual-1' } });
+
+    await service.criarVenda(
+      {
+        edicaoId: 'ed-1',
+        cpf: '1',
+        nome: 'X',
+        telefone: '1',
+        dataNascimento: '1990-01-01',
+        tipoPagamento: TipoPagamento.MANUAL,
+      } as never,
+      vendedor,
+    );
+
+    expect(mockVendas.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tipoPagamento: TipoPagamento.MANUAL,
+        vendedorId: 'vend-1',
+        distribuidorId: undefined,
+      }),
+      vendedor,
+      {
+        origemParticipacao: OrigemParticipacao.POS,
+        requireGateway: false,
+      },
+    );
+  });
+
   it('busca cliente por CPF no escopo do vendedor para autofill do POS', async () => {
     mockPrisma.cliente.findFirst.mockResolvedValue({
       id: 'cliente-1',

@@ -225,7 +225,11 @@ export class VendasService {
       }
     }
 
-    const tipoPagamentoResolvido = this.resolverTipoPagamento(dto, user);
+    const tipoPagamentoResolvido = this.resolverTipoPagamento(
+      dto,
+      user,
+      options,
+    );
     const criadoPorId = this.resolverCriadoPorId(user);
 
     // 4. Calcular total
@@ -1736,6 +1740,7 @@ export class VendasService {
   private resolverTipoPagamento(
     dto: CreateVendaDto,
     user?: RequestUser,
+    options?: CreateVendaOptions,
   ): TipoPagamento {
     if (user?.perfil === 'ADMIN') {
       return TipoPagamento.MANUAL;
@@ -1748,8 +1753,12 @@ export class VendasService {
     }
 
     if (dto.tipoPagamento === TipoPagamento.MANUAL) {
+      if (options?.origemParticipacao === OrigemParticipacao.POS) {
+        return TipoPagamento.MANUAL;
+      }
+
       throw new BadRequestException(
-        'tipoPagamento MANUAL é permitido apenas para venda direta do ADMIN',
+        'tipoPagamento MANUAL é permitido apenas para venda direta do ADMIN ou no canal POS',
       );
     }
 

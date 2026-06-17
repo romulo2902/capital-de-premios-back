@@ -67,6 +67,7 @@ describe('VendasService', () => {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     vendedor: {
       findUnique: jest.fn(),
@@ -384,6 +385,8 @@ describe('VendasService', () => {
       cpf: '12345678900',
       nome: 'Romulo Valadares',
       telefone: '(00) 99999-9999',
+      email: 'romulo@test.com',
+      dataNascimento: '1990-01-01',
     };
 
     const edicaoAtiva = {
@@ -407,6 +410,7 @@ describe('VendasService', () => {
       id: 'cliente-1',
       cpf: '12345678900',
       nome: 'Romulo Valadares',
+      dataNascimento: new Date('1990-01-01T00:00:00.000Z'),
     };
 
     const vendaCriada = {
@@ -853,6 +857,134 @@ describe('VendasService', () => {
       ).rejects.toThrow(
         'tipoPagamento é obrigatório para vendas que não são diretas do ADMIN',
       );
+    });
+
+    it('should allow tipoPagamento MANUAL for POS sales by vendedor', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue(edicaoAtiva);
+      mockPrisma.cliente.findUnique.mockResolvedValue(clienteMock);
+      const txMock = {
+        venda: {
+          create: jest.fn().mockResolvedValue({
+            ...vendaCriada,
+            id: 'venda-pos-manual',
+            status: StatusVenda.APROVADO,
+            tipoPagamento: TipoPagamento.MANUAL,
+            origemParticipacao: OrigemParticipacao.POS,
+            edicaoId: 'edicao-1',
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-1',
+            gatewayPayload: null,
+            vendedor: {
+              id: 'vendedor-1',
+              distribuidorId: 'distribuidor-1',
+            },
+            edicao: {
+              id: 'edicao-1',
+            },
+            total: new Prisma.Decimal('60.00'),
+          }),
+          update: jest.fn().mockResolvedValue({
+            ...vendaCriada,
+            id: 'venda-pos-manual',
+            status: StatusVenda.APROVADO,
+            tipoPagamento: TipoPagamento.MANUAL,
+            origemParticipacao: OrigemParticipacao.POS,
+            bilhetes: [],
+          }),
+        },
+        edicao: {
+          findUnique: jest.fn().mockResolvedValue({
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1999999),
+            detalhes: edicaoAtiva.detalhes,
+            combos: edicaoAtiva.combos,
+          }),
+        },
+        matrizRange: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: 'matriz-1',
+              numero: BigInt(1000000),
+              sequenciaBolas: [1, 2, 3, 4, 5, 6],
+            },
+          ]),
+        },
+        bilhete: {
+          createMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        distribuidor: {
+          findUnique: jest.fn(),
+          update: jest.fn(),
+        },
+        comissaoDistribuidor: {
+          create: jest.fn(),
+        },
+        cliente: {
+          update: jest.fn().mockResolvedValue(undefined),
+        },
+        comissao: {
+          create: jest.fn().mockResolvedValue(undefined),
+          delete: jest.fn().mockResolvedValue(undefined),
+        },
+        vendedor: {
+          update: jest.fn(),
+        },
+      };
+      mockPrisma.$transaction.mockImplementation(async (callback) =>
+        callback(txMock as never),
+      );
+      mockPrisma.venda.findUnique.mockResolvedValue({
+        ...vendaCriada,
+        id: 'venda-pos-manual',
+        status: StatusVenda.APROVADO,
+        tipoPagamento: TipoPagamento.MANUAL,
+        origemParticipacao: OrigemParticipacao.POS,
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-1',
+        distribuidorId: 'distribuidor-1',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-1',
+      });
+
+      const result = await service.create(
+        {
+          ...createDto,
+          tipoPagamento: TipoPagamento.MANUAL,
+        },
+        {
+          id: 'usuario-vendedor',
+          email: 'vend@test.com',
+          cpf: '12345678900',
+          perfil: 'VENDEDOR',
+          status: 'ATIVO',
+          vendedorId: 'vendedor-1',
+          distribuidorId: 'distribuidor-1',
+        },
+        {
+          origemParticipacao: OrigemParticipacao.POS,
+        },
+      );
+
+      expect(txMock.venda.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: StatusVenda.APROVADO,
+            tipoPagamento: TipoPagamento.MANUAL,
+            origemParticipacao: OrigemParticipacao.POS,
+          }),
+        }),
+      );
+      expect(txMock.venda.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: StatusVenda.APROVADO,
+          }),
+        }),
+      );
+      expect(result.data.status).toBe(StatusVenda.APROVADO);
+      expect(mockPaymentGatewayFactory.getGateway).not.toHaveBeenCalled();
     });
 
     it('should use detalhe price and persist internal cartela type from quantidadeCartelas', async () => {

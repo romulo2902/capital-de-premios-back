@@ -16,15 +16,15 @@ export class CreatePosVendaDto extends OmitType(CreateVendaDto, [
   'tipoPagamento',
 ] as const) {
   @ApiPropertyOptional({
-    enum: [TipoPagamento.PIX],
+    enum: [TipoPagamento.PIX, TipoPagamento.MANUAL],
     example: TipoPagamento.PIX,
     description:
-      'Método de pagamento do POS. Por enquanto, o POS aceita apenas PIX.',
+      'Método de pagamento do POS. Aceita PIX para cobrança via gateway ou MANUAL para venda já paga na maquininha.',
   })
   @IsOptional()
   @IsEnum(TipoPagamento)
-  @IsIn([TipoPagamento.PIX], {
-    message: 'O POS aceita apenas tipoPagamento PIX por enquanto',
+  @IsIn([TipoPagamento.PIX, TipoPagamento.MANUAL], {
+    message: 'O POS aceita apenas tipoPagamento PIX ou MANUAL',
   })
   tipoPagamento?: TipoPagamento;
 }
