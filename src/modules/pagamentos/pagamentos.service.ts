@@ -307,30 +307,44 @@ export class PagamentosService {
       return false;
     }
 
-    // DEBUG TEMPORÁRIO: suporte da Mercado Pago indicou que o template real
-    // usa espaço como separador (sem ';'), diferente do que a doc pública
-    // mostra. Testando as duas variantes até confirmar qual bate de fato —
-    // remover a perdedora depois de validado em produção.
+    // DEBUG TEMPORÁRIO: testando várias variações do manifest sugeridas pelo
+    // suporte da Mercado Pago (separador espaço vs ';', espaço/newline final,
+    // com/sem lowercase do id) até confirmar qual bate de fato — limpar
+    // depois de validado em produção.
+    const idOriginal = orderId;
     const idMinusculo = orderId.toLowerCase();
-    const manifestEspaco = `id:${idMinusculo} request-id:${xRequestId} ts:${ts}`;
-    const manifestPontoVirgula = `id:${idMinusculo};request-id:${xRequestId};ts:${ts};`;
 
-    const hashEspaco = createHmac('sha256', secret)
-      .update(manifestEspaco)
-      .digest('hex');
-    const hashPontoVirgula = createHmac('sha256', secret)
-      .update(manifestPontoVirgula)
-      .digest('hex');
+    const candidatos: Array<[string, string]> = [
+      ['ESPACO_lower', `id:${idMinusculo} request-id:${xRequestId} ts:${ts}`],
+      ['ESPACO_lower_trailing-space', `id:${idMinusculo} request-id:${xRequestId} ts:${ts} `],
+      ['ESPACO_lower_trailing-newline', `id:${idMinusculo} request-id:${xRequestId} ts:${ts}\n`],
+      ['ESPACO_original', `id:${idOriginal} request-id:${xRequestId} ts:${ts}`],
+      ['ESPACO_original_trailing-space', `id:${idOriginal} request-id:${xRequestId} ts:${ts} `],
+      ['ESPACO_original_trailing-newline', `id:${idOriginal} request-id:${xRequestId} ts:${ts}\n`],
+      ['PONTOVIRGULA_lower', `id:${idMinusculo};request-id:${xRequestId};ts:${ts};`],
+      ['PONTOVIRGULA_original', `id:${idOriginal};request-id:${xRequestId};ts:${ts};`],
+    ];
 
-    if (hashEspaco !== v1 && hashPontoVirgula !== v1) {
+    let variantaVencedora: string | null = null;
+    const hashesCalculados: string[] = [];
+
+    for (const [label, manifest] of candidatos) {
+      const hash = createHmac('sha256', secret).update(manifest).digest('hex');
+      hashesCalculados.push(`${label}=${hash}`);
+      if (hash === v1) {
+        variantaVencedora = label;
+      }
+    }
+
+    if (!variantaVencedora) {
       this.logger.warn(
-        `Hash não confere (nenhuma variante) — manifestEspaco="${manifestEspaco}" hashEspaco=${hashEspaco} manifestPontoVirgula="${manifestPontoVirgula}" hashPontoVirgula=${hashPontoVirgula} recebido=${v1}`,
+        `Hash não confere (nenhuma das ${candidatos.length} variantes) — recebido=${v1} | ${hashesCalculados.join(' | ')}`,
       );
       return false;
     }
 
     this.logger.log(
-      `Assinatura Mercado Pago validada com sucesso usando variante: ${hashEspaco === v1 ? 'ESPAÇO' : 'PONTO_E_VIRGULA'}`,
+      `Assinatura Mercado Pago validada com sucesso usando variante: ${variantaVencedora}`,
     );
 
     return true;
