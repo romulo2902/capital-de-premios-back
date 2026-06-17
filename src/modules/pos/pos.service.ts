@@ -128,7 +128,7 @@ export class PosService {
         },
         combos: {
           where: { origemParticipacao: OrigemParticipacao.DIGITAL },
-          select: { tipoCartela: true, preco: true },
+          select: { id: true, tipoCartela: true, preco: true },
           orderBy: { tipoCartela: 'asc' },
         },
       },
@@ -153,6 +153,7 @@ export class PosService {
       }));
 
     const opcoesCombos = edicao.combos.map((combo) => ({
+      id: combo.id,
       tipoCompra: 'COMBO',
       tipoCartela: combo.tipoCartela,
       quantidadeCartelas: obterQuantidadeCartelas(combo.tipoCartela),

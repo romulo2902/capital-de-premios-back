@@ -115,6 +115,9 @@ Copie o `id` da edição desejada — usado em todos os passos seguintes como `{
 
 Lista as opções de venda disponíveis (unitária e combos) com preço e quantidade de cartelas. Use para montar a tela de escolha do terminal.
 
+Quando a opção for `tipoCompra: "COMBO"`, o campo `id` retornado é o `comboId`
+que deve ser enviado depois no `POST /api/pos/vendas`.
+
 ```http
 GET /api/pos/edicoes/{edicaoId}/opcoes
 Authorization: Bearer <accessToken>
@@ -139,6 +142,7 @@ Authorization: Bearer <accessToken>
       },
       {
         "tipoCompra": "COMBO",
+        "id": "f3d6cb09-4f2e-437c-8d4e-e32cfd0aa111",
         "tipoCartela": "DUAS_CHANCES",
         "quantidadeCartelas": 2,
         "preco": "8.00",
@@ -146,6 +150,7 @@ Authorization: Bearer <accessToken>
       },
       {
         "tipoCompra": "COMBO",
+        "id": "8d0b4f74-7a4e-4fe3-a731-46f2cc22a111",
         "tipoCartela": "TRES_CHANCES",
         "quantidadeCartelas": 3,
         "preco": "12.00",

@@ -410,6 +410,9 @@ fazer um novo \`POST /pos/auth/login\`.
 Lista as opções de venda configuradas para o canal **POS** na edição: compra
 unitária e combos, com quantidade de cartelas e preço. Use este endpoint para
 montar a tela de escolha antes de navegar/reservar cartelas.
+
+Para itens do tipo **COMBO**, o campo \`id\` retornado nesta lista é o
+\`comboId\` que deve ser enviado em \`POST /pos/vendas\`.
     `.trim(),
   })
   @ApiParam({
@@ -438,6 +441,7 @@ montar a tela de escolha antes de navegar/reservar cartelas.
             },
             {
               tipoCompra: 'COMBO',
+              id: 'f3d6cb09-4f2e-437c-8d4e-e32cfd0aa111',
               tipoCartela: 'TRES_CHANCES',
               quantidadeCartelas: 3,
               preco: '25.00',
