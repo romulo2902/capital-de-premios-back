@@ -87,10 +87,23 @@ export class PagamentosService {
     headers: Record<string, string | string[] | undefined>,
     query: Record<string, unknown>,
     body: Record<string, unknown>,
+    url: string,
   ) {
     this.logger.log(`Webhook Mercado Pago recebido: ${JSON.stringify(body)}`);
 
-    const orderId = this.extrairOrderIdMercadoPago(body, query);
+    // O id para a assinatura DEVE vir da query string da URL recebida, não do
+    // body — parseamos a URL crua para não depender de como o NestJS/Express
+    // normaliza `data.id` no objeto de query (ex.: poderia virar `data: { id }`
+    // aninhado dependendo do parser, mascarando o valor real da URL).
+    const idDaUrl = new URL(url, 'http://localhost').searchParams.get(
+      'data.id',
+    );
+
+    this.logger.debug(
+      `data.id extraído da URL crua: ${JSON.stringify(idDaUrl)} (url=${url})`,
+    );
+
+    const orderId = idDaUrl ?? this.extrairOrderIdMercadoPago(body, query);
     if (!orderId) {
       this.logger.warn('Webhook Mercado Pago sem data.id de order — ignorado');
       return { message: 'Webhook recebido (sem dados de pagamento)' };
@@ -294,17 +307,31 @@ export class PagamentosService {
       return false;
     }
 
-    const manifest = `id:${orderId.toLowerCase()};request-id:${xRequestId};ts:${ts};`;
-    const hashEsperado = createHmac('sha256', secret)
-      .update(manifest)
+    // DEBUG TEMPORÁRIO: suporte da Mercado Pago indicou que o template real
+    // usa espaço como separador (sem ';'), diferente do que a doc pública
+    // mostra. Testando as duas variantes até confirmar qual bate de fato —
+    // remover a perdedora depois de validado em produção.
+    const idMinusculo = orderId.toLowerCase();
+    const manifestEspaco = `id:${idMinusculo} request-id:${xRequestId} ts:${ts}`;
+    const manifestPontoVirgula = `id:${idMinusculo};request-id:${xRequestId};ts:${ts};`;
+
+    const hashEspaco = createHmac('sha256', secret)
+      .update(manifestEspaco)
+      .digest('hex');
+    const hashPontoVirgula = createHmac('sha256', secret)
+      .update(manifestPontoVirgula)
       .digest('hex');
 
-    if (hashEsperado !== v1) {
+    if (hashEspaco !== v1 && hashPontoVirgula !== v1) {
       this.logger.warn(
-        `Hash não confere — manifest="${manifest}" esperado=${hashEsperado} recebido=${v1}`,
+        `Hash não confere (nenhuma variante) — manifestEspaco="${manifestEspaco}" hashEspaco=${hashEspaco} manifestPontoVirgula="${manifestPontoVirgula}" hashPontoVirgula=${hashPontoVirgula} recebido=${v1}`,
       );
       return false;
     }
+
+    this.logger.log(
+      `Assinatura Mercado Pago validada com sucesso usando variante: ${hashEspaco === v1 ? 'ESPAÇO' : 'PONTO_E_VIRGULA'}`,
+    );
 
     return true;
   }

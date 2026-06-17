@@ -221,7 +221,7 @@ describe('PagamentosService', () => {
 
   describe('processarWebhookMercadoPago', () => {
     it('should return message when order id is missing', async () => {
-      const result = await service.processarWebhookMercadoPago({}, {}, {});
+      const result = await service.processarWebhookMercadoPago({}, {}, {}, '');
       expect(result.message).toContain('sem dados');
     });
 
@@ -235,6 +235,7 @@ describe('PagamentosService', () => {
         {},
         {},
         { data: { id: 'ORD01' } },
+        '',
       );
 
       expect(result.data).toEqual({
@@ -259,6 +260,7 @@ describe('PagamentosService', () => {
         {},
         {},
         { data: { id: 'ORD01' } },
+        '',
       );
 
       expect(result.data).toEqual({ gatewayId: 'ORD01', status: 'CONFIRMADA' });
@@ -266,6 +268,28 @@ describe('PagamentosService', () => {
         'venda-1',
         expect.any(Object),
       );
+    });
+
+    it('should prefer data.id from the raw URL query string over the body', async () => {
+      mockMercadoPagoPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'PENDENTE',
+        payload: {},
+      });
+
+      const result = await service.processarWebhookMercadoPago(
+        {},
+        {},
+        { data: { id: 'id-do-body' } },
+        '/api/pagamentos/webhook/mercadopago?data.id=id-da-url&type=order',
+      );
+
+      expect(mockMercadoPagoPixGateway.consultarCobranca).toHaveBeenCalledWith(
+        'id-da-url',
+      );
+      expect(result.data).toEqual({
+        gatewayId: 'id-da-url',
+        status: 'IGNORADO_PENDENTE',
+      });
     });
 
     it('should reject webhook with invalid signature when secret is configured', async () => {
@@ -301,11 +325,64 @@ describe('PagamentosService', () => {
           { 'x-signature': 'ts=123,v1=assinatura-invalida', 'x-request-id': 'req-1' },
           {},
           { data: { id: 'ORD01' } },
+          '',
         ),
       ).rejects.toThrow('Assinatura do webhook inválida');
     });
 
-    it('should accept webhook with a valid signature', async () => {
+    it('should accept webhook with a valid signature (formato espaço)', async () => {
+      const secret = 'meu-segredo';
+      const configGet = jest.fn((key: string) => {
+        if (key === 'MERCADOPAGO_WEBHOOK_SECRET') return secret;
+        return '';
+      });
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PagamentosService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: ConfigService, useValue: { get: configGet } },
+          {
+            provide: PaymentGatewayFactory,
+            useValue: mockPaymentGatewayFactory,
+          },
+          { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
+          { provide: VendasService, useValue: mockVendasService },
+          { provide: VendasSenaService, useValue: mockVendasSenaService },
+          {
+            provide: DistributedLockService,
+            useValue: mockDistributedLockService,
+          },
+          { provide: EmailService, useValue: mockEmailService },
+        ],
+      }).compile();
+
+      const serviceComSecret = module.get<PagamentosService>(PagamentosService);
+
+      mockMercadoPagoPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'PENDENTE',
+        payload: {},
+      });
+
+      const ts = '1700000000000';
+      const requestId = 'req-1';
+      const manifest = `id:ord01 request-id:${requestId} ts:${ts}`;
+      const v1 = createHmac('sha256', secret).update(manifest).digest('hex');
+
+      const result = await serviceComSecret.processarWebhookMercadoPago(
+        { 'x-signature': `ts=${ts},v1=${v1}`, 'x-request-id': requestId },
+        {},
+        { data: { id: 'ORD01' } },
+        '',
+      );
+
+      expect(result.data).toEqual({
+        gatewayId: 'ORD01',
+        status: 'IGNORADO_PENDENTE',
+      });
+    });
+
+    it('should accept webhook with a valid signature (formato ponto-e-vírgula)', async () => {
       const secret = 'meu-segredo';
       const configGet = jest.fn((key: string) => {
         if (key === 'MERCADOPAGO_WEBHOOK_SECRET') return secret;
@@ -348,6 +425,7 @@ describe('PagamentosService', () => {
         { 'x-signature': `ts=${ts},v1=${v1}`, 'x-request-id': requestId },
         {},
         { data: { id: 'ORD01' } },
+        '',
       );
 
       expect(result.data).toEqual({
