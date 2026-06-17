@@ -313,6 +313,7 @@ export class PagamentosService {
     // depois de validado em produção.
     const idOriginal = orderId;
     const idMinusculo = orderId.toLowerCase();
+    const tsMs = /^\d+$/.test(ts) ? `${ts}000` : ts;
 
     const candidatos: Array<[string, string]> = [
       ['ESPACO_lower', `id:${idMinusculo} request-id:${xRequestId} ts:${ts}`],
@@ -323,6 +324,10 @@ export class PagamentosService {
       ['ESPACO_original_trailing-newline', `id:${idOriginal} request-id:${xRequestId} ts:${ts}\n`],
       ['PONTOVIRGULA_lower', `id:${idMinusculo};request-id:${xRequestId};ts:${ts};`],
       ['PONTOVIRGULA_original', `id:${idOriginal};request-id:${xRequestId};ts:${ts};`],
+      ['ESPACO_lower_ts-ms', `id:${idMinusculo} request-id:${xRequestId} ts:${tsMs}`],
+      ['ESPACO_original_ts-ms', `id:${idOriginal} request-id:${xRequestId} ts:${tsMs}`],
+      ['PONTOVIRGULA_lower_ts-ms', `id:${idMinusculo};request-id:${xRequestId};ts:${tsMs};`],
+      ['PONTOVIRGULA_original_ts-ms', `id:${idOriginal};request-id:${xRequestId};ts:${tsMs};`],
     ];
 
     let variantaVencedora: string | null = null;
