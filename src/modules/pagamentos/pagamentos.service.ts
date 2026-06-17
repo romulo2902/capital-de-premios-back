@@ -266,6 +266,10 @@ export class PagamentosService {
     const xSignature = this.lerHeader(headers, 'x-signature');
     const xRequestId = this.lerHeader(headers, 'x-request-id');
 
+    this.logger.debug(
+      `Headers brutos — x-signature=${JSON.stringify(xSignature)} x-request-id=${JSON.stringify(xRequestId)} todasAsChaves=${JSON.stringify(Object.keys(headers))}`,
+    );
+
     if (!xSignature || !xRequestId) {
       this.logger.warn(
         `Assinatura Mercado Pago ausente: x-signature=${xSignature ?? 'N/A'} x-request-id=${xRequestId ?? 'N/A'}`,

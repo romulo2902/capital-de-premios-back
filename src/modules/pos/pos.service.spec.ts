@@ -19,6 +19,7 @@ describe('PosService', () => {
   const mockPrisma = {
     edicao: { findMany: jest.fn() },
     edicaoSena: { findMany: jest.fn() },
+    cliente: { findFirst: jest.fn() },
     venda: { findUnique: jest.fn(), update: jest.fn() },
     vendaSena: { findUnique: jest.fn(), update: jest.fn() },
   };
@@ -96,6 +97,76 @@ describe('PosService', () => {
         requireGateway: true,
       },
     );
+  });
+
+  it('busca cliente por CPF no escopo do vendedor para autofill do POS', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValue({
+      id: 'cliente-1',
+      cpf: '12345678900',
+      nome: 'Maria Cliente',
+      telefone: '(11) 99999-9999',
+      email: 'maria.cliente@email.com',
+      dataNascimento: new Date('1985-04-11T00:00:00.000Z'),
+      cidade: 'São Paulo',
+      estado: 'SP',
+    });
+
+    const result = await service.buscarClientePorCpf('123.456.789-00', vendedor);
+
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
+      where: {
+        AND: [{ cpf: '12345678900' }, { vendedorId: 'vend-1' }],
+      },
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+        cidade: true,
+        estado: true,
+      },
+    });
+    expect(result).toEqual({
+      message: 'Cliente encontrado com sucesso',
+      data: {
+        encontrado: true,
+        cliente: {
+          id: 'cliente-1',
+          cpf: '12345678900',
+          nome: 'Maria Cliente',
+          telefone: '(11) 99999-9999',
+          email: 'maria.cliente@email.com',
+          dataNascimento: '1985-04-11',
+          cidade: 'São Paulo',
+          estado: 'SP',
+        },
+      },
+    });
+  });
+
+  it('retorna encontrado false quando CPF não existe no escopo do POS', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValue(null);
+
+    const result = await service.buscarClientePorCpf('12345678900', vendedor);
+
+    expect(result).toEqual({
+      message: 'Cliente não encontrado',
+      data: {
+        encontrado: false,
+        cliente: null,
+      },
+    });
+  });
+
+  it('rejeita consulta de cliente POS quando vendedor não possui vínculo válido', async () => {
+    await expect(
+      service.buscarClientePorCpf('12345678900', {
+        ...vendedor,
+        vendedorId: undefined,
+      }),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('rejeita venda POS com cartão', async () => {

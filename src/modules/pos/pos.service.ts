@@ -71,6 +71,48 @@ export class PosService {
     return { message: 'Edições ativas listadas com sucesso', data: edicoes };
   }
 
+  async buscarClientePorCpf(cpf: string, user: RequestUser) {
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    const cliente = await this.prisma.cliente.findFirst({
+      where: {
+        AND: [this.buildClienteCpfWhere(cpfLimpo), this.buildClienteScope(user)],
+      },
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+        cidade: true,
+        estado: true,
+      },
+    });
+
+    if (!cliente) {
+      return {
+        message: 'Cliente não encontrado',
+        data: {
+          encontrado: false,
+          cliente: null,
+        },
+      };
+    }
+
+    return {
+      message: 'Cliente encontrado com sucesso',
+      data: {
+        encontrado: true,
+        cliente: {
+          ...cliente,
+          dataNascimento: cliente.dataNascimento
+            ? cliente.dataNascimento.toISOString().split('T')[0]
+            : null,
+        },
+      },
+    };
+  }
+
   async listarOpcoesVenda(edicaoId: string) {
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: edicaoId },
@@ -660,5 +702,35 @@ export class PosService {
     if (!ehDono) {
       throw new ForbiddenException('Venda não pertence a este operador');
     }
+  }
+
+  private buildClienteCpfWhere(cpf: string) {
+    return { cpf };
+  }
+
+  private buildClienteScope(user: RequestUser) {
+    if (user.perfil === 'DISTRIBUIDOR') {
+      if (!user.distribuidorId) {
+        throw new ForbiddenException(
+          'Usuário distribuidor sem vínculo válido para consultar clientes no POS',
+        );
+      }
+
+      return { distribuidorId: user.distribuidorId };
+    }
+
+    if (user.perfil === 'VENDEDOR') {
+      if (!user.vendedorId) {
+        throw new ForbiddenException(
+          'Usuário vendedor sem vínculo válido para consultar clientes no POS',
+        );
+      }
+
+      return { vendedorId: user.vendedorId };
+    }
+
+    throw new ForbiddenException(
+      'Perfil sem permissão para consultar clientes no POS',
+    );
   }
 }

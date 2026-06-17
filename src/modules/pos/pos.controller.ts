@@ -54,6 +54,7 @@ const POS_PREMIOS_VENDA_COMBO_REQUEST_EXAMPLE = {
   edicaoId: '8f52a4b8-1c4f-4e0b-8df6-95522f47a111',
   tipoPagamento: 'PIX',
   combosSelecionados: ['0276145'],
+  email: 'maria.cliente@email.com',
   cpf: '98765432100',
   nome: 'Maria Cliente',
   telefone: '(11) 99999-9999',
@@ -251,6 +252,75 @@ a ele.
         distribuidorId: user.distribuidorId,
       },
     };
+  }
+
+  @Get('clientes/cpf/:cpf')
+  @UseGuards(PosAuthGuard)
+  @ApiBearerAuth()
+  @ApiTags(POS_PREMIOS_TAG)
+  @ApiOperation({
+    summary: '3. 🔒 Buscar dados do cliente por CPF para autofill no POS',
+    description: `
+Consulta um cliente já cadastrado para preencher automaticamente os campos da
+venda no terminal POS. A busca respeita a hierarquia do operador autenticado:
+
+- **VENDEDOR** só enxerga clientes vinculados a ele
+- **DISTRIBUIDOR** só enxerga clientes da sua rede
+
+Se o cliente não existir, a API retorna \`encontrado: false\` para o terminal
+seguir com preenchimento manual.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'cpf',
+    description: 'CPF do cliente com ou sem máscara.',
+    example: '12345678900',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Consulta concluída.',
+    schema: {
+      examples: {
+        encontrado: {
+          summary: 'Cliente encontrado',
+          value: {
+            statusCode: 200,
+            message: 'Cliente encontrado com sucesso',
+            data: {
+              encontrado: true,
+              cliente: {
+                id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+                cpf: '12345678900',
+                nome: 'Maria Cliente',
+                telefone: '(11) 99999-9999',
+                email: 'maria.cliente@email.com',
+                dataNascimento: '1985-04-11',
+                cidade: 'São Paulo',
+                estado: 'SP',
+              },
+            },
+          },
+        },
+        naoEncontrado: {
+          summary: 'Cliente não encontrado',
+          value: {
+            statusCode: 200,
+            message: 'Cliente não encontrado',
+            data: {
+              encontrado: false,
+              cliente: null,
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  buscarClientePorCpf(
+    @Param('cpf') cpf: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.posService.buscarClientePorCpf(cpf, user);
   }
 
   @Post('auth/logout')
