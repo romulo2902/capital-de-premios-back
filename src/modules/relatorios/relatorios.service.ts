@@ -705,12 +705,7 @@ export class RelatoriosService {
     };
   }
 
-  async exportarRelatorioCDP(
-    res: Response,
-    edicaoId: string,
-    dataInicio?: string,
-    dataFim?: string,
-  ): Promise<void> {
+  async exportarRelatorioCDP(res: Response, edicaoId: string): Promise<void> {
     this.logger.log(`Gerando relatório CDP para edição ${edicaoId}`);
 
     const edicao = await this.prisma.edicao.findUniqueOrThrow({
@@ -737,20 +732,14 @@ export class RelatoriosService {
       return `${dia}/${mes}/${d.getFullYear()}`;
     };
 
-    const hoje = new Date();
-    const dataInicioFmt = dataInicio
-      ? formatarDataCDP(new Date(dataInicio))
-      : formatarDataCDP(hoje);
-    const dataFimFmt = dataFim
-      ? formatarDataCDP(new Date(dataFim))
-      : formatarDataCDP(hoje);
+    const dataSorteioFmt = formatarDataCDP(edicao.dataSorteio);
 
     const removerAcentos = (str: string): string =>
       str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
     const linhas: string[] = [];
 
-    linhas.push(`H;CAPDF;${dataInicioFmt};${dataFimFmt};${edicao.numero}`);
+    linhas.push(`H;CAPDF;${dataSorteioFmt};${dataSorteioFmt};${edicao.numero}`);
 
     for (const bilhete of bilhetes) {
       const { venda } = bilhete;
@@ -797,9 +786,9 @@ export class RelatoriosService {
     linhas.push(`T;${bilhetes.length};${rangesStr};`);
 
     const conteudo = linhas.join('\r\n');
-    const nomeArquivo = `relatorio-cdp-${edicao.numero}-${Date.now()}.csv`;
+    const nomeArquivo = `relatorio-cdp-${edicao.numero}-${Date.now()}.txt`;
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
     res.send(conteudo);
   }

@@ -237,6 +237,7 @@ describe('RelatoriosService', () => {
     mockPrisma.edicao.findUniqueOrThrow.mockResolvedValue({
       id: 'edicao-1',
       numero: 'ED-126-RASCUNHO',
+      dataSorteio: new Date('2026-05-27'),
       detalhes: [
         {
           rangeInicio: 980000n,
@@ -306,16 +307,11 @@ describe('RelatoriosService', () => {
       send: jest.fn(),
     };
 
-    await service.exportarRelatorioCDP(
-      res as never,
-      'edicao-1',
-      '2026-05-27',
-      '2026-05-27',
-    );
+    await service.exportarRelatorioCDP(res as never, 'edicao-1');
 
     expect(res.setHeader).toHaveBeenCalledWith(
       'Content-Type',
-      'text/csv; charset=utf-8',
+      'text/plain; charset=utf-8',
     );
     expect(res.send).toHaveBeenCalledWith(
       expect.stringContaining('D3;0980000;15.00;06790319107;Jair Rodrigues'),
