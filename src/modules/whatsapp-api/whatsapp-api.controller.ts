@@ -20,6 +20,7 @@ import {
 import { WhatsappApiService } from './whatsapp-api.service';
 import { AuthWhatsappDto } from './dto/auth-whatsapp.dto';
 import { CriarPedidoWhatsappDto } from './dto/criar-pedido-whatsapp.dto';
+import { CriarPedidoSenaWhatsappDto } from './dto/criar-pedido-sena-whatsapp.dto';
 import { PreviewCotasWhatsappDto } from './dto/preview-cotas-whatsapp.dto';
 import { ConsultarPedidosWhatsappDto } from './dto/consultar-pedidos-whatsapp.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -27,6 +28,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
+
+const WHATSAPP_SENA_TAG = 'WhatsApp API — Capital Sena';
 
 /**
  * ## WhatsApp API — Guia de Integração
@@ -71,6 +74,22 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
  *
  * ---
  *
+ * ### Capital Sena
+ *
+ * Usa a **mesma autenticação** (`POST /api/whatsapp/auth`) e o **mesmo webhook**
+ * de pagamento do fluxo acima — apenas as rotas de campanha/pedido têm o
+ * prefixo `/sena`:
+ *
+ * ```
+ * 1. GET  /api/whatsapp/sena/campanhas/ativa
+ * 2. POST /api/whatsapp/sena/pedidos                  [Bearer]
+ * 3. GET  /api/whatsapp/sena/pedidos/{id}/pagamento    [Bearer]
+ * 4. GET  /api/whatsapp/sena/pedidos/{id}/cartelas     [Bearer]
+ * 5. GET  /api/whatsapp/sena/pedidos                   [Bearer]
+ * ```
+ *
+ * ---
+ *
  * ### Autenticação
  *
  * Após o `POST /api/whatsapp/auth`, use o `accessToken` retornado
@@ -83,7 +102,8 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
  *
  * Configure a URL `POST /api/whatsapp/webhook/pagamento` no painel
  * do PagBank para receber notificações de pagamento confirmado.
- * Esta rota **não** exige autenticação JWT.
+ * Esta rota **não** exige autenticação JWT e vale tanto para Prêmios
+ * quanto para Capital Sena — a confirmação é resolvida pelo gatewayId.
  */
 @ApiTags('WhatsApp API')
 @Controller('whatsapp')
@@ -617,11 +637,372 @@ Retorna todos os detalhes de um pedido, incluindo os bilhetes se o pedido estive
     return this.service.detalharPedido(id, user.id);
   }
 
-  // ─── 8. WEBHOOK PAGAMENTO ─────────────────────────────────────────────────
+  // ─── 9. CAPITAL SENA — CAMPANHA ATIVA ─────────────────────────────────────
+
+  @Get('sena/campanhas/ativa')
+  @ApiTags(WHATSAPP_SENA_TAG)
+  @ApiOperation({
+    summary: '9. Consultar campanha/edição Sena ativa',
+    description: `
+Retorna os dados completos da campanha Capital Sena ativa no momento.
+
+**Uso:** O bot deve chamar esta rota para obter o \`id\` da edição (necessário para criar pedidos)
+e os combos/preços disponíveis.
+
+Se não houver campanha ativa, retorna \`data: null\`.
+    `.trim(),
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Campanha Sena ativa retornada (ou null se não houver).',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Campanha Sena ativa encontrada',
+        data: {
+          id: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
+          numero: '2026-15',
+          titulo: 'Capital Sena 2026-15',
+          descricao: 'Acerte os 6 números da Mega-Sena e ganhe!',
+          imagemUrl: 'https://cdn.exemplo.com/sena-2026-15.jpg',
+          status: 'ATIVA',
+          dataSorteioMegaSena: '2026-06-05T20:00:00.000Z',
+          dataEncerramento: '2026-06-05T18:00:00.000Z',
+          valorCartela: '5.00',
+          combos: [
+            {
+              id: 'fd2f8a0e-8ce6-4aa2-9c94-668c7530a111',
+              nome: 'Combo 3 cartelas',
+              quantidade: 3,
+              preco: '12.00',
+              precoFormatado: 'R$ 12,00',
+            },
+          ],
+          premios: [
+            {
+              faixa: 'SENA',
+              descricao: 'Acertar os 6 números',
+              valor: '100000.00',
+              imagemUrl: null,
+              valorFormatado: 'R$ 100.000,00',
+            },
+          ],
+        },
+      },
+    },
+  })
+  consultarCampanhaSenaAtiva() {
+    return this.service.consultarCampanhaSenaAtiva();
+  }
+
+  // ─── 10. CAPITAL SENA — CRIAR PEDIDO COM PIX ──────────────────────────────
+
+  @Post('sena/pedidos')
+  @ApiTags(WHATSAPP_SENA_TAG)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CLIENTE')
+  @ApiOperation({
+    summary: '10. 🔒 Criar pedido Sena e gerar PIX (operação combinada)',
+    description: `
+Cria um pedido Capital Sena com status **PENDENTE** e gera automaticamente a cobrança PIX,
+retornando o código Copia-e-Cola e a URL do QR Code para o bot enviar ao cliente.
+
+**Seleção das cartelas:**
+- \`cartelas\`: lista explícita (cada item \`MANUAL\` com 6 números de 1 a 60, ou \`SURPRESINHA\`).
+- \`quantidade\`: compra rápida unitária — gera N cartelas surpresinha automaticamente.
+- \`comboSenaId\`: compra de combo — se \`cartelas\` for omitido, gera automaticamente a
+  quantidade de cartelas do combo (surpresinha).
+
+**Autenticação:** Requer \`Authorization: Bearer {accessToken}\` obtido em \`POST /whatsapp/auth\`
+— os dados do cliente (CPF, nome, telefone, e-mail, data de nascimento) são resolvidos pelo token,
+não envie esses campos no corpo.
+
+**⚠️ Se o PIX falhar (gateway indisponível):** A API retorna erro HTTP 502 com mensagem
+humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
+    `.trim(),
+  })
+  @ApiBody({
+    type: CriarPedidoSenaWhatsappDto,
+    examples: {
+      compraRapida: {
+        summary: 'Compra rápida unitária (surpresinha)',
+        value: { edicaoSenaId: 'c3d4e5f6-a7b8-9012-cdef-123456789012', quantidade: 2 },
+      },
+      cartelaManual: {
+        summary: 'Cartela manual com números escolhidos',
+        value: {
+          edicaoSenaId: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
+          cartelas: [{ modoSelecao: 'MANUAL', numeros: [3, 12, 24, 37, 45, 58] }],
+        },
+      },
+      combo: {
+        summary: 'Compra de combo (surpresinha automática)',
+        value: {
+          edicaoSenaId: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
+          comboSenaId: 'fd2f8a0e-8ce6-4aa2-9c94-668c7530a111',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Pedido Sena criado e PIX gerado com sucesso.',
+    schema: {
+      example: {
+        statusCode: 201,
+        message: 'Pedido Sena criado com sucesso. Aguardando pagamento PIX.',
+        data: {
+          pedidoId: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+          status: 'PENDENTE',
+          total: '12.00',
+          totalFormatado: 'R$ 12,00',
+          quantidadeCartelas: 3,
+          campanha: { id: 'c3d4e5f6...', numero: '2026-15' },
+          cartelas: [{ numerosEscolhidos: [3, 12, 24, 37, 45, 58], modoSelecao: 'MANUAL' }],
+          pagamento: {
+            tipo: 'PIX',
+            pixCopiaECola: '00020126580014br.gov.bcb.pix0136...',
+            qrCodeUrl: 'https://assets.pagseguro.com.br/qrcode/...',
+            expiracaoMinutos: 60,
+            instrucoes: 'Copie o código PIX e pague no seu banco...',
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Edição inativa, cartelas/combo inválidos ou cliente sem data de nascimento.',
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({ status: 404, description: 'Campanha ou combo não encontrado.' })
+  @ApiResponse({
+    status: 502,
+    description: 'Não foi possível gerar o PIX. O bot deve informar o cliente para tentar novamente.',
+  })
+  criarPedidoSena(
+    @Body() dto: CriarPedidoSenaWhatsappDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.criarPedidoSenaComPix(dto, user.id);
+  }
+
+  // ─── 11. CAPITAL SENA — STATUS DO PAGAMENTO ───────────────────────────────
+
+  @Get('sena/pedidos/:id/pagamento')
+  @ApiTags(WHATSAPP_SENA_TAG)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CLIENTE')
+  @ApiOperation({
+    summary: '11. 🔒 Consultar status do pagamento PIX — Sena',
+    description: `
+Consulta o status do pagamento de um pedido Sena específico.
+
+**Status possíveis:**
+- \`PENDENTE\` → Aguardando pagamento
+- \`APROVADO\` → Pagamento confirmado — buscar cartelas em \`GET /sena/pedidos/{id}/cartelas\`
+- \`CANCELADO\` → Pedido cancelado
+- \`RECUSADO\` → Pagamento recusado
+
+**Polling:** O bot pode chamar esta rota periodicamente (ex: a cada 30s) até receber \`APROVADO\`.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID do pedido Sena (obtido em POST /whatsapp/sena/pedidos)',
+    example: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Status do pagamento Sena consultado.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Status do pagamento Sena consultado',
+        data: {
+          pedidoId: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+          status: 'PENDENTE',
+          statusLabel: 'Aguardando pagamento',
+          statusGateway: 'PENDENTE',
+          total: '12.00',
+          criadoEm: '2026-05-28T14:30:00.000Z',
+          pago: false,
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Pedido não encontrado ou não pertence ao cliente.',
+  })
+  consultarStatusPagamentoSena(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.consultarStatusPagamentoSena(id, user.id);
+  }
+
+  // ─── 12. CAPITAL SENA — CARTELAS COMPRADAS ────────────────────────────────
+
+  @Get('sena/pedidos/:id/cartelas')
+  @ApiTags(WHATSAPP_SENA_TAG)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CLIENTE')
+  @ApiOperation({
+    summary: '12. 🔒 Retornar cartelas/números comprados — Sena',
+    description: `
+Retorna os números das cartelas Sena de um pedido **aprovado**.
+
+**Pré-requisito:** O pedido deve ter status \`APROVADO\`. Se ainda estiver \`PENDENTE\`,
+retorna a lista vazia com uma mensagem de aviso.
+
+**Estrutura retornada:** cada cartela tem \`numerosEscolhidos\` (6 números, 1 a 60),
+\`setimoNumero\` (gerado pelo sistema após a confirmação) e \`modoSelecao\` (MANUAL ou SURPRESINHA).
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID do pedido Sena aprovado',
+    example: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Cartelas retornadas com sucesso.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Cartelas encontradas com sucesso',
+        data: {
+          pedidoId: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+          status: 'APROVADO',
+          campanha: {
+            id: 'c3d4e5f6...',
+            numero: '2026-15',
+            dataSorteioMegaSena: '2026-06-05T20:00:00.000Z',
+          },
+          totalCartelas: 1,
+          cartelas: [
+            { numerosEscolhidos: [3, 12, 24, 37, 45, 58], setimoNumero: 41, modoSelecao: 'MANUAL' },
+          ],
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Pedido não encontrado ou não pertence ao cliente.',
+  })
+  consultarCartelasSena(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.consultarCartelasSena(id, user.id);
+  }
+
+  // ─── 13. CAPITAL SENA — LISTAR PEDIDOS ────────────────────────────────────
+
+  @Get('sena/pedidos')
+  @ApiTags(WHATSAPP_SENA_TAG)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CLIENTE')
+  @ApiOperation({
+    summary: '13. 🔒 Consultar pedidos Sena do cliente (por telefone ou ID)',
+    description: `
+Lista os pedidos Sena do cliente autenticado. Filtros opcionais permitem buscar por
+telefone ou ID específico.
+
+**Segurança:** Apenas pedidos do cliente autenticado no JWT são retornados.
+
+**Paginação:** Use \`page\` e \`limit\` para navegar pelo histórico.
+    `.trim(),
+  })
+  @ApiQuery({ name: 'pedidoId', required: false, description: 'Filtrar por ID de pedido específico.' })
+  @ApiQuery({ name: 'telefone', required: false, description: 'Confirmar identidade por telefone.' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Página (default: 1).' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página (default: 10, máx: 50).' })
+  @ApiResponse({
+    status: 200,
+    description: 'Pedidos Sena retornados.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Pedidos encontrados',
+        data: {
+          total: 1,
+          page: 1,
+          totalPages: 1,
+          pedidos: [
+            {
+              pedidoId: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+              status: 'APROVADO',
+              statusLabel: 'Pagamento confirmado ✅',
+              campanha: {
+                id: 'c3d4e5f6...',
+                numero: '2026-15',
+                dataSorteioMegaSena: '2026-06-05T20:00:00.000Z',
+              },
+              quantidadeCartelas: 3,
+              total: '12.00',
+              totalFormatado: 'R$ 12,00',
+              criadoEm: '2026-05-28T14:30:00.000Z',
+              temCartelas: true,
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Telefone não corresponde ao cadastro do cliente.',
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido.' })
+  consultarPedidosSena(
+    @Query() filtros: ConsultarPedidosWhatsappDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.consultarPedidosSena(user.id, filtros);
+  }
+
+  // ─── 13b. CAPITAL SENA — DETALHE DE PEDIDO ────────────────────────────────
+
+  @Get('sena/pedidos/:id')
+  @ApiTags(WHATSAPP_SENA_TAG)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CLIENTE')
+  @ApiOperation({
+    summary: '13b. 🔒 Detalhes de um pedido Sena específico',
+    description: `
+Retorna todos os detalhes de um pedido Sena, incluindo as cartelas se o pedido estiver aprovado.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID do pedido Sena',
+    example: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+  })
+  @ApiResponse({ status: 200, description: 'Pedido Sena detalhado retornado.' })
+  @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({ status: 404, description: 'Pedido não encontrado.' })
+  detalharPedidoSena(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.detalharPedidoSena(id, user.id);
+  }
+
+  // ─── 14. WEBHOOK PAGAMENTO ─────────────────────────────────────────────────
 
   @Post('webhook/pagamento')
   @ApiOperation({
-    summary: '8. Webhook PagBank — Confirmação de pagamento (sem auth)',
+    summary: '14. Webhook PagBank — Confirmação de pagamento (sem auth)',
     description: `
 Endpoint para receber notificações de pagamento confirmado do PagBank.
 

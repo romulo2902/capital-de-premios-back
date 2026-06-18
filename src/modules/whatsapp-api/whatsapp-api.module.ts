@@ -4,6 +4,7 @@ import { WhatsappApiController } from './whatsapp-api.controller';
 import { WhatsappApiService } from './whatsapp-api.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { VendasModule } from '../vendas/vendas.module';
+import { VendasSenaModule } from '../capital-sena/vendas-sena/vendas-sena.module';
 import { PagamentosModule } from '../pagamentos/pagamentos.module';
 import { RedisModule } from '../../common/redis/redis.module';
 
@@ -11,6 +12,7 @@ import { RedisModule } from '../../common/redis/redis.module';
   imports: [
     PrismaModule,
     VendasModule,
+    VendasSenaModule,
     PagamentosModule,
     RedisModule,
     // JwtModule sem configuração estática — a estratégia JWT global já cuida

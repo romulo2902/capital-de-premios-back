@@ -11,20 +11,25 @@ import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
+import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import { PagamentosService } from '../pagamentos/pagamentos.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import {
   OrigemParticipacao,
   Prisma,
   StatusEdicao,
+  StatusEdicaoSena,
   StatusVenda,
+  StatusVendaSena,
   TipoCartela,
   TipoPagamento,
 } from '@prisma/client';
 import type { AuthWhatsappDto } from './dto/auth-whatsapp.dto';
 import type { CriarPedidoWhatsappDto } from './dto/criar-pedido-whatsapp.dto';
+import type { CriarPedidoSenaWhatsappDto } from './dto/criar-pedido-sena-whatsapp.dto';
 import type { PreviewCotasWhatsappDto } from './dto/preview-cotas-whatsapp.dto';
 import type { ConsultarPedidosWhatsappDto } from './dto/consultar-pedidos-whatsapp.dto';
+import type { CreateVendaSenaDto } from '../capital-sena/vendas-sena/dto/create-venda-sena.dto';
 import type { JwtPayload } from '../auth/auth.service';
 import {
   obterQuantidadeCartelas,
@@ -58,6 +63,7 @@ export class WhatsappApiService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly vendasService: VendasService,
+    private readonly vendasSenaService: VendasSenaService,
     private readonly pagamentosService: PagamentosService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
   ) {}
@@ -789,6 +795,419 @@ export class WhatsappApiService {
         bilhetes: venda.bilhetes.map((b) => ({
           numero: b.numero.toString().padStart(7, '0'),
           sequenciaBolas: b.sequenciaBolas,
+        })),
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — CAMPANHA ATIVA ─────────────────────────────────────────
+
+  /**
+   * Retorna a edição Sena ativa com combos e premiação, para o bot montar
+   * a oferta antes de criar o pedido.
+   */
+  async consultarCampanhaSenaAtiva() {
+    const edicao = await this.prisma.edicaoSena.findFirst({
+      where: { status: StatusEdicaoSena.ATIVA },
+      include: {
+        premios: true,
+        combos: { where: { ativo: true }, orderBy: { quantidade: 'asc' } },
+      },
+    });
+
+    if (!edicao) {
+      return { message: 'Nenhuma campanha Sena ativa no momento', data: null };
+    }
+
+    const valorUnitarioCartela = this.formatarValorMonetario(
+      edicao.valorCartela,
+    );
+
+    return {
+      message: 'Campanha Sena ativa encontrada',
+      data: {
+        id: edicao.id,
+        numero: edicao.numero,
+        titulo: `Capital Sena ${edicao.numero}`,
+        descricao: edicao.descricao,
+        imagemUrl: edicao.imagemUrl,
+        status: edicao.status,
+        dataSorteioMegaSena: edicao.dataSorteioMegaSena,
+        dataEncerramento: edicao.dataEncerramento,
+        valorCartela: valorUnitarioCartela,
+        combos: edicao.combos.map((combo) => ({
+          id: combo.id,
+          nome: combo.nome,
+          quantidade: combo.quantidade,
+          preco: this.formatarValorMonetario(combo.preco),
+          precoFormatado: this.formatarMoeda(Number(combo.preco)),
+        })),
+        premios: edicao.premios.map((premio) => ({
+          faixa: premio.faixa,
+          descricao: premio.descricao,
+          valor: premio.valor.toString(),
+          imagemUrl: premio.imagemUrl,
+          valorFormatado: this.formatarMoeda(Number(premio.valor)),
+        })),
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — CRIAR PEDIDO COM PIX ───────────────────────────────────
+
+  /**
+   * Cria o pedido Sena (venda PENDENTE) e gera a cobrança PIX no gateway,
+   * reaproveitando o VendasSenaService — mesma lógica usada pelo POS/loja.
+   * Os dados do cliente vêm do JWT (cliente já autenticado via POST /whatsapp/auth).
+   */
+  async criarPedidoSenaComPix(
+    dto: CriarPedidoSenaWhatsappDto,
+    clienteId: string,
+  ) {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+      },
+    });
+
+    if (!cliente) {
+      throw new UnauthorizedException('Cliente não encontrado');
+    }
+
+    if (!cliente.dataNascimento) {
+      throw new BadRequestException(
+        'Cliente sem data de nascimento cadastrada. Refaça a autenticação em POST /whatsapp/auth',
+      );
+    }
+
+    const vendaSenaDto: CreateVendaSenaDto = {
+      edicaoSenaId: dto.edicaoSenaId,
+      cartelas: dto.cartelas,
+      quantidade: dto.quantidade,
+      comboSenaId: dto.comboSenaId,
+      tipoPagamento: TipoPagamento.PIX,
+      cpf: cliente.cpf,
+      nome: cliente.nome,
+      telefone: cliente.telefone,
+      email: cliente.email ?? '',
+      dataNascimento: cliente.dataNascimento.toISOString().split('T')[0],
+    };
+
+    const resultado = await this.vendasSenaService.create(
+      vendaSenaDto,
+      undefined,
+      { origemParticipacao: OrigemParticipacao.DIGITAL, requireGateway: true },
+    );
+
+    const venda = resultado.data as {
+      id: string;
+      status: StatusVendaSena;
+      total: string;
+      quantidade: number;
+      edicaoSena: { id: string; numero: string } | null;
+      cartelas?: { numerosEscolhidos: number[]; modoSelecao: string }[];
+      pagamento?: {
+        pixCopiaECola?: string;
+        qrCodeBase64?: string;
+        urlPagamento?: string;
+      };
+    };
+
+    this.logger.log(
+      `Pedido Sena WhatsApp criado: vendaSenaId=${venda.id} clienteId=${clienteId} total=R$${venda.total}`,
+    );
+
+    return {
+      message: 'Pedido Sena criado com sucesso. Aguardando pagamento PIX.',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        total: venda.total,
+        totalFormatado: this.formatarMoeda(Number(venda.total)),
+        quantidadeCartelas: venda.quantidade,
+        campanha: venda.edicaoSena
+          ? { id: venda.edicaoSena.id, numero: venda.edicaoSena.numero }
+          : null,
+        cartelas: (venda.cartelas ?? []).map((c) => ({
+          numerosEscolhidos: c.numerosEscolhidos,
+          modoSelecao: c.modoSelecao,
+        })),
+        pagamento: {
+          tipo: 'PIX',
+          pixCopiaECola: venda.pagamento?.pixCopiaECola,
+          qrCodeUrl: venda.pagamento?.qrCodeBase64,
+          expiracaoMinutos: 60,
+          instrucoes: venda.pagamento?.pixCopiaECola
+            ? 'Copie o código PIX e pague no seu banco. O pedido é confirmado automaticamente após o pagamento.'
+            : 'PIX temporariamente indisponível. Entre em contato com o suporte.',
+        },
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — STATUS DO PAGAMENTO ────────────────────────────────────
+
+  async consultarStatusPagamentoSena(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.vendaSena.findFirst({
+      where: { id: pedidoId, clienteId },
+      select: {
+        id: true,
+        status: true,
+        gatewayId: true,
+        gatewayPayload: true,
+        tipoPagamento: true,
+        total: true,
+        createdAt: true,
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    const statusLabel: Record<StatusVendaSena, string> = {
+      [StatusVendaSena.PENDENTE]: 'Aguardando pagamento',
+      [StatusVendaSena.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVendaSena.CANCELADO]: 'Pedido cancelado',
+      [StatusVendaSena.RECUSADO]: 'Pagamento recusado',
+    };
+
+    let statusGateway: string | undefined;
+
+    if (venda.status === StatusVendaSena.PENDENTE && venda.gatewayId) {
+      try {
+        const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
+          venda.tipoPagamento,
+          venda.gatewayPayload,
+        );
+        const resultadoGateway = await gateway.consultarCobranca(
+          venda.gatewayId,
+        );
+        statusGateway = resultadoGateway.status;
+      } catch (error) {
+        this.logger.warn(
+          `Erro ao consultar gateway para venda Sena ${pedidoId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    return {
+      message: 'Status do pagamento Sena consultado',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        statusLabel: statusLabel[venda.status],
+        statusGateway,
+        total: venda.total.toString(),
+        criadoEm: venda.createdAt,
+        pago: venda.status === StatusVendaSena.APROVADO,
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — CARTELAS COMPRADAS ─────────────────────────────────────
+
+  async consultarCartelasSena(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.vendaSena.findFirst({
+      where: { id: pedidoId, clienteId },
+      include: {
+        edicaoSena: {
+          select: { id: true, numero: true, dataSorteioMegaSena: true },
+        },
+        cartelas: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    if (venda.status !== StatusVendaSena.APROVADO) {
+      return {
+        message: 'Pedido ainda não confirmado',
+        data: {
+          pedidoId: venda.id,
+          status: venda.status,
+          statusLabel:
+            venda.status === StatusVendaSena.PENDENTE
+              ? 'Aguardando pagamento'
+              : 'Pedido cancelado/recusado',
+          cartelas: [],
+        },
+      };
+    }
+
+    return {
+      message: 'Cartelas encontradas com sucesso',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        campanha: {
+          id: venda.edicaoSena.id,
+          numero: venda.edicaoSena.numero,
+          dataSorteioMegaSena: venda.edicaoSena.dataSorteioMegaSena,
+        },
+        totalCartelas: venda.cartelas.length,
+        cartelas: venda.cartelas.map((c) => ({
+          numerosEscolhidos: c.numerosEscolhidos,
+          setimoNumero: c.setimoNumero,
+          modoSelecao: c.modoSelecao,
+        })),
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — CONSULTAR PEDIDOS ──────────────────────────────────────
+
+  async consultarPedidosSena(
+    clienteId: string,
+    filtros: ConsultarPedidosWhatsappDto,
+  ) {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: { id: true, telefone: true },
+    });
+
+    if (!cliente) {
+      throw new UnauthorizedException('Cliente não encontrado');
+    }
+
+    if (filtros.telefone) {
+      const telefoneLimpo = filtros.telefone.replace(/\D/g, '');
+      const clienteTelefone = cliente.telefone?.replace(/\D/g, '');
+      if (telefoneLimpo !== clienteTelefone) {
+        throw new BadRequestException(
+          'O telefone informado não corresponde ao cadastro do cliente autenticado',
+        );
+      }
+    }
+
+    const page = filtros.page ?? 1;
+    const limit = Math.min(filtros.limit ?? 10, 50);
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.VendaSenaWhereInput = {
+      clienteId,
+      ...(filtros.pedidoId ? { id: filtros.pedidoId } : {}),
+    };
+
+    const [vendas, total] = await Promise.all([
+      this.prisma.vendaSena.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          status: true,
+          tipoPagamento: true,
+          quantidade: true,
+          total: true,
+          gatewayId: true,
+          createdAt: true,
+          edicaoSena: {
+            select: { id: true, numero: true, dataSorteioMegaSena: true },
+          },
+          cartelas: { select: { id: true } },
+        },
+      }),
+      this.prisma.vendaSena.count({ where }),
+    ]);
+
+    const statusLabel: Record<StatusVendaSena, string> = {
+      [StatusVendaSena.PENDENTE]: 'Aguardando pagamento',
+      [StatusVendaSena.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVendaSena.CANCELADO]: 'Cancelado',
+      [StatusVendaSena.RECUSADO]: 'Recusado',
+    };
+
+    return {
+      message: total > 0 ? 'Pedidos encontrados' : 'Nenhum pedido encontrado',
+      data: {
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+        pedidos: vendas.map((v) => ({
+          pedidoId: v.id,
+          status: v.status,
+          statusLabel: statusLabel[v.status],
+          campanha: {
+            id: v.edicaoSena.id,
+            numero: v.edicaoSena.numero,
+            dataSorteioMegaSena: v.edicaoSena.dataSorteioMegaSena,
+          },
+          quantidadeCartelas: v.quantidade,
+          total: v.total.toString(),
+          totalFormatado: this.formatarMoeda(Number(v.total)),
+          criadoEm: v.createdAt,
+          temCartelas: v.cartelas.length > 0,
+        })),
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — DETALHE DE PEDIDO ──────────────────────────────────────
+
+  async detalharPedidoSena(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.vendaSena.findFirst({
+      where: { id: pedidoId, clienteId },
+      include: {
+        edicaoSena: {
+          select: {
+            id: true,
+            numero: true,
+            dataSorteioMegaSena: true,
+            dataEncerramento: true,
+          },
+        },
+        cartelas: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    const statusLabel: Record<StatusVendaSena, string> = {
+      [StatusVendaSena.PENDENTE]: 'Aguardando pagamento',
+      [StatusVendaSena.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVendaSena.CANCELADO]: 'Cancelado',
+      [StatusVendaSena.RECUSADO]: 'Recusado',
+    };
+
+    return {
+      message: 'Pedido encontrado',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        statusLabel: statusLabel[venda.status],
+        campanha: {
+          id: venda.edicaoSena.id,
+          numero: venda.edicaoSena.numero,
+          dataSorteioMegaSena: venda.edicaoSena.dataSorteioMegaSena,
+          dataEncerramento: venda.edicaoSena.dataEncerramento,
+        },
+        quantidadeCartelas: venda.quantidade,
+        total: venda.total.toString(),
+        totalFormatado: this.formatarMoeda(Number(venda.total)),
+        criadoEm: venda.createdAt,
+        totalCartelas: venda.cartelas.length,
+        cartelas: venda.cartelas.map((c) => ({
+          numerosEscolhidos: c.numerosEscolhidos,
+          setimoNumero: c.setimoNumero,
+          modoSelecao: c.modoSelecao,
         })),
       },
     };
