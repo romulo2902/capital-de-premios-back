@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
@@ -14,6 +15,7 @@ import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import { PagamentosService } from '../pagamentos/pagamentos.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
+import { RedisService } from '../../common/redis/redis.service';
 import {
   OrigemParticipacao,
   Prisma,
@@ -29,6 +31,7 @@ import type { CriarPedidoWhatsappDto } from './dto/criar-pedido-whatsapp.dto';
 import type { CriarPedidoSenaWhatsappDto } from './dto/criar-pedido-sena-whatsapp.dto';
 import type { PreviewCotasWhatsappDto } from './dto/preview-cotas-whatsapp.dto';
 import type { ConsultarPedidosWhatsappDto } from './dto/consultar-pedidos-whatsapp.dto';
+import type { ReservarCartelasWhatsappDto } from './dto/reservar-cartelas-whatsapp.dto';
 import type { CreateVendaSenaDto } from '../capital-sena/vendas-sena/dto/create-venda-sena.dto';
 import type { JwtPayload } from '../auth/auth.service';
 import {
@@ -40,6 +43,9 @@ import {
   parseEValidarDataNascimento,
   validarMaioridade,
 } from '../../common/utils/data-nascimento.util';
+
+const WHATSAPP_RESERVA_TTL_SEGUNDOS = 300;
+const WHATSAPP_PRE_COMPRA_TTL_SEGUNDOS = 1800;
 
 export type TipoCompraWhatsapp = 'UNITARIO' | 'COMBO';
 
@@ -66,6 +72,7 @@ export class WhatsappApiService {
     private readonly vendasSenaService: VendasSenaService,
     private readonly pagamentosService: PagamentosService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
+    private readonly redisService: RedisService,
   ) {}
 
   // ─── AUTH ──────────────────────────────────────────────────────────────────
@@ -228,11 +235,14 @@ export class WhatsappApiService {
   // ─── PREVIEW DE COTAS ──────────────────────────────────────────────────────
 
   /**
-   * Gera preview de combos disponíveis para a campanha informada,
-   * SEM reservar nenhum número. Ideal para o bot mostrar opções antes
-   * da confirmação do cliente.
+   * Gera preview de combos disponíveis para a campanha informada.
+   * Exclui números já reservados (por este ou outro canal — POS/loja/WhatsApp
+   * compartilham o mesmo namespace `reserva:{edicaoId}:{numero}` no Redis).
+   * Não reserva nada: para travar a seleção antes de finalizar, use
+   * POST /whatsapp/campanhas/:id/reservas.
    */
   async previewCotas(edicaoId: string, dto: PreviewCotasWhatsappDto) {
+    const numerosReservados = await this.listarNumerosReservados(edicaoId);
     return this.vendasService.listarCombosDisponiveis({
       edicaoId,
       origemParticipacao: OrigemParticipacao.DIGITAL,
@@ -242,7 +252,68 @@ export class WhatsappApiService {
       cursorNumeroBase: dto.cursorNumeroBase,
       direcao: dto.direcao ?? 'PROXIMO',
       limit: dto.quantidade ?? 1,
+      numerosReservados,
     });
+  }
+
+  // ─── RESERVA DE CARTELAS/COMBOS ─────────────────────────────────────────────
+
+  /**
+   * Reserva os números escolhidos por 5 minutos para o cliente autenticado —
+   * mesmo esquema usado no POS (`POST /pos/edicoes/:edicaoId/reservas`).
+   * Use antes de POST /whatsapp/pedidos para garantir que a seleção mostrada
+   * no preview não seja vendida para outro cliente/canal nesse intervalo.
+   */
+  async reservarCartelas(
+    edicaoId: string,
+    dto: ReservarCartelasWhatsappDto,
+    clienteId: string,
+  ) {
+    const edicao = await this.prisma.edicao.findUnique({
+      where: { id: edicaoId },
+      select: { id: true, numero: true, status: true },
+    });
+
+    if (!edicao) {
+      throw new NotFoundException('Campanha não encontrada');
+    }
+
+    if (edicao.status !== StatusEdicao.ATIVA) {
+      throw new BadRequestException('A campanha não está ativa');
+    }
+
+    const numeros = this.normalizarNumerosReserva(dto.cartelas);
+    const comprados = await this.prisma.bilhete.findMany({
+      where: {
+        edicaoId: edicao.id,
+        numero: { in: numeros.map((numero) => BigInt(numero)) },
+      },
+      select: { numero: true },
+    });
+
+    if (comprados.length > 0) {
+      throw new BadRequestException(
+        'Algumas cartelas selecionadas já foram vendidas',
+      );
+    }
+
+    await this.reservarNumerosNoRedis(
+      edicao.id,
+      numeros,
+      clienteId,
+      WHATSAPP_RESERVA_TTL_SEGUNDOS,
+    );
+
+    return {
+      message: 'Cartelas reservadas para pré-compra',
+      data: {
+        edicaoId: edicao.id,
+        edicaoNumero: edicao.numero,
+        reservadas: numeros.length,
+        cartelas: numeros.map((numero) => this.formatarNumeroBilhete(numero)),
+        expiresIn: WHATSAPP_RESERVA_TTL_SEGUNDOS,
+      },
+    };
   }
 
   // ─── CRIAR PEDIDO COM PIX ─────────────────────────────────────────────────
@@ -301,6 +372,10 @@ export class WhatsappApiService {
     const total = valorSelecionado * dto.quantidade;
     const quantidadeCartelasCompra =
       quantidadeCartelasPorCombo * dto.quantidade;
+
+    // Se o bot reservou números via POST /whatsapp/campanhas/:id/reservas,
+    // valida que a seleção ainda pertence a este cliente antes de criar a venda.
+    await this.garantirReservasSelecionadas(dto, clienteId);
 
     // Criar venda PENDENTE
     const venda = await this.prisma.venda.create({
@@ -405,6 +480,9 @@ export class WhatsappApiService {
         errorCode: erroPagamento.errorCode,
       });
     }
+
+    // Estende a reserva (5min → 30min) para sobreviver ao tempo de pagamento do PIX.
+    await this.estenderReservasSelecionadas(dto, clienteId);
 
     return {
       message: 'Pedido criado com sucesso. Aguardando pagamento PIX.',
@@ -1342,5 +1420,170 @@ export class WhatsappApiService {
         '7d',
       ) as JwtSignOptions['expiresIn'],
     };
+  }
+
+  // ─── Helpers de reserva (mesmo esquema do POS) ─────────────────────────────
+
+  private async listarNumerosReservados(edicaoId: string): Promise<string[]> {
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      return [];
+    }
+
+    const keys = await this.redisService.client.keys(`reserva:${edicaoId}:*`);
+    return keys
+      .map((key) => key.split(':').pop())
+      .filter((numero): numero is string => Boolean(numero))
+      .map((numero) => BigInt(numero).toString());
+  }
+
+  private normalizarNumerosReserva(cartelas: string[]): string[] {
+    return Array.from(
+      new Set(
+        cartelas.map((numero) => {
+          const digits = numero.replace(/\D/g, '');
+          if (!digits) {
+            throw new BadRequestException('Cartela inválida para reserva');
+          }
+          return BigInt(digits).toString();
+        }),
+      ),
+    );
+  }
+
+  private async reservarNumerosNoRedis(
+    edicaoId: string,
+    numeros: string[],
+    clienteId: string,
+    ttlSegundos: number,
+  ): Promise<void> {
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      throw new ServiceUnavailableException(
+        'Reservas WhatsApp exigem Redis configurado',
+      );
+    }
+
+    const redis = this.redisService.client;
+    const valorReserva = JSON.stringify({
+      origem: 'WHATSAPP',
+      clienteId,
+      criadoEm: new Date().toISOString(),
+    });
+    const keysCriadas: string[] = [];
+
+    for (const numero of numeros) {
+      const key = this.montarChaveReserva(edicaoId, numero);
+      const resultado = await redis.set(
+        key,
+        valorReserva,
+        'EX',
+        ttlSegundos,
+        'NX',
+      );
+
+      if (resultado === 'OK') {
+        keysCriadas.push(key);
+        continue;
+      }
+
+      const reservaAtual = await redis.get(key);
+      if (this.reservaPertenceAoCliente(reservaAtual, clienteId)) {
+        await redis.setex(key, ttlSegundos, valorReserva);
+        continue;
+      }
+
+      if (keysCriadas.length > 0) {
+        await redis.del(...keysCriadas);
+      }
+      throw new ConflictException(
+        `Cartela ${this.formatarNumeroBilhete(numero)} já está reservada em outra pré-compra`,
+      );
+    }
+  }
+
+  private async garantirReservasSelecionadas(
+    dto: CriarPedidoWhatsappDto,
+    clienteId: string,
+  ): Promise<void> {
+    const numerosSelecionados = (dto.combosSelecionados ?? []).map(
+      (c) => c.numeroBase,
+    );
+
+    if (!dto.edicaoId || numerosSelecionados.length === 0) {
+      return;
+    }
+
+    const numeros = this.normalizarNumerosReserva(numerosSelecionados);
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      throw new ServiceUnavailableException(
+        'Reservas WhatsApp exigem Redis configurado',
+      );
+    }
+
+    for (const numero of numeros) {
+      const key = this.montarChaveReserva(dto.edicaoId, numero);
+      const reservaAtual = await this.redisService.client.get(key);
+      if (!this.reservaPertenceAoCliente(reservaAtual, clienteId)) {
+        throw new ConflictException(
+          `Cartela ${this.formatarNumeroBilhete(numero)} não está reservada para este cliente`,
+        );
+      }
+    }
+  }
+
+  private async estenderReservasSelecionadas(
+    dto: CriarPedidoWhatsappDto,
+    clienteId: string,
+  ): Promise<void> {
+    const numerosSelecionados = (dto.combosSelecionados ?? []).map(
+      (c) => c.numeroBase,
+    );
+
+    if (!dto.edicaoId || numerosSelecionados.length === 0) {
+      return;
+    }
+
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      return;
+    }
+
+    const redis = this.redisService.client;
+    const valorReserva = JSON.stringify({
+      origem: 'WHATSAPP',
+      clienteId,
+      criadoEm: new Date().toISOString(),
+    });
+
+    for (const numeroBruto of numerosSelecionados) {
+      const numero = this.normalizarNumerosReserva([numeroBruto])[0];
+      const key = this.montarChaveReserva(dto.edicaoId, numero);
+      const reservaAtual = await redis.get(key);
+      if (this.reservaPertenceAoCliente(reservaAtual, clienteId)) {
+        await redis.setex(key, WHATSAPP_PRE_COMPRA_TTL_SEGUNDOS, valorReserva);
+      }
+    }
+  }
+
+  private montarChaveReserva(edicaoId: string, numero: string): string {
+    return `reserva:${edicaoId}:${numero}`;
+  }
+
+  private reservaPertenceAoCliente(
+    reserva: string | null,
+    clienteId: string,
+  ): boolean {
+    if (!reserva) {
+      return false;
+    }
+
+    try {
+      const parsed = JSON.parse(reserva) as { clienteId?: unknown };
+      return parsed.clienteId === clienteId;
+    } catch {
+      return false;
+    }
+  }
+
+  private formatarNumeroBilhete(numero: string): string {
+    return numero.padStart(7, '0');
   }
 }

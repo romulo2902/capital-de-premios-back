@@ -586,23 +586,44 @@ function shouldIncludeOperation(
   return false;
 }
 
+/**
+ * Controllers que não declaram `@ApiTags` na classe (apenas por método) recebem
+ * do @nestjs/swagger uma tag automática com o nome da classe (`autoTagControllers`),
+ * que é concatenada — nunca substituída — com as tags específicas de cada método.
+ * Sem essa limpeza, cada endpoint apareceria duplicado: uma vez no grupo
+ * específico e outra vez no grupo genérico com nome da classe.
+ */
+const AUTO_TAG_CLEANUP: Record<
+  string,
+  { autoTagNames: string[]; specificPrefix: string }
+> = {
+  pos: { autoTagNames: ['Pos', 'POS'], specificPrefix: 'POS /' },
+  whatsapp: {
+    autoTagNames: ['WhatsappApi', 'WhatsApp Api', 'WhatsApp'],
+    specificPrefix: 'WhatsApp API —',
+  },
+};
+
 function normalizeAudienceOperationTags(
   operation: OperationObject,
   audience: Exclude<SwaggerAudience, 'shared'>,
 ): OperationObject {
-  if (audience !== 'pos') {
+  const cleanup = AUTO_TAG_CLEANUP[audience];
+  if (!cleanup) {
     return operation;
   }
 
   const tags = operation.tags ?? [];
-  const hasSpecificPosTag = tags.some((tag) => tag.startsWith('POS /'));
-  if (!hasSpecificPosTag) {
+  const hasSpecificTag = tags.some((tag) =>
+    tag.startsWith(cleanup.specificPrefix),
+  );
+  if (!hasSpecificTag) {
     return operation;
   }
 
   return {
     ...operation,
-    tags: tags.filter((tag) => tag !== 'Pos' && tag !== 'POS'),
+    tags: tags.filter((tag) => !cleanup.autoTagNames.includes(tag)),
   };
 }
 

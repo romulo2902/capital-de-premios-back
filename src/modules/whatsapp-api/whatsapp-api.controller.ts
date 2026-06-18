@@ -23,12 +23,15 @@ import { CriarPedidoWhatsappDto } from './dto/criar-pedido-whatsapp.dto';
 import { CriarPedidoSenaWhatsappDto } from './dto/criar-pedido-sena-whatsapp.dto';
 import { PreviewCotasWhatsappDto } from './dto/preview-cotas-whatsapp.dto';
 import { ConsultarPedidosWhatsappDto } from './dto/consultar-pedidos-whatsapp.dto';
+import { ReservarCartelasWhatsappDto } from './dto/reservar-cartelas-whatsapp.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
+const WHATSAPP_GERAL_TAG = 'WhatsApp API — Geral';
+const WHATSAPP_PREMIOS_TAG = 'WhatsApp API — Capital de Prêmios';
 const WHATSAPP_SENA_TAG = 'WhatsApp API — Capital Sena';
 
 /**
@@ -52,11 +55,16 @@ const WHATSAPP_SENA_TAG = 'WhatsApp API — Capital Sena';
  *
  * 3. (Opcional) Gerar preview das cotas disponíveis
  *    → POST /api/whatsapp/campanhas/{id}/cotas/preview
- *    → Retorna: combos com números disponíveis (sem reservar)
+ *    → Retorna: combos com números disponíveis (já exclui números reservados)
+ *
+ * 3b. (Recomendado para combos) Reservar a seleção por 5 minutos
+ *    → POST /api/whatsapp/campanhas/{id}/reservas  [Bearer]
+ *    → Trava os números escolhidos para este cliente — mesmo esquema do POS
  *
  * 4. Criar o pedido e receber o QR Code / Copia-e-Cola PIX
  *    → POST /api/whatsapp/pedidos  [Bearer]
  *    → Retorna: pedidoId + pixCopiaECola + qrCodeUrl
+ *    → Se a seleção foi reservada no passo 3b, a reserva é estendida automaticamente
  *
  * 5. Enviar o código PIX ao cliente via WhatsApp e aguardar pagamento
  *
@@ -105,7 +113,6 @@ const WHATSAPP_SENA_TAG = 'WhatsApp API — Capital Sena';
  * Esta rota **não** exige autenticação JWT e vale tanto para Prêmios
  * quanto para Capital Sena — a confirmação é resolvida pelo gatewayId.
  */
-@ApiTags('WhatsApp API')
 @Controller('whatsapp')
 export class WhatsappApiController {
   constructor(private readonly service: WhatsappApiService) {}
@@ -113,6 +120,7 @@ export class WhatsappApiController {
   // ─── 1. AUTENTICAÇÃO / CADASTRO ───────────────────────────────────────────
 
   @Post('auth')
+  @ApiTags(WHATSAPP_GERAL_TAG)
   @ApiOperation({
     summary: '1. Registrar ou autenticar cliente por CPF',
     description: `
@@ -162,6 +170,7 @@ O telefone é necessário pois é o canal de origem (WhatsApp) e também usado p
   // ─── 2. CAMPANHA ATIVA ────────────────────────────────────────────────────
 
   @Get('campanhas/ativa')
+  @ApiTags(WHATSAPP_PREMIOS_TAG)
   @ApiOperation({
     summary: '2. Consultar campanha/edição ativa',
     description: `
@@ -233,16 +242,19 @@ Se não houver campanha ativa, retorna \`data: null\`.
   // ─── 3. PREVIEW DE COTAS ──────────────────────────────────────────────────
 
   @Post('campanhas/:id/cotas/preview')
+  @ApiTags(WHATSAPP_PREMIOS_TAG)
   @ApiOperation({
     summary: '3. Gerar preview de cotas/combos disponíveis (sem reservar)',
     description: `
-Gera uma prévia dos combos (conjuntos de números) disponíveis para a campanha,
-**sem reservar** nenhum número. Ideal para mostrar ao cliente as opções antes da confirmação.
+Gera uma prévia dos combos (conjuntos de números) disponíveis para a campanha.
+Exclui automaticamente números já reservados por qualquer canal (POS, loja ou outro
+cliente WhatsApp) — mas **ainda não reserva** a seleção mostrada aqui.
 
 **Paginação:** Use \`cursorNumeroBase\` + \`direcao\` para navegar entre os combos disponíveis.
 
 **Atenção:** Os números retornados aqui **não estão reservados**. Podem ser adquiridos por outro
-cliente antes do pedido ser finalizado.
+cliente/canal antes do pedido ser finalizado — para travar a seleção, chame
+\`POST /whatsapp/campanhas/{id}/reservas\` com os números do combo escolhido antes de criar o pedido.
     `.trim(),
   })
   @ApiParam({
@@ -296,9 +308,79 @@ cliente antes do pedido ser finalizado.
     return this.service.previewCotas(id, dto);
   }
 
+  // ─── 3b. RESERVAR CARTELAS/COMBOS ──────────────────────────────────────────
+
+  @Post('campanhas/:id/reservas')
+  @ApiTags(WHATSAPP_PREMIOS_TAG)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CLIENTE')
+  @ApiOperation({
+    summary: '3b. 🔒 Reservar cartelas/combos para pré-compra (5 min)',
+    description: `
+Marca os números escolhidos como **pré-compra** por 5 minutos para o cliente autenticado —
+mesmo esquema usado no canal POS (\`POST /pos/edicoes/:edicaoId/reservas\`).
+
+**Por quê reservar?** Evita que outro cliente ou canal (loja, POS) compre a mesma cartela
+enquanto o bot ainda está confirmando a escolha com o cliente no WhatsApp.
+
+**Para combo:** envie todos os números de \`bilhetes[].numero\` do combo retornado em
+\`POST /whatsapp/campanhas/{id}/cotas/preview\`.
+
+**Depois de reservar:** crie o pedido em \`POST /whatsapp/pedidos\` enviando o mesmo \`numeroBase\`
+em \`combosSelecionados\`. A API valida que a seleção ainda pertence a este cliente e estende
+a reserva (para 30 minutos) enquanto a cobrança PIX está pendente.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID da edição ativa (obtido em GET /whatsapp/campanhas/ativa)',
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  })
+  @ApiBody({ type: ReservarCartelasWhatsappDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Cartelas reservadas para pré-compra.',
+    schema: {
+      example: {
+        statusCode: 201,
+        message: 'Cartelas reservadas para pré-compra',
+        data: {
+          edicaoId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          edicaoNumero: '001',
+          reservadas: 6,
+          cartelas: ['0001234', '0002345', '0003456'],
+          expiresIn: 300,
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Campanha inativa ou alguma cartela já foi vendida.',
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 409,
+    description: 'Alguma cartela já está reservada em outra pré-compra (outro cliente/canal).',
+  })
+  @ApiResponse({ status: 404, description: 'Campanha não encontrada.' })
+  @ApiResponse({
+    status: 503,
+    description: 'Redis não configurado para controlar reservas.',
+  })
+  reservarCartelas(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReservarCartelasWhatsappDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.reservarCartelas(id, dto, user.id);
+  }
+
   // ─── 4. CRIAR PEDIDO COM PIX ──────────────────────────────────────────────
 
   @Post('pedidos')
+  @ApiTags(WHATSAPP_PREMIOS_TAG)
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
@@ -326,6 +408,11 @@ retornando o código Copia-e-Cola e a URL do QR Code para o bot enviar ao client
 
 **⚠️ Se o PIX falhar (gateway indisponível):** A API retorna erro HTTP 502 com mensagem
 humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
+
+**Reserva prévia (opcional, recomendada para combos):** Se você reservou os números em
+\`POST /whatsapp/campanhas/{id}/reservas\` antes de chamar esta rota, envie o mesmo \`numeroBase\`
+em \`combosSelecionados\` — a API valida que a reserva ainda pertence a este cliente (HTTP 409 caso
+contrário) e estende automaticamente o prazo da reserva enquanto o PIX está pendente.
 
 **Autenticação:** Requer \`Authorization: Bearer {accessToken}\` obtido em \`POST /whatsapp/auth\`.
     `.trim(),
@@ -370,6 +457,11 @@ humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
   @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
   @ApiResponse({ status: 404, description: 'Campanha não encontrada.' })
   @ApiResponse({
+    status: 409,
+    description:
+      'Algum dos números em combosSelecionados não está reservado para este cliente (reserva expirou ou pertence a outro cliente/canal).',
+  })
+  @ApiResponse({
     status: 502,
     description:
       'Não foi possível gerar o PIX. O bot deve informar o cliente para tentar novamente.',
@@ -392,6 +484,7 @@ humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
   // ─── 5. STATUS DO PAGAMENTO ───────────────────────────────────────────────
 
   @Get('pedidos/:id/pagamento')
+  @ApiTags(WHATSAPP_PREMIOS_TAG)
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
@@ -452,6 +545,7 @@ se o PIX expirou no gateway antes de criar um novo pedido.
   // ─── 6. CARTELAS COMPRADAS ────────────────────────────────────────────────
 
   @Get('pedidos/:id/cartelas')
+  @ApiTags(WHATSAPP_PREMIOS_TAG)
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
@@ -525,6 +619,7 @@ retorna a lista vazia com uma mensagem de aviso.
   // ─── 7. LISTAR PEDIDOS ────────────────────────────────────────────────────
 
   @Get('pedidos')
+  @ApiTags(WHATSAPP_PREMIOS_TAG)
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
@@ -613,6 +708,7 @@ Se o telefone informado não corresponder ao cadastro do cliente, retorna erro 4
   // ─── 7b. DETALHE DE PEDIDO ────────────────────────────────────────────────
 
   @Get('pedidos/:id')
+  @ApiTags(WHATSAPP_PREMIOS_TAG)
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('CLIENTE')
@@ -1001,6 +1097,7 @@ Retorna todos os detalhes de um pedido Sena, incluindo as cartelas se o pedido e
   // ─── 14. WEBHOOK PAGAMENTO ─────────────────────────────────────────────────
 
   @Post('webhook/pagamento')
+  @ApiTags(WHATSAPP_GERAL_TAG)
   @ApiOperation({
     summary: '14. Webhook PagBank — Confirmação de pagamento (sem auth)',
     description: `
