@@ -7,7 +7,10 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, createHmac } from 'crypto';
+import {
+  WebhookSignatureValidator,
+  InvalidWebhookSignatureError,
+} from 'mercadopago';
 import { Prisma, StatusVenda, StatusVendaSena } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
@@ -79,75 +82,64 @@ export class PagamentosService {
 
   // ─── WEBHOOK PIX (Mercado Pago) ────────────────────────
   //
-  // A notificação da Orders API só garante o id do order (`data.id`);
-  // o status real é sempre buscado via GET /v1/orders/{id} — nunca
-  // confiamos em um eventual status embutido no corpo do webhook.
+  // A notificação só garante o id do pagamento (`data.id`); o status real é
+  // sempre buscado via GET /v1/payments/{id} — nunca confiamos em um
+  // eventual status embutido no corpo do webhook.
 
   async processarWebhookMercadoPago(
     headers: Record<string, string | string[] | undefined>,
     query: Record<string, unknown>,
     body: Record<string, unknown>,
-    url: string,
   ) {
     this.logger.log(`Webhook Mercado Pago recebido: ${JSON.stringify(body)}`);
 
-    // O id para a assinatura DEVE vir da query string da URL recebida, não do
-    // body — parseamos a URL crua para não depender de como o NestJS/Express
-    // normaliza `data.id` no objeto de query (ex.: poderia virar `data: { id }`
-    // aninhado dependendo do parser, mascarando o valor real da URL).
-    const idDaUrl = new URL(url, 'http://localhost').searchParams.get(
-      'data.id',
-    );
-
-    this.logger.debug(
-      `data.id extraído da URL crua: ${JSON.stringify(idDaUrl)} (url=${url})`,
-    );
-
-    const orderId = idDaUrl ?? this.extrairOrderIdMercadoPago(body, query);
-    if (!orderId) {
-      this.logger.warn('Webhook Mercado Pago sem data.id de order — ignorado');
+    const paymentId = this.extrairPaymentIdMercadoPago(body, query);
+    if (!paymentId) {
+      this.logger.warn(
+        'Webhook Mercado Pago sem data.id de pagamento — ignorado',
+      );
       return { message: 'Webhook recebido (sem dados de pagamento)' };
     }
 
-    if (!this.validarAssinaturaMercadoPago(headers, orderId)) {
+    if (!this.validarAssinaturaMercadoPago(headers, query, paymentId)) {
       this.logger.warn(
-        `Assinatura inválida no webhook Mercado Pago para order ${orderId}`,
+        `Assinatura inválida no webhook Mercado Pago para pagamento ${paymentId}`,
       );
       throw new BadRequestException('Assinatura do webhook inválida');
     }
 
-    const lockKey = `lock:mercadopago:webhook:${orderId}`;
+    const lockKey = `lock:mercadopago:webhook:${paymentId}`;
     const lock = await this.distributedLock.acquire(lockKey, 30_000);
     if (!lock) {
       this.logger.warn(
-        `Webhook Mercado Pago ignorado temporariamente para order ${orderId} (já em processamento em outra instância)`,
+        `Webhook Mercado Pago ignorado temporariamente para pagamento ${paymentId} (já em processamento em outra instância)`,
       );
       return {
         message: 'Webhook em processamento',
-        data: { gatewayId: orderId, status: 'EM_PROCESSAMENTO' },
+        data: { gatewayId: paymentId, status: 'EM_PROCESSAMENTO' },
       };
     }
 
     try {
       const resultado = await this.mercadoPagoPixGateway.consultarCobranca(
-        orderId,
+        paymentId,
       );
 
       if (resultado.status !== 'APROVADO') {
         this.logger.log(
-          `Order Mercado Pago ${orderId} ainda não aprovada (status=${resultado.status})`,
+          `Pagamento Mercado Pago ${paymentId} ainda não aprovado (status=${resultado.status})`,
         );
         return {
           message: 'Webhook processado',
           data: {
-            gatewayId: orderId,
+            gatewayId: paymentId,
             status: `IGNORADO_${resultado.status}`,
           },
         };
       }
 
       const venda = await this.prisma.venda.findFirst({
-        where: { gatewayId: orderId },
+        where: { gatewayId: paymentId },
         select: { id: true, status: true },
       });
 
@@ -158,38 +150,38 @@ export class PagamentosService {
           );
           return {
             message: 'Webhook processado',
-            data: { gatewayId: orderId, status: 'JA_PROCESSADA' },
+            data: { gatewayId: paymentId, status: 'JA_PROCESSADA' },
           };
         }
 
         await this.vendasService.confirmarPagamento(venda.id, {
           mercadoPagoWebhook: body,
-          mercadoPagoOrder: resultado.payload,
+          mercadoPagoPayment: resultado.payload,
           confirmadoEm: new Date().toISOString(),
         });
-        await this.notificarConfirmacaoPagamentoN8n(venda.id, orderId);
+        await this.notificarConfirmacaoPagamentoN8n(venda.id, paymentId);
         void this.enviarEmailCompraAprovada(venda.id);
         this.logger.log(
           `Pagamento confirmado via webhook Mercado Pago para venda ${venda.id}`,
         );
         return {
           message: 'Webhook processado',
-          data: { gatewayId: orderId, status: 'CONFIRMADA' },
+          data: { gatewayId: paymentId, status: 'CONFIRMADA' },
         };
       }
 
       const vendaSena = await this.prisma.vendaSena.findFirst({
-        where: { gatewayId: orderId },
+        where: { gatewayId: paymentId },
         select: { id: true, status: true },
       });
 
       if (!vendaSena) {
         this.logger.warn(
-          `Venda não encontrada para order Mercado Pago ${orderId}`,
+          `Venda não encontrada para pagamento Mercado Pago ${paymentId}`,
         );
         return {
           message: 'Webhook processado',
-          data: { gatewayId: orderId, status: 'VENDA_NAO_ENCONTRADA' },
+          data: { gatewayId: paymentId, status: 'VENDA_NAO_ENCONTRADA' },
         };
       }
 
@@ -199,13 +191,13 @@ export class PagamentosService {
         );
         return {
           message: 'Webhook processado',
-          data: { gatewayId: orderId, status: 'JA_PROCESSADA' },
+          data: { gatewayId: paymentId, status: 'JA_PROCESSADA' },
         };
       }
 
       await this.vendasSenaService.confirmarPagamento(vendaSena.id, {
         mercadoPagoWebhook: body,
-        mercadoPagoOrder: resultado.payload,
+        mercadoPagoPayment: resultado.payload,
         confirmadoEm: new Date().toISOString(),
       });
       void this.enviarEmailCompraAprovadaSena(vendaSena.id);
@@ -214,24 +206,24 @@ export class PagamentosService {
       );
       return {
         message: 'Webhook processado',
-        data: { gatewayId: orderId, status: 'CONFIRMADA_SENA' },
+        data: { gatewayId: paymentId, status: 'CONFIRMADA_SENA' },
       };
     } catch (error) {
       this.logger.error(
-        `Erro ao confirmar pagamento Mercado Pago para order ${orderId}: ${
+        `Erro ao confirmar pagamento Mercado Pago ${paymentId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
       return {
         message: 'Webhook processado',
-        data: { gatewayId: orderId, status: 'ERRO' },
+        data: { gatewayId: paymentId, status: 'ERRO' },
       };
     } finally {
       await this.distributedLock.release(lock);
     }
   }
 
-  private extrairOrderIdMercadoPago(
+  private extrairPaymentIdMercadoPago(
     body: Record<string, unknown>,
     query: Record<string, unknown>,
   ): string | undefined {
@@ -242,23 +234,22 @@ export class PagamentosService {
         ? (query['data.id'] as string)
         : undefined;
 
-    return idDoBody ?? idDaQuery;
+    return idDaQuery ?? idDoBody;
   }
 
   /**
-   * Valida o header `x-signature` enviado pelo Mercado Pago.
-   *
-   * Referência: https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/notifications
-   * manifest = "id:{data.id};request-id:{x-request-id};ts:{ts};" assinado
-   * com HMAC-SHA256 usando o webhook secret configurado no painel.
+   * Valida o header `x-signature` enviado pelo Mercado Pago usando o
+   * validador oficial do SDK (`mercadopago`), que implementa exatamente o
+   * algoritmo usado pelo backend deles — evita reimplementar HMAC à mão.
    *
    * Se `MERCADOPAGO_WEBHOOK_SECRET` não estiver configurado (ex.: ainda não
-   * gerado no painel em sandbox), apenas avisa e segue sem validar —
-   * mesmo padrão tolerante já usado para o PagBank neste serviço.
+   * gerado no painel em sandbox), apenas avisa e segue sem validar — mesmo
+   * padrão tolerante já usado para o PagBank neste serviço.
    */
   private validarAssinaturaMercadoPago(
     headers: Record<string, string | string[] | undefined>,
-    orderId: string,
+    query: Record<string, unknown>,
+    paymentId: string,
   ): boolean {
     const secret = this.config
       .get<string>('MERCADOPAGO_WEBHOOK_SECRET', '')
@@ -271,96 +262,23 @@ export class PagamentosService {
       return true;
     }
 
-    const fingerprint = createHash('sha256').update(secret).digest('hex').slice(0, 16);
-    this.logger.debug(
-      `MERCADOPAGO_WEBHOOK_SECRET em uso: fingerprint=${fingerprint} length=${secret.length}`,
-    );
-
-    const xSignature = this.lerHeader(headers, 'x-signature');
-    const xRequestId = this.lerHeader(headers, 'x-request-id');
-
-    this.logger.debug(
-      `Headers brutos — x-signature=${JSON.stringify(xSignature)} x-request-id=${JSON.stringify(xRequestId)} todasAsChaves=${JSON.stringify(Object.keys(headers))}`,
-    );
-
-    if (!xSignature || !xRequestId) {
-      this.logger.warn(
-        `Assinatura Mercado Pago ausente: x-signature=${xSignature ?? 'N/A'} x-request-id=${xRequestId ?? 'N/A'}`,
-      );
-      return false;
-    }
-
-    const partes = Object.fromEntries(
-      xSignature.split(',').map((parte) => {
-        const [chave, valor] = parte.split('=');
-        return [chave?.trim(), valor?.trim()];
-      }),
-    );
-
-    const ts = partes['ts'];
-    const v1 = partes['v1'];
-
-    if (!ts || !v1) {
-      this.logger.warn(
-        `x-signature em formato inesperado: "${xSignature}" (ts=${ts ?? 'N/A'} v1=${v1 ?? 'N/A'})`,
-      );
-      return false;
-    }
-
-    // DEBUG TEMPORÁRIO: testando várias variações do manifest sugeridas pelo
-    // suporte da Mercado Pago (separador espaço vs ';', espaço/newline final,
-    // com/sem lowercase do id) até confirmar qual bate de fato — limpar
-    // depois de validado em produção.
-    const idOriginal = orderId;
-    const idMinusculo = orderId.toLowerCase();
-    const tsMs = /^\d+$/.test(ts) ? `${ts}000` : ts;
-
-    const candidatos: Array<[string, string]> = [
-      ['ESPACO_lower', `id:${idMinusculo} request-id:${xRequestId} ts:${ts}`],
-      ['ESPACO_lower_trailing-space', `id:${idMinusculo} request-id:${xRequestId} ts:${ts} `],
-      ['ESPACO_lower_trailing-newline', `id:${idMinusculo} request-id:${xRequestId} ts:${ts}\n`],
-      ['ESPACO_original', `id:${idOriginal} request-id:${xRequestId} ts:${ts}`],
-      ['ESPACO_original_trailing-space', `id:${idOriginal} request-id:${xRequestId} ts:${ts} `],
-      ['ESPACO_original_trailing-newline', `id:${idOriginal} request-id:${xRequestId} ts:${ts}\n`],
-      ['PONTOVIRGULA_lower', `id:${idMinusculo};request-id:${xRequestId};ts:${ts};`],
-      ['PONTOVIRGULA_original', `id:${idOriginal};request-id:${xRequestId};ts:${ts};`],
-      ['ESPACO_lower_ts-ms', `id:${idMinusculo} request-id:${xRequestId} ts:${tsMs}`],
-      ['ESPACO_original_ts-ms', `id:${idOriginal} request-id:${xRequestId} ts:${tsMs}`],
-      ['PONTOVIRGULA_lower_ts-ms', `id:${idMinusculo};request-id:${xRequestId};ts:${tsMs};`],
-      ['PONTOVIRGULA_original_ts-ms', `id:${idOriginal};request-id:${xRequestId};ts:${tsMs};`],
-    ];
-
-    let variantaVencedora: string | null = null;
-    const hashesCalculados: string[] = [];
-
-    for (const [label, manifest] of candidatos) {
-      const hash = createHmac('sha256', secret).update(manifest).digest('hex');
-      hashesCalculados.push(`${label}=${hash}`);
-      if (hash === v1) {
-        variantaVencedora = label;
+    try {
+      WebhookSignatureValidator.validate({
+        xSignature: headers['x-signature'],
+        xRequestId: headers['x-request-id'],
+        dataId: (query['data.id'] as string | undefined) ?? paymentId,
+        secret,
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof InvalidWebhookSignatureError) {
+        this.logger.warn(
+          `Assinatura Mercado Pago rejeitada (${error.reason}) para pagamento ${paymentId}`,
+        );
+        return false;
       }
+      throw error;
     }
-
-    if (!variantaVencedora) {
-      this.logger.warn(
-        `Hash não confere (nenhuma das ${candidatos.length} variantes) — recebido=${v1} | ${hashesCalculados.join(' | ')}`,
-      );
-      return false;
-    }
-
-    this.logger.log(
-      `Assinatura Mercado Pago validada com sucesso usando variante: ${variantaVencedora}`,
-    );
-
-    return true;
-  }
-
-  private lerHeader(
-    headers: Record<string, string | string[] | undefined>,
-    nome: string,
-  ): string | undefined {
-    const valor = headers[nome] ?? headers[nome.toLowerCase()];
-    return Array.isArray(valor) ? valor[0] : valor;
   }
 
   // ─── PROCESSAMENTO INTERNO DE WEBHOOK PAGBANK ─────────

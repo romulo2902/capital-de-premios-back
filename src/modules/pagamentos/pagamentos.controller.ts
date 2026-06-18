@@ -7,10 +7,8 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
-  Req,
   UseGuards,
 } from '@nestjs/common';
-import type { Request } from 'express';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -61,19 +59,17 @@ export class PagamentosController {
   @Post('pagamentos/webhook/mercadopago')
   @ApiOperation({
     summary:
-      'Webhook PIX do Mercado Pago (Orders API) — Notificação de pagamento (sem auth)',
+      'Webhook PIX do Mercado Pago (API Pagamentos) — Notificação de pagamento (sem auth)',
   })
   webhookMercadoPago(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: Record<string, unknown>,
     @Body() body: Record<string, unknown>,
-    @Req() req: Request,
   ) {
     return this.pagamentosService.processarWebhookMercadoPago(
       headers,
       query,
       body,
-      req.url,
     );
   }
 

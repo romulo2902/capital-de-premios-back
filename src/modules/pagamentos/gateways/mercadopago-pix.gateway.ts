@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
+import { MercadoPagoConfig, Payment } from 'mercadopago';
 import type {
   PaymentGateway,
   CriarCobrancaInput,
@@ -10,87 +10,43 @@ import type {
 } from './payment-gateway.interface';
 
 /**
- * Mapeia status de Order da Orders API do Mercado Pago para status interno normalizado.
+ * Mapeia status de pagamento da API Pagamentos clássica do Mercado Pago
+ * para status interno normalizado.
  *
- * Referência: https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-management/status/order-status
+ * Referência: https://www.mercadopago.com.br/developers/pt/reference/online-payments/checkout-api-payments/create-payment/post
  */
+type PaymentResponse = Awaited<ReturnType<Payment['get']>>;
+
 const STATUS_MAP: Record<string, StatusCobrancaGateway> = {
-  created: 'PENDENTE',
-  processing: 'PENDENTE',
-  action_required: 'PENDENTE',
-  processed: 'APROVADO',
-  expired: 'EXPIRADO',
-  canceled: 'CANCELADO',
-  failed: 'CANCELADO',
-  charged_back: 'CANCELADO',
+  pending: 'PENDENTE',
+  in_process: 'PENDENTE',
+  authorized: 'PENDENTE',
+  in_mediation: 'PENDENTE',
+  approved: 'APROVADO',
+  rejected: 'CANCELADO',
+  cancelled: 'CANCELADO',
   refunded: 'CANCELADO',
-};
-
-interface MercadoPagoPayment {
-  id: string;
-  status: string;
-  status_detail?: string;
-  amount: string;
-  date_approved?: string;
-  payment_method: {
-    id: string;
-    type: string;
-    ticket_url?: string;
-    qr_code?: string;
-    qr_code_base64?: string;
-  };
-  [key: string]: unknown;
-}
-
-interface MercadoPagoOrderResponse {
-  id: string;
-  type: string;
-  status: string;
-  status_detail?: string;
-  total_amount: string;
-  external_reference?: string;
-  transactions?: {
-    payments?: MercadoPagoPayment[];
-  };
-  [key: string]: unknown;
-}
-
-type MercadoPagoOrderRequest = {
-  type: 'online';
-  total_amount: string;
-  external_reference: string;
-  processing_mode: 'automatic';
-  transactions: {
-    payments: Array<{
-      amount: string;
-      payment_method: { id: 'pix'; type: 'bank_transfer' };
-      expiration_time?: string;
-    }>;
-  };
-  payer: {
-    email: string;
-    identification: { type: 'CPF'; number: string };
-  };
+  charged_back: 'CANCELADO',
 };
 
 @Injectable()
 export class MercadoPagoPixGateway implements PaymentGateway {
   private readonly logger = new Logger(MercadoPagoPixGateway.name);
 
-  private readonly apiUrl: string;
+  private readonly payment: Payment;
   private readonly accessToken: string;
 
   constructor(private readonly config: ConfigService) {
-    this.apiUrl = this.config.get<string>(
-      'MERCADOPAGO_API_URL',
-      'https://api.mercadopago.com',
-    );
     this.accessToken = this.config.get<string>('MERCADOPAGO_ACCESS_TOKEN', '');
+    const mercadoPagoConfig = new MercadoPagoConfig({
+      accessToken: this.accessToken,
+    });
+    this.payment = new Payment(mercadoPagoConfig);
   }
 
   /**
-   * Em contas de teste, a Orders API rejeita qualquer e-mail que não termine
-   * em "@testuser.com" (erro `invalid_email_for_sandbox`). Quando configurado,
+   * Em contas de teste, a API Pagamentos rejeita qualquer e-mail que não
+   * termine em "@testuser.com". Quando configurado,
    * `MERCADOPAGO_SANDBOX_PAYER_EMAIL` substitui o e-mail real do cliente pelo
    * e-mail do usuário de teste comprador. Deve ficar VAZIO em produção.
    */
@@ -107,88 +63,78 @@ export class MercadoPagoPixGateway implements PaymentGateway {
   }
 
   async criarCobranca(input: CriarCobrancaInput): Promise<CriarCobrancaOutput> {
-    const expiracaoSegundos = input.expiracaoSegundos ?? 1800;
-    const valorTotal = this.centavosParaDecimal(input.valorCentavos);
-
-    const body: MercadoPagoOrderRequest = {
-      type: 'online',
-      total_amount: valorTotal,
-      external_reference: input.vendaId,
-      processing_mode: 'automatic',
-      transactions: {
-        payments: [
-          {
-            amount: valorTotal,
-            payment_method: { id: 'pix', type: 'bank_transfer' },
-            expiration_time: this.segundosParaIso8601Duration(expiracaoSegundos),
-          },
-        ],
-      },
-      payer: {
-        email: this.resolverEmailPagador(input.emailPagador),
-        identification: {
-          type: 'CPF',
-          number: input.cpfPagador.replace(/\D/g, ''),
-        },
-      },
-    };
-
-    this.logger.log(
-      `Criando cobrança PIX Mercado Pago: vendaId=${input.vendaId} valor=${input.valorCentavos}¢ payerEmail=${body.payer.email}`,
-    );
-
-    const response = await this.request<MercadoPagoOrderResponse>(
-      'POST',
-      '/v1/orders',
-      body,
-      { 'X-Idempotency-Key': randomUUID() },
-    );
-
-    const pagamento = response.transactions?.payments?.[0];
-
-    if (!response.id) {
-      throw new Error('Mercado Pago não retornou id do pedido PIX');
+    if (!this.accessToken) {
+      throw new Error('MERCADOPAGO_ACCESS_TOKEN não configurado');
     }
 
-    if (!pagamento?.payment_method?.qr_code) {
+    const expiracaoSegundos = input.expiracaoSegundos ?? 1800;
+    const valorTotal = input.valorCentavos / 100;
+    const dataExpiracao = new Date(
+      Date.now() + expiracaoSegundos * 1000,
+    ).toISOString();
+    const emailPagador = this.resolverEmailPagador(input.emailPagador);
+
+    this.logger.log(
+      `Criando pagamento PIX Mercado Pago: vendaId=${input.vendaId} valor=${input.valorCentavos}¢ payerEmail=${emailPagador}`,
+    );
+
+    const response = await this.payment.create({
+      body: {
+        transaction_amount: valorTotal,
+        description: input.descricao,
+        payment_method_id: 'pix',
+        external_reference: input.vendaId,
+        date_of_expiration: dataExpiracao,
+        payer: {
+          email: emailPagador,
+          identification: {
+            type: 'CPF',
+            number: input.cpfPagador.replace(/\D/g, ''),
+          },
+        },
+      },
+    });
+
+    const transacao = response.point_of_interaction?.transaction_data;
+
+    if (!response.id) {
+      throw new Error('Mercado Pago não retornou id do pagamento PIX');
+    }
+
+    if (!transacao?.qr_code) {
       throw new Error(
-        'Mercado Pago não retornou QR Code na criação do pedido PIX',
+        'Mercado Pago não retornou QR Code na criação do pagamento PIX',
       );
     }
 
     this.logger.log(
-      `Pedido PIX criado: orderId=${response.id} paymentId=${pagamento.id}`,
+      `Pagamento PIX criado: paymentId=${response.id} status=${response.status}`,
     );
 
     return {
-      gatewayId: response.id,
-      pixCopiaECola: pagamento.payment_method.qr_code,
-      qrCodeBase64: pagamento.payment_method.qr_code_base64,
-      urlPagamento: pagamento.payment_method.ticket_url,
+      gatewayId: String(response.id),
+      pixCopiaECola: transacao.qr_code,
+      qrCodeBase64: transacao.qr_code_base64,
+      urlPagamento: transacao.ticket_url,
       payload: {
-        mercadoPagoRequest: body,
         mercadoPagoResponse: response,
-        orderId: response.id,
-        paymentId: pagamento.id,
+        paymentId: response.id,
       },
     };
   }
 
   async consultarCobranca(gatewayId: string): Promise<ConsultarCobrancaOutput> {
-    const response = await this.request<MercadoPagoOrderResponse>(
-      'GET',
-      `/v1/orders/${gatewayId}`,
-    );
+    const response = await this.payment.get({ id: gatewayId });
 
-    const status = STATUS_MAP[response.status] ?? 'PENDENTE';
-    const pagamento = response.transactions?.payments?.[0];
+    const status = STATUS_MAP[response.status ?? ''] ?? 'PENDENTE';
+    const statusFinal = this.detectarExpiracao(response, status);
     const paidAt =
-      status === 'APROVADO' && pagamento?.date_approved
-        ? new Date(pagamento.date_approved)
+      statusFinal === 'APROVADO' && response.date_approved
+        ? new Date(response.date_approved)
         : undefined;
 
     return {
-      status,
+      status: statusFinal,
       paidAt,
       payload: response as unknown as Record<string, unknown>,
     };
@@ -196,13 +142,11 @@ export class MercadoPagoPixGateway implements PaymentGateway {
 
   async cancelarCobranca(gatewayId: string): Promise<void> {
     try {
-      await this.request('POST', `/v1/orders/${gatewayId}/cancel`);
-      this.logger.log(
-        `Cobrança PIX Mercado Pago cancelada: orderId=${gatewayId}`,
-      );
+      await this.payment.cancel({ id: gatewayId });
+      this.logger.log(`Pagamento PIX Mercado Pago cancelado: paymentId=${gatewayId}`);
     } catch (error) {
       this.logger.warn(
-        `Falha ao cancelar order Mercado Pago ${gatewayId}: ${
+        `Falha ao cancelar pagamento Mercado Pago ${gatewayId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -211,53 +155,19 @@ export class MercadoPagoPixGateway implements PaymentGateway {
 
   // ─── Helpers ───────────────────────────────────────────
 
-  private centavosParaDecimal(centavos: number): string {
-    return (centavos / 100).toFixed(2);
-  }
-
-  /** A Orders API exige expiração entre 30 minutos e 30 dias. */
-  private segundosParaIso8601Duration(segundos: number): string {
-    const totalMinutos = Math.max(30, Math.ceil(segundos / 60));
-    const horas = Math.floor(totalMinutos / 60);
-    const minutos = totalMinutos % 60;
-    return horas > 0 ? `PT${horas}H${minutos}M` : `PT${minutos}M`;
-  }
-
-  private async request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-    extraHeaders?: Record<string, string>,
-  ): Promise<T> {
-    if (!this.accessToken) {
-      throw new Error('MERCADOPAGO_ACCESS_TOKEN não configurado');
+  /**
+   * Um Pix expirado (não pago até `date_of_expiration`) é reportado pela API
+   * como status `cancelled` com `status_detail` indicando a expiração — sem
+   * isso, o front trataria expiração e cancelamento manual da mesma forma.
+   */
+  private detectarExpiracao(
+    response: PaymentResponse,
+    status: StatusCobrancaGateway,
+  ): StatusCobrancaGateway {
+    if (status === 'CANCELADO' && response.status_detail?.includes('expired')) {
+      return 'EXPIRADO';
     }
 
-    const url = `${this.apiUrl}${path}`;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${this.accessToken}`,
-      ...extraHeaders,
-    };
-
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      this.logger.error(
-        `Erro na API Mercado Pago: ${method} ${path} → ${response.status}: ${errorBody}`,
-      );
-      throw new Error(
-        `API Mercado Pago retornou ${response.status}: ${errorBody}`,
-      );
-    }
-
-    const text = await response.text();
-    return text ? (JSON.parse(text) as T) : ({} as T);
+    return status;
   }
 }

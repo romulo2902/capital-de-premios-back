@@ -4,6 +4,7 @@ import { BadRequestException } from '@nestjs/common';
 import { PaymentGatewayFactory } from './payment-gateway.factory';
 import { PagBankPixGateway } from './pagbank-pix.gateway';
 import { PagBankCartaoGateway } from './pagbank-cartao.gateway';
+import { Payment } from 'mercadopago';
 import { MercadoPagoPixGateway } from './mercadopago-pix.gateway';
 import { MockPixGateway } from './mock-pix.gateway';
 import { ConfigService } from '@nestjs/config';
@@ -244,7 +245,6 @@ describe('PaymentGateway', () => {
           .fn()
           .mockImplementation((key: string, defaultValue?: string) => {
             const config: Record<string, string> = {
-              MERCADOPAGO_API_URL: 'https://api.mercadopago.com',
               MERCADOPAGO_ACCESS_TOKEN: 'test-access-token',
             };
             return config[key] ?? defaultValue ?? '';
@@ -269,31 +269,20 @@ describe('PaymentGateway', () => {
       expect(gateway).toBeDefined();
     });
 
-    it('should create a PIX order and return the QR code data', async () => {
-      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        text: jest.fn().mockResolvedValue(
-          JSON.stringify({
-            id: 'ORD01HRYFWNYRE1MR1E60MW3X0T2P',
-            status: 'action_required',
-            transactions: {
-              payments: [
-                {
-                  id: 'PAY01HRYFXQ53Q3JPEC48MYWMR0TE',
-                  status: 'action_required',
-                  payment_method: {
-                    id: 'pix',
-                    type: 'bank_transfer',
-                    qr_code: '00020126580014br.gov.bcb.pix...',
-                    qr_code_base64: 'aGVsbG8=',
-                    ticket_url: 'https://www.mercadopago.com.br/sandbox/...',
-                  },
-                },
-              ],
+    it('should create a PIX payment and return the QR code data', async () => {
+      const createSpy = jest
+        .spyOn(Payment.prototype, 'create')
+        .mockResolvedValue({
+          id: 123456,
+          status: 'pending',
+          point_of_interaction: {
+            transaction_data: {
+              qr_code: '00020126580014br.gov.bcb.pix...',
+              qr_code_base64: 'aGVsbG8=',
+              ticket_url: 'https://www.mercadopago.com.br/payments/123456/ticket',
             },
-          }),
-        ),
-      } as unknown as Response);
+          },
+        } as never);
 
       const resultado = await gateway.criarCobranca({
         vendaId: 'venda-uuid-1',
@@ -304,34 +293,39 @@ describe('PaymentGateway', () => {
         emailPagador: 'joao@teste.com',
       });
 
-      expect(resultado.gatewayId).toBe('ORD01HRYFWNYRE1MR1E60MW3X0T2P');
+      expect(resultado.gatewayId).toBe('123456');
       expect(resultado.pixCopiaECola).toBe('00020126580014br.gov.bcb.pix...');
       expect(resultado.qrCodeBase64).toBe('aGVsbG8=');
 
-      const [, options] = fetchMock.mock.calls[0];
-      const body = JSON.parse(options!.body as string);
-      expect(body.total_amount).toBe('60.00');
-      expect(body.payer.identification.number).toBe('12345678900');
+      const [{ body }] = createSpy.mock.calls[0];
+      expect(body.transaction_amount).toBe(60);
+      expect(body.payment_method_id).toBe('pix');
+      expect(body.payer?.identification?.number).toBe('12345678900');
     });
 
-    it('should map order status processed to APROVADO', async () => {
-      jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        text: jest.fn().mockResolvedValue(
-          JSON.stringify({
-            id: 'ORD01',
-            status: 'processed',
-            transactions: {
-              payments: [{ id: 'PAY01', date_approved: '2026-01-01T10:00:00Z' }],
-            },
-          }),
-        ),
-      } as unknown as Response);
+    it('should map payment status approved to APROVADO', async () => {
+      jest.spyOn(Payment.prototype, 'get').mockResolvedValue({
+        id: 123456,
+        status: 'approved',
+        date_approved: '2026-01-01T10:00:00Z',
+      } as never);
 
-      const resultado = await gateway.consultarCobranca('ORD01');
+      const resultado = await gateway.consultarCobranca('123456');
 
       expect(resultado.status).toBe('APROVADO');
       expect(resultado.paidAt).toEqual(new Date('2026-01-01T10:00:00Z'));
+    });
+
+    it('should map an expired pix (cancelled + expired detail) to EXPIRADO', async () => {
+      jest.spyOn(Payment.prototype, 'get').mockResolvedValue({
+        id: 123456,
+        status: 'cancelled',
+        status_detail: 'expired',
+      } as never);
+
+      const resultado = await gateway.consultarCobranca('123456');
+
+      expect(resultado.status).toBe('EXPIRADO');
     });
 
     it('should override payer email with MERCADOPAGO_SANDBOX_PAYER_EMAIL when configured', async () => {
@@ -346,7 +340,6 @@ describe('PaymentGateway', () => {
                 .mockImplementation(
                   (key: string, defaultValue?: string) =>
                     ({
-                      MERCADOPAGO_API_URL: 'https://api.mercadopago.com',
                       MERCADOPAGO_ACCESS_TOKEN: 'test-access-token',
                       MERCADOPAGO_SANDBOX_PAYER_EMAIL: 'test_user_123@testuser.com',
                     })[key] ?? defaultValue ?? '',
@@ -359,23 +352,15 @@ describe('PaymentGateway', () => {
       const gatewaySandbox =
         module.get<MercadoPagoPixGateway>(MercadoPagoPixGateway);
 
-      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        text: jest.fn().mockResolvedValue(
-          JSON.stringify({
-            id: 'ORD01',
-            status: 'action_required',
-            transactions: {
-              payments: [
-                {
-                  id: 'PAY01',
-                  payment_method: { id: 'pix', type: 'bank_transfer', qr_code: 'abc' },
-                },
-              ],
-            },
-          }),
-        ),
-      } as unknown as Response);
+      const createSpy = jest
+        .spyOn(Payment.prototype, 'create')
+        .mockResolvedValue({
+          id: 123456,
+          status: 'pending',
+          point_of_interaction: {
+            transaction_data: { qr_code: 'abc' },
+          },
+        } as never);
 
       await gatewaySandbox.criarCobranca({
         vendaId: 'venda-uuid-1',
@@ -386,9 +371,8 @@ describe('PaymentGateway', () => {
         emailPagador: 'cliente.real@gmail.com',
       });
 
-      const [, options] = fetchMock.mock.calls[0];
-      const body = JSON.parse(options!.body as string);
-      expect(body.payer.email).toBe('test_user_123@testuser.com');
+      const [{ body }] = createSpy.mock.calls[0];
+      expect(body.payer?.email).toBe('test_user_123@testuser.com');
     });
 
     it('should throw when MERCADOPAGO_ACCESS_TOKEN is not configured', async () => {
@@ -406,7 +390,13 @@ describe('PaymentGateway', () => {
         module.get<MercadoPagoPixGateway>(MercadoPagoPixGateway);
 
       await expect(
-        gatewaySemToken.consultarCobranca('ORD01'),
+        gatewaySemToken.criarCobranca({
+          vendaId: 'venda-uuid-1',
+          valorCentavos: 6000,
+          descricao: 'Teste',
+          cpfPagador: '12345678900',
+          nomePagador: 'João Teste',
+        }),
       ).rejects.toThrow('MERCADOPAGO_ACCESS_TOKEN não configurado');
     });
   });
