@@ -786,7 +786,7 @@ export class RelatoriosService {
     linhas.push(`T;${bilhetes.length};${rangesStr};`);
 
     const conteudo = linhas.join('\r\n');
-    const nomeArquivo = `relatorio-cdp-${edicao.numero}-${Date.now()}.txt`;
+    const nomeArquivo = `capital_de_premios_${this.formatarDataNomeArquivo(new Date())}.txt`;
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
@@ -881,7 +881,7 @@ export class RelatoriosService {
     linhas.push(`T;${cartelas.length};`);
 
     const conteudo = linhas.join('\r\n');
-    const nomeArquivo = `capital_sena_${edicao.numero}_${Date.now()}.txt`;
+    const nomeArquivo = `capital_sena_${this.formatarDataNomeArquivo(new Date())}.txt`;
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
@@ -1292,6 +1292,13 @@ export class RelatoriosService {
     const dia = String(data.getDate()).padStart(2, '0');
     const mes = String(data.getMonth() + 1).padStart(2, '0');
     return `${dia}/${mes}/${data.getFullYear()}`;
+  }
+
+  private formatarDataNomeArquivo(data: Date): string {
+    const ano = data.getFullYear().toString().padStart(4, '0');
+    const mes = String(data.getMonth() + 1).padStart(2, '0');
+    const dia = String(data.getDate()).padStart(2, '0');
+    return `${ano}${mes}${dia}`;
   }
 
   private formatarValorRelatorioSena(value: unknown): string {

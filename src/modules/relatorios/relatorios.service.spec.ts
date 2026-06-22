@@ -50,6 +50,10 @@ describe('RelatoriosService', () => {
     service = module.get<RelatoriosService>(RelatoriosService);
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
@@ -234,6 +238,8 @@ describe('RelatoriosService', () => {
   });
 
   it('deve preservar zeros a esquerda no relatorio CDP', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-09T12:00:00-03:00'));
+
     mockPrisma.edicao.findUniqueOrThrow.mockResolvedValue({
       id: 'edicao-1',
       numero: 'ED-126-RASCUNHO',
@@ -313,6 +319,10 @@ describe('RelatoriosService', () => {
       'Content-Type',
       'text/plain; charset=utf-8',
     );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'attachment; filename=capital_de_premios_20260609.txt',
+    );
     expect(res.send).toHaveBeenCalledWith(
       expect.stringContaining('D3;0980000;15.00;06790319107;Jair Rodrigues'),
     );
@@ -331,6 +341,8 @@ describe('RelatoriosService', () => {
   });
 
   it('deve exportar relatorio Sena no formato TXT esperado', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-09T12:00:00-03:00'));
+
     mockPrisma.edicaoSena.findUniqueOrThrow.mockResolvedValue({
       numero: '12',
       valorCartela: '5.00',
@@ -386,6 +398,10 @@ describe('RelatoriosService', () => {
     expect(res.setHeader).toHaveBeenCalledWith(
       'Content-Type',
       'text/plain; charset=utf-8',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'attachment; filename=capital_sena_20260609.txt',
     );
     expect(res.send).toHaveBeenCalledWith(
       [
