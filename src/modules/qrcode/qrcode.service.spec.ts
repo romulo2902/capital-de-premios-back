@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3UploadService } from '../../common/s3/s3-upload.service';
-import { QrcodeService } from './qrcode.service';
+import { ModoAtualizacaoQrcode, QrcodeService } from './qrcode.service';
 import * as qrcode from 'qrcode';
 
 jest.mock('qrcode', () => ({
@@ -16,10 +16,12 @@ describe('QrcodeService', () => {
   const mockPrisma = {
     vendedor: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
     },
     distribuidor: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
     },
   };
@@ -55,6 +57,10 @@ describe('QrcodeService', () => {
     }).compile();
 
     service = module.get<QrcodeService>(QrcodeService);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('should be defined', () => {
@@ -244,5 +250,126 @@ describe('QrcodeService', () => {
     await expect(service.obterQrcodeDistribuidorLink('dist-1')).rejects.toThrow(
       new NotFoundException('Distribuidor não encontrado'),
     );
+  });
+
+  it('deve criar somente QR Codes ausentes e preservar os existentes por padrao', async () => {
+    mockPrisma.vendedor.findMany.mockResolvedValue([
+      {
+        id: 'vend-completo',
+        nome: 'Vendedor Completo',
+        link: 'https://loja.test/vend-completo',
+        qrcode: 'https://s3.test/vend-completo-cdp.png',
+        linkSena: 'https://sena.test/vend-completo',
+        qrcodeSena: 'https://s3.test/vend-completo-sena.png',
+      },
+      {
+        id: 'vend-incompleto',
+        nome: 'Vendedor Incompleto',
+        link: null,
+        qrcode: 'https://s3.test/vend-incompleto-cdp.png',
+        linkSena: null,
+        qrcodeSena: null,
+      },
+    ]);
+    mockPrisma.distribuidor.findMany.mockResolvedValue([
+      {
+        id: 'dist-completo',
+        nome: 'Distribuidor Completo',
+        link: 'https://loja.test/dist-completo',
+        qrcode: 'https://s3.test/dist-completo-cdp.png',
+        linkSena: 'https://sena.test/dist-completo',
+        qrcodeSena: 'https://s3.test/dist-completo-sena.png',
+      },
+    ]);
+    const gerarCdpVendedor = jest
+      .spyOn(service, 'gerarQrcodeVendedor')
+      .mockResolvedValue({ buffer: Buffer.from('cdp'), qrcodeUrl: 'cdp' });
+    const gerarSenaVendedor = jest
+      .spyOn(service, 'gerarQrcodeSenaVendedor')
+      .mockResolvedValue({ buffer: Buffer.from('sena'), qrcodeUrl: 'sena' });
+    const gerarCdpDistribuidor = jest.spyOn(service, 'gerarQrcodeDistribuidor');
+    const gerarSenaDistribuidor = jest.spyOn(
+      service,
+      'gerarQrcodeSenaDistribuidor',
+    );
+
+    const resultado = await service.atualizarLinksEQrcodesSellers();
+
+    expect(gerarCdpVendedor).not.toHaveBeenCalled();
+    expect(gerarSenaVendedor).toHaveBeenCalledTimes(1);
+    expect(gerarSenaVendedor).toHaveBeenCalledWith('vend-incompleto');
+    expect(gerarCdpDistribuidor).not.toHaveBeenCalled();
+    expect(gerarSenaDistribuidor).not.toHaveBeenCalled();
+    expect(mockPrisma.vendedor.update).toHaveBeenCalledWith({
+      where: { id: 'vend-incompleto' },
+      data: {
+        link: 'https://loja.capitalpremios.com.br/?seller_id=vend-incompleto&seller_name=Vendedor+Incompleto',
+      },
+    });
+    expect(resultado).toEqual({
+      modo: ModoAtualizacaoQrcode.CRIAR_AUSENTES,
+      vendedoresAtualizados: 1,
+      vendedoresPreservados: 1,
+      distribuidoresAtualizados: 0,
+      distribuidoresPreservados: 1,
+      erros: [],
+    });
+  });
+
+  it('deve recriar todos os QR Codes somente no modo explicito', async () => {
+    mockPrisma.vendedor.findMany.mockResolvedValue([
+      {
+        id: 'vend-1',
+        nome: 'Vendedor 1',
+        link: 'link-cdp',
+        qrcode: 'qrcode-cdp',
+        linkSena: 'link-sena',
+        qrcodeSena: 'qrcode-sena',
+      },
+    ]);
+    mockPrisma.distribuidor.findMany.mockResolvedValue([
+      {
+        id: 'dist-1',
+        nome: 'Distribuidor 1',
+        link: 'link-cdp',
+        qrcode: 'qrcode-cdp',
+        linkSena: 'link-sena',
+        qrcodeSena: 'qrcode-sena',
+      },
+    ]);
+    const retorno = { buffer: Buffer.from('qr'), qrcodeUrl: 'qrcode' };
+    const gerarCdpVendedor = jest
+      .spyOn(service, 'gerarQrcodeVendedor')
+      .mockResolvedValue(retorno);
+    const gerarSenaVendedor = jest
+      .spyOn(service, 'gerarQrcodeSenaVendedor')
+      .mockResolvedValue(retorno);
+    const gerarCdpDistribuidor = jest
+      .spyOn(service, 'gerarQrcodeDistribuidor')
+      .mockResolvedValue(retorno);
+    const gerarSenaDistribuidor = jest
+      .spyOn(service, 'gerarQrcodeSenaDistribuidor')
+      .mockResolvedValue(retorno);
+
+    const resultado = await service.atualizarLinksEQrcodesSellers(
+      ModoAtualizacaoQrcode.RECRIAR_TODOS,
+    );
+
+    expect(gerarCdpVendedor).toHaveBeenCalledWith('vend-1', { force: true });
+    expect(gerarSenaVendedor).toHaveBeenCalledWith('vend-1', { force: true });
+    expect(gerarCdpDistribuidor).toHaveBeenCalledWith('dist-1', {
+      force: true,
+    });
+    expect(gerarSenaDistribuidor).toHaveBeenCalledWith('dist-1', {
+      force: true,
+    });
+    expect(resultado).toEqual({
+      modo: ModoAtualizacaoQrcode.RECRIAR_TODOS,
+      vendedoresAtualizados: 1,
+      vendedoresPreservados: 0,
+      distribuidoresAtualizados: 1,
+      distribuidoresPreservados: 0,
+      erros: [],
+    });
   });
 });

@@ -19,9 +19,17 @@ interface GerarQrcodeOptions {
   force?: boolean;
 }
 
+export enum ModoAtualizacaoQrcode {
+  CRIAR_AUSENTES = 'CRIAR_AUSENTES',
+  RECRIAR_TODOS = 'RECRIAR_TODOS',
+}
+
 interface AtualizacaoQrcodeSellersResultado {
+  modo: ModoAtualizacaoQrcode;
   vendedoresAtualizados: number;
+  vendedoresPreservados: number;
   distribuidoresAtualizados: number;
+  distribuidoresPreservados: number;
   erros: Array<{
     tipo: 'VENDEDOR' | 'DISTRIBUIDOR';
     id: string;
@@ -391,22 +399,86 @@ export class QrcodeService {
     };
   }
 
-  async atualizarLinksEQrcodesSellers(): Promise<AtualizacaoQrcodeSellersResultado> {
+  async atualizarLinksEQrcodesSellers(
+    modo: ModoAtualizacaoQrcode = ModoAtualizacaoQrcode.CRIAR_AUSENTES,
+  ): Promise<AtualizacaoQrcodeSellersResultado> {
     const resultado: AtualizacaoQrcodeSellersResultado = {
+      modo,
       vendedoresAtualizados: 0,
+      vendedoresPreservados: 0,
       distribuidoresAtualizados: 0,
+      distribuidoresPreservados: 0,
       erros: [],
     };
 
+    const recriarTodos = modo === ModoAtualizacaoQrcode.RECRIAR_TODOS;
+
     const [vendedores, distribuidores] = await Promise.all([
-      this.prisma.vendedor.findMany({ select: { id: true } }),
-      this.prisma.distribuidor.findMany({ select: { id: true } }),
+      this.prisma.vendedor.findMany({
+        select: {
+          id: true,
+          nome: true,
+          link: true,
+          qrcode: true,
+          linkSena: true,
+          qrcodeSena: true,
+        },
+      }),
+      this.prisma.distribuidor.findMany({
+        select: {
+          id: true,
+          nome: true,
+          link: true,
+          qrcode: true,
+          linkSena: true,
+          qrcodeSena: true,
+        },
+      }),
     ]);
 
     for (const vendedor of vendedores) {
+      const operacoes: Array<Promise<unknown>> = [];
+
+      if (recriarTodos) {
+        operacoes.push(
+          this.gerarQrcodeVendedor(vendedor.id, { force: true }),
+          this.gerarQrcodeSenaVendedor(vendedor.id, { force: true }),
+        );
+      } else {
+        if (!vendedor.qrcode) {
+          operacoes.push(this.gerarQrcodeVendedor(vendedor.id));
+        } else if (!vendedor.link) {
+          operacoes.push(
+            this.prisma.vendedor.update({
+              where: { id: vendedor.id },
+              data: {
+                link: this.criarLinkLoja(vendedor.id, vendedor.nome),
+              },
+            }),
+          );
+        }
+
+        if (!vendedor.qrcodeSena) {
+          operacoes.push(this.gerarQrcodeSenaVendedor(vendedor.id));
+        } else if (!vendedor.linkSena) {
+          operacoes.push(
+            this.prisma.vendedor.update({
+              where: { id: vendedor.id },
+              data: {
+                linkSena: this.criarLinkLojaSena(vendedor.id, vendedor.nome),
+              },
+            }),
+          );
+        }
+      }
+
+      if (operacoes.length === 0) {
+        resultado.vendedoresPreservados += 1;
+        continue;
+      }
+
       try {
-        await this.gerarQrcodeVendedor(vendedor.id, { force: true });
-        await this.gerarQrcodeSenaVendedor(vendedor.id, { force: true });
+        await Promise.all(operacoes);
         resultado.vendedoresAtualizados += 1;
       } catch (error) {
         resultado.erros.push({
@@ -418,11 +490,51 @@ export class QrcodeService {
     }
 
     for (const distribuidor of distribuidores) {
+      const operacoes: Array<Promise<unknown>> = [];
+
+      if (recriarTodos) {
+        operacoes.push(
+          this.gerarQrcodeDistribuidor(distribuidor.id, { force: true }),
+          this.gerarQrcodeSenaDistribuidor(distribuidor.id, { force: true }),
+        );
+      } else {
+        if (!distribuidor.qrcode) {
+          operacoes.push(this.gerarQrcodeDistribuidor(distribuidor.id));
+        } else if (!distribuidor.link) {
+          operacoes.push(
+            this.prisma.distribuidor.update({
+              where: { id: distribuidor.id },
+              data: {
+                link: this.criarLinkLoja(distribuidor.id, distribuidor.nome),
+              },
+            }),
+          );
+        }
+
+        if (!distribuidor.qrcodeSena) {
+          operacoes.push(this.gerarQrcodeSenaDistribuidor(distribuidor.id));
+        } else if (!distribuidor.linkSena) {
+          operacoes.push(
+            this.prisma.distribuidor.update({
+              where: { id: distribuidor.id },
+              data: {
+                linkSena: this.criarLinkLojaSena(
+                  distribuidor.id,
+                  distribuidor.nome,
+                ),
+              },
+            }),
+          );
+        }
+      }
+
+      if (operacoes.length === 0) {
+        resultado.distribuidoresPreservados += 1;
+        continue;
+      }
+
       try {
-        await this.gerarQrcodeDistribuidor(distribuidor.id, { force: true });
-        await this.gerarQrcodeSenaDistribuidor(distribuidor.id, {
-          force: true,
-        });
+        await Promise.all(operacoes);
         resultado.distribuidoresAtualizados += 1;
       } catch (error) {
         resultado.erros.push({
@@ -434,7 +546,7 @@ export class QrcodeService {
     }
 
     this.logger.log(
-      `Backfill de QR Codes finalizado: ${resultado.vendedoresAtualizados} vendedor(es), ${resultado.distribuidoresAtualizados} distribuidor(es), ${resultado.erros.length} erro(s)`,
+      `Backfill de QR Codes (${modo}) finalizado: ${resultado.vendedoresAtualizados} vendedor(es) atualizado(s), ${resultado.vendedoresPreservados} preservado(s); ${resultado.distribuidoresAtualizados} distribuidor(es) atualizado(s), ${resultado.distribuidoresPreservados} preservado(s); ${resultado.erros.length} erro(s)`,
     );
 
     return resultado;
