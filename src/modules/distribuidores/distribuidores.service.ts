@@ -135,10 +135,13 @@ export class DistribuidoresService {
       return distribuidor;
     }).then(async (distribuidor) => {
       try {
-        await this.qrcodeService.gerarQrcodeDistribuidor(distribuidor.id);
+        await Promise.all([
+          this.qrcodeService.gerarQrcodeDistribuidor(distribuidor.id),
+          this.qrcodeService.gerarQrcodeSenaDistribuidor(distribuidor.id),
+        ]);
       } catch (err) {
         this.logger.warn(
-          `Falha ao gerar QR Code para distribuidor ${distribuidor.id}: ${(err as Error).message}`,
+          `Falha ao gerar QR Codes para distribuidor ${distribuidor.id}: ${(err as Error).message}`,
         );
       }
       return distribuidor;

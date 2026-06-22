@@ -3,6 +3,7 @@ import * as bcrypt from 'bcrypt';
 import { DistribuidoresService } from './distribuidores.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConflictException } from '@nestjs/common';
+import { QrcodeService } from '../qrcode/qrcode.service';
 
 describe('DistribuidoresService', () => {
   let service: DistribuidoresService;
@@ -25,6 +26,11 @@ describe('DistribuidoresService', () => {
     },
   };
 
+  const mockQrcodeService = {
+    gerarQrcodeDistribuidor: jest.fn().mockResolvedValue(undefined),
+    gerarQrcodeSenaDistribuidor: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) =>
@@ -35,6 +41,7 @@ describe('DistribuidoresService', () => {
       providers: [
         DistribuidoresService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: QrcodeService, useValue: mockQrcodeService },
       ],
     }).compile();
 
@@ -96,6 +103,12 @@ describe('DistribuidoresService', () => {
     };
     expect(await bcrypt.compare('033638', usuarioCreatePayload.data.senhaHash))
       .toBe(true);
+    expect(mockQrcodeService.gerarQrcodeDistribuidor).toHaveBeenCalledWith(
+      'dist-1',
+    );
+    expect(
+      mockQrcodeService.gerarQrcodeSenaDistribuidor,
+    ).toHaveBeenCalledWith('dist-1');
   });
 
   it('create should reject cpf already present in usuario table', async () => {

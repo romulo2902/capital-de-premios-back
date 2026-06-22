@@ -30,6 +30,10 @@ describe('QrcodeService', () => {
         return 'https://loja.capitalpremios.com.br';
       }
 
+      if (key === 'FRONTEND_LOJA_SENA_URL') {
+        return 'https://sena.capitalpremios.com.br';
+      }
+
       return defaultValue;
     }),
   };
@@ -125,6 +129,80 @@ describe('QrcodeService', () => {
       'https://loja.capitalpremios.com.br/?seller_id=vend-2&seller_name=Maria+Vendedora',
     );
     expect(result.message).toBe('QR Code do vendedor disponível com sucesso');
+  });
+
+  it('deve gerar e salvar o QR Code Sena do vendedor usando a URL da loja Sena', async () => {
+    const buffer = Buffer.from('png-vendedor-sena');
+
+    mockPrisma.vendedor.findUnique.mockResolvedValue({
+      id: 'vend-sena-1',
+      nome: 'João Vendedor',
+      linkSena: null,
+      qrcodeSena: null,
+    });
+    (qrcode.toBuffer as jest.Mock).mockResolvedValue(buffer);
+    mockS3UploadService.uploadPublicObject.mockResolvedValue(
+      'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-sena-1/qrcode-sena.png',
+    );
+
+    const result = await service.gerarQrcodeSenaVendedor('vend-sena-1');
+
+    expect(qrcode.toBuffer).toHaveBeenCalledWith(
+      'https://sena.capitalpremios.com.br/?seller_id=vend-sena-1&seller_name=Jo%C3%A3o+Vendedor',
+      expect.any(Object),
+    );
+    expect(mockS3UploadService.uploadPublicObject).toHaveBeenCalledWith({
+      body: buffer,
+      contentType: 'image/png',
+      key: 'vendedores/vend-sena-1/qrcode-sena.png',
+    });
+    expect(mockPrisma.vendedor.update).toHaveBeenCalledWith({
+      where: { id: 'vend-sena-1' },
+      data: {
+        linkSena:
+          'https://sena.capitalpremios.com.br/?seller_id=vend-sena-1&seller_name=Jo%C3%A3o+Vendedor',
+        qrcodeSena:
+          'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-sena-1/qrcode-sena.png',
+      },
+    });
+    expect(result).toEqual({
+      buffer,
+      qrcodeUrl:
+        'https://bucket.s3.sa-east-1.amazonaws.com/vendedores/vend-sena-1/qrcode-sena.png',
+    });
+  });
+
+  it('deve retornar link e QR Code Sena do distribuidor autenticado', async () => {
+    mockPrisma.distribuidor.findUnique.mockResolvedValue({
+      id: 'dist-sena-1',
+      nome: 'Distribuidor Sena',
+      linkSena:
+        'https://sena.capitalpremios.com.br/?seller_id=dist-sena-1&seller_name=Distribuidor+Sena',
+      qrcodeSena:
+        'https://bucket.s3.sa-east-1.amazonaws.com/distribuidores/dist-sena-1/qrcode-sena.png',
+    });
+
+    const result = await service.obterMeuQrcodeSena({
+      id: 'usuario-distribuidor',
+      email: 'distribuidor@test.com',
+      cpf: '12345678901',
+      perfil: 'DISTRIBUIDOR',
+      status: 'ATIVO',
+      distribuidorId: 'dist-sena-1',
+    });
+
+    expect(result).toEqual({
+      message: 'Link e QR Code Sena disponíveis com sucesso',
+      data: {
+        tipo: 'DISTRIBUIDOR',
+        sellerId: 'dist-sena-1',
+        link: 'https://sena.capitalpremios.com.br/?seller_id=dist-sena-1&seller_name=Distribuidor+Sena',
+        qrcodeUrl:
+          'https://bucket.s3.sa-east-1.amazonaws.com/distribuidores/dist-sena-1/qrcode-sena.png',
+        reused: true,
+      },
+    });
+    expect(qrcode.toBuffer).not.toHaveBeenCalled();
   });
 
   it('should retornar link e qrcode do vendedor autenticado', async () => {

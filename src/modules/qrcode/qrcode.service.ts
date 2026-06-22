@@ -114,6 +114,73 @@ export class QrcodeService {
     };
   }
 
+  async gerarQrcodeSenaVendedor(
+    id: string,
+    options: GerarQrcodeOptions = {},
+  ): Promise<QrcodeGerado> {
+    const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
+    if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
+
+    const link = this.criarLinkLojaSena(vendedor.id, vendedor.nome);
+
+    if (!options.force && vendedor.qrcodeSena && vendedor.linkSena === link) {
+      const existingBuffer = await this.obterBufferPorUrl(vendedor.qrcodeSena);
+      if (existingBuffer) {
+        this.logger.log(`QR Code Sena reutilizado para vendedor ${id}`);
+        return {
+          buffer: existingBuffer,
+          qrcodeUrl: vendedor.qrcodeSena,
+        };
+      }
+    }
+
+    const buffer = await this.gerarBufferQrcode(link);
+    const qrcodeUrl = await this.s3UploadService.uploadPublicObject({
+      body: buffer,
+      contentType: 'image/png',
+      key: `vendedores/${id}/qrcode-sena.png`,
+    });
+
+    await this.prisma.vendedor.update({
+      where: { id },
+      data: {
+        linkSena: link,
+        qrcodeSena: qrcodeUrl,
+      },
+    });
+
+    this.logger.log(`QR Code Sena gerado para vendedor ${id}`);
+    return { buffer, qrcodeUrl };
+  }
+
+  async obterQrcodeSenaVendedorLink(id: string) {
+    const vendedor = await this.prisma.vendedor.findUnique({ where: { id } });
+    if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
+
+    const link = this.criarLinkLojaSena(vendedor.id, vendedor.nome);
+
+    if (vendedor.qrcodeSena && vendedor.linkSena === link) {
+      return {
+        message: 'QR Code Sena do vendedor disponível com sucesso',
+        data: {
+          link,
+          qrcodeUrl: vendedor.qrcodeSena,
+          reused: true,
+        },
+      };
+    }
+
+    const { qrcodeUrl } = await this.gerarQrcodeSenaVendedor(id);
+    return {
+      message: 'QR Code Sena do vendedor gerado com sucesso',
+      data: {
+        link,
+        qrcodeUrl,
+        reused: false,
+      },
+    };
+  }
+
   async gerarQrcodeDistribuidor(
     id: string,
     options: GerarQrcodeOptions = {},
@@ -193,6 +260,85 @@ export class QrcodeService {
     };
   }
 
+  async gerarQrcodeSenaDistribuidor(
+    id: string,
+    options: GerarQrcodeOptions = {},
+  ): Promise<QrcodeGerado> {
+    const distribuidor = await this.prisma.distribuidor.findUnique({
+      where: { id },
+    });
+    if (!distribuidor)
+      throw new NotFoundException('Distribuidor não encontrado');
+
+    const link = this.criarLinkLojaSena(distribuidor.id, distribuidor.nome);
+
+    if (
+      !options.force &&
+      distribuidor.qrcodeSena &&
+      distribuidor.linkSena === link
+    ) {
+      const existingBuffer = await this.obterBufferPorUrl(
+        distribuidor.qrcodeSena,
+      );
+      if (existingBuffer) {
+        this.logger.log(`QR Code Sena reutilizado para distribuidor ${id}`);
+        return {
+          buffer: existingBuffer,
+          qrcodeUrl: distribuidor.qrcodeSena,
+        };
+      }
+    }
+
+    const buffer = await this.gerarBufferQrcode(link);
+    const qrcodeUrl = await this.s3UploadService.uploadPublicObject({
+      body: buffer,
+      contentType: 'image/png',
+      key: `distribuidores/${id}/qrcode-sena.png`,
+    });
+
+    await this.prisma.distribuidor.update({
+      where: { id },
+      data: {
+        linkSena: link,
+        qrcodeSena: qrcodeUrl,
+      },
+    });
+
+    this.logger.log(`QR Code Sena gerado para distribuidor ${id}`);
+    return { buffer, qrcodeUrl };
+  }
+
+  async obterQrcodeSenaDistribuidorLink(id: string) {
+    const distribuidor = await this.prisma.distribuidor.findUnique({
+      where: { id },
+    });
+    if (!distribuidor)
+      throw new NotFoundException('Distribuidor não encontrado');
+
+    const link = this.criarLinkLojaSena(distribuidor.id, distribuidor.nome);
+
+    if (distribuidor.qrcodeSena && distribuidor.linkSena === link) {
+      return {
+        message: 'QR Code Sena do distribuidor disponível com sucesso',
+        data: {
+          link,
+          qrcodeUrl: distribuidor.qrcodeSena,
+          reused: true,
+        },
+      };
+    }
+
+    const { qrcodeUrl } = await this.gerarQrcodeSenaDistribuidor(id);
+    return {
+      message: 'QR Code Sena do distribuidor gerado com sucesso',
+      data: {
+        link,
+        qrcodeUrl,
+        reused: false,
+      },
+    };
+  }
+
   async obterMeuQrcode(user: RequestUser) {
     const tipo = this.resolverTipoSellerDoUsuario(user);
     const sellerId =
@@ -219,6 +365,32 @@ export class QrcodeService {
     };
   }
 
+  async obterMeuQrcodeSena(user: RequestUser) {
+    const tipo = this.resolverTipoSellerDoUsuario(user);
+    const sellerId =
+      tipo === 'VENDEDOR' ? user.vendedorId : user.distribuidorId;
+
+    if (!sellerId) {
+      throw new NotFoundException(
+        'Vínculo de vendedor/distribuidor não encontrado para este usuário',
+      );
+    }
+
+    const resultado =
+      tipo === 'VENDEDOR'
+        ? await this.obterQrcodeSenaVendedorLink(sellerId)
+        : await this.obterQrcodeSenaDistribuidorLink(sellerId);
+
+    return {
+      message: 'Link e QR Code Sena disponíveis com sucesso',
+      data: {
+        tipo,
+        sellerId,
+        ...resultado.data,
+      },
+    };
+  }
+
   async atualizarLinksEQrcodesSellers(): Promise<AtualizacaoQrcodeSellersResultado> {
     const resultado: AtualizacaoQrcodeSellersResultado = {
       vendedoresAtualizados: 0,
@@ -234,6 +406,7 @@ export class QrcodeService {
     for (const vendedor of vendedores) {
       try {
         await this.gerarQrcodeVendedor(vendedor.id, { force: true });
+        await this.gerarQrcodeSenaVendedor(vendedor.id, { force: true });
         resultado.vendedoresAtualizados += 1;
       } catch (error) {
         resultado.erros.push({
@@ -247,6 +420,9 @@ export class QrcodeService {
     for (const distribuidor of distribuidores) {
       try {
         await this.gerarQrcodeDistribuidor(distribuidor.id, { force: true });
+        await this.gerarQrcodeSenaDistribuidor(distribuidor.id, {
+          force: true,
+        });
         resultado.distribuidoresAtualizados += 1;
       } catch (error) {
         resultado.erros.push({
@@ -278,6 +454,19 @@ export class QrcodeService {
     return url.toString();
   }
 
+  criarLinkLojaSena(sellerId: string, sellerName: string): string {
+    const baseUrl = (
+      this.config.get<string>('FRONTEND_LOJA_SENA_URL')?.trim() ||
+      'http://localhost:3003'
+    ).replace(/\/+$/, '');
+
+    const url = new URL(baseUrl);
+    url.searchParams.set('seller_id', sellerId);
+    url.searchParams.set('seller_name', sellerName);
+
+    return url.toString();
+  }
+
   private resolverTipoSellerDoUsuario(user: RequestUser): MeuQrcodeTipo {
     if (user.perfil === 'VENDEDOR') {
       return 'VENDEDOR';
@@ -290,6 +479,15 @@ export class QrcodeService {
     throw new ForbiddenException(
       'Acesso permitido apenas para DISTRIBUIDOR ou VENDEDOR',
     );
+  }
+
+  private gerarBufferQrcode(link: string): Promise<Buffer> {
+    return qrcode.toBuffer(link, {
+      type: 'png',
+      width: 300,
+      margin: 2,
+      color: { dark: '#000000', light: '#FFFFFF' },
+    });
   }
 
   private async obterBufferPorUrl(qrcodeUrl: string): Promise<Buffer | null> {

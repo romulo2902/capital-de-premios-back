@@ -47,6 +47,10 @@ async function bootstrap(): Promise<void> {
     'FRONTEND_LOJA_URL',
     isProduction ? '' : 'http://localhost:3001',
   );
+  const frontendLojaSenaUrl = config.get<string>(
+    'FRONTEND_LOJA_SENA_URL',
+    isProduction ? '' : 'http://localhost:3003',
+  );
   const frontendAdminUrl = config.get<string>(
     'FRONTEND_ADMIN_URL',
     isProduction ? '' : 'http://localhost:3002',
@@ -59,6 +63,7 @@ async function bootstrap(): Promise<void> {
     : [
         'http://localhost:3001',
         'http://localhost:3002',
+        'http://localhost:3003',
         'http://localhost:8081',
       ];
   const corsOrigins = Array.from(
@@ -66,6 +71,7 @@ async function bootstrap(): Promise<void> {
       [
         ...frontendAllowedOrigins,
         frontendLojaUrl,
+        frontendLojaSenaUrl,
         frontendAdminUrl,
         ...developmentCorsOrigins,
       ]

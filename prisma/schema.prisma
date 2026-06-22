@@ -183,6 +183,8 @@ model Distribuidor {
   saldo                     Decimal                    @default(0)
   link                      String?
   qrcode                    String?
+  linkSena                  String?
+  qrcodeSena                String?
   status                    StatusUsuario              @default(ATIVO)
   createdAt                 DateTime                   @default(now())
   updatedAt                 DateTime                   @updatedAt
@@ -216,6 +218,8 @@ model Vendedor {
   saldo           Decimal        @default(0)
   link            String?
   qrcode          String?
+  linkSena        String?
+  qrcodeSena      String?
   status          StatusUsuario  @default(ATIVO)
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
