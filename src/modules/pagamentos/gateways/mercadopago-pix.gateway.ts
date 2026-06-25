@@ -16,6 +16,7 @@ import type {
  * Referência: https://www.mercadopago.com.br/developers/pt/reference/online-payments/checkout-api-payments/create-payment/post
  */
 type PaymentResponse = Awaited<ReturnType<Payment['get']>>;
+type Registro = Record<string, unknown>;
 
 const STATUS_MAP: Record<string, StatusCobrancaGateway> = {
   pending: 'PENDENTE',
@@ -78,22 +79,32 @@ export class MercadoPagoPixGateway implements PaymentGateway {
       `Criando pagamento PIX Mercado Pago: vendaId=${input.vendaId} valor=${input.valorCentavos}¢ payerEmail=${emailPagador}`,
     );
 
-    const response = await this.payment.create({
-      body: {
-        transaction_amount: valorTotal,
-        description: input.descricao,
-        payment_method_id: 'pix',
-        external_reference: input.vendaId,
-        date_of_expiration: dataExpiracao,
-        payer: {
-          email: emailPagador,
-          identification: {
-            type: 'CPF',
-            number: input.cpfPagador.replace(/\D/g, ''),
+    let response: Awaited<ReturnType<Payment['create']>>;
+
+    try {
+      response = await this.payment.create({
+        body: {
+          transaction_amount: valorTotal,
+          description: input.descricao,
+          payment_method_id: 'pix',
+          external_reference: input.vendaId,
+          date_of_expiration: dataExpiracao,
+          payer: {
+            email: emailPagador,
+            identification: {
+              type: 'CPF',
+              number: input.cpfPagador.replace(/\D/g, ''),
+            },
           },
         },
-      },
-    });
+      });
+    } catch (error) {
+      const errorMessage = this.formatarErroMercadoPago(error);
+      this.logger.error(
+        `Falha ao criar pagamento PIX Mercado Pago para venda ${input.vendaId}: ${errorMessage}`,
+      );
+      throw new Error(errorMessage);
+    }
 
     const transacao = response.point_of_interaction?.transaction_data;
 
@@ -143,7 +154,9 @@ export class MercadoPagoPixGateway implements PaymentGateway {
   async cancelarCobranca(gatewayId: string): Promise<void> {
     try {
       await this.payment.cancel({ id: gatewayId });
-      this.logger.log(`Pagamento PIX Mercado Pago cancelado: paymentId=${gatewayId}`);
+      this.logger.log(
+        `Pagamento PIX Mercado Pago cancelado: paymentId=${gatewayId}`,
+      );
     } catch (error) {
       this.logger.warn(
         `Falha ao cancelar pagamento Mercado Pago ${gatewayId}: ${
@@ -169,5 +182,97 @@ export class MercadoPagoPixGateway implements PaymentGateway {
     }
 
     return status;
+  }
+
+  private formatarErroMercadoPago(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    if (!this.ehRegistro(error)) {
+      return String(error);
+    }
+
+    const partes: string[] = [];
+    this.adicionarCampoErro(partes, 'status', error.status ?? error.statusCode);
+    this.adicionarCampoErro(partes, 'error', error.error);
+    this.adicionarCampoErro(partes, 'message', error.message);
+    this.adicionarCampoErro(partes, 'cause', error.cause);
+    this.adicionarCampoErro(partes, 'errors', error.errors);
+
+    if (partes.length > 0) {
+      return `Mercado Pago retornou erro (${partes.join('; ')})`;
+    }
+
+    return `Mercado Pago retornou erro: ${this.serializarSeguro(error)}`;
+  }
+
+  private adicionarCampoErro(
+    partes: string[],
+    campo: string,
+    valor: unknown,
+  ): void {
+    const valorFormatado = this.formatarValorErro(valor);
+
+    if (valorFormatado) {
+      partes.push(`${campo}=${valorFormatado}`);
+    }
+  }
+
+  private formatarValorErro(valor: unknown): string | undefined {
+    if (typeof valor === 'string') {
+      return valor.trim() || undefined;
+    }
+
+    if (typeof valor === 'number' || typeof valor === 'boolean') {
+      return String(valor);
+    }
+
+    if (Array.isArray(valor)) {
+      const itens = valor
+        .map((item) => this.formatarValorErro(item))
+        .filter((item): item is string => Boolean(item));
+
+      return itens.length > 0 ? itens.join(' | ') : undefined;
+    }
+
+    if (this.ehRegistro(valor)) {
+      const campos = [
+        ['code', valor.code],
+        ['description', valor.description],
+        ['message', valor.message],
+        ['data', valor.data],
+      ] as const;
+      const partes = campos
+        .map(([campo, campoValor]) => {
+          const campoFormatado = this.formatarValorErro(campoValor);
+          return campoFormatado ? `${campo}=${campoFormatado}` : undefined;
+        })
+        .filter((item): item is string => Boolean(item));
+
+      return partes.length > 0
+        ? partes.join(', ')
+        : this.serializarSeguro(valor);
+    }
+
+    return undefined;
+  }
+
+  private serializarSeguro(valor: Registro): string {
+    return JSON.stringify(valor, (chave, campoValor: unknown) => {
+      const chaveNormalizada = chave.toLowerCase();
+      if (
+        chaveNormalizada.includes('token') ||
+        chaveNormalizada.includes('authorization')
+      ) {
+        return '[redacted]';
+      }
+
+      return campoValor;
+    });
+  }
+
+  private ehRegistro(valor: unknown): valor is Registro {
+    return typeof valor === 'object' && valor !== null && !Array.isArray(valor);
   }
 }

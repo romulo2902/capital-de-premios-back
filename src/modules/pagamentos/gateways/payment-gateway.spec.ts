@@ -279,7 +279,8 @@ describe('PaymentGateway', () => {
             transaction_data: {
               qr_code: '00020126580014br.gov.bcb.pix...',
               qr_code_base64: 'aGVsbG8=',
-              ticket_url: 'https://www.mercadopago.com.br/payments/123456/ticket',
+              ticket_url:
+                'https://www.mercadopago.com.br/payments/123456/ticket',
             },
           },
         } as never);
@@ -301,6 +302,33 @@ describe('PaymentGateway', () => {
       expect(body.transaction_amount).toBe(60);
       expect(body.payment_method_id).toBe('pix');
       expect(body.payer?.identification?.number).toBe('12345678900');
+    });
+
+    it('should expose Mercado Pago API errors thrown as plain objects', async () => {
+      jest.spyOn(Payment.prototype, 'create').mockRejectedValue({
+        status: 400,
+        error: 'bad_request',
+        message: 'invalid users involved',
+        cause: [
+          {
+            code: 2035,
+            description: 'Payer and collector cannot be equal',
+          },
+        ],
+      });
+
+      await expect(
+        gateway.criarCobranca({
+          vendaId: 'venda-uuid-1',
+          valorCentavos: 6000,
+          descricao: 'Teste PIX Mercado Pago',
+          cpfPagador: '123.456.789-00',
+          nomePagador: 'João Teste',
+          emailPagador: 'joao@teste.com',
+        }),
+      ).rejects.toThrow(
+        'Mercado Pago retornou erro (status=400; error=bad_request; message=invalid users involved; cause=code=2035, description=Payer and collector cannot be equal)',
+      );
     });
 
     it('should map payment status approved to APROVADO', async () => {
@@ -335,22 +363,24 @@ describe('PaymentGateway', () => {
           {
             provide: ConfigService,
             useValue: {
-              get: jest
-                .fn()
-                .mockImplementation(
-                  (key: string, defaultValue?: string) =>
-                    ({
-                      MERCADOPAGO_ACCESS_TOKEN: 'test-access-token',
-                      MERCADOPAGO_SANDBOX_PAYER_EMAIL: 'test_user_123@testuser.com',
-                    })[key] ?? defaultValue ?? '',
-                ),
+              get: jest.fn().mockImplementation(
+                (key: string, defaultValue?: string) =>
+                  ({
+                    MERCADOPAGO_ACCESS_TOKEN: 'test-access-token',
+                    MERCADOPAGO_SANDBOX_PAYER_EMAIL:
+                      'test_user_123@testuser.com',
+                  })[key] ??
+                  defaultValue ??
+                  '',
+              ),
             },
           },
         ],
       }).compile();
 
-      const gatewaySandbox =
-        module.get<MercadoPagoPixGateway>(MercadoPagoPixGateway);
+      const gatewaySandbox = module.get<MercadoPagoPixGateway>(
+        MercadoPagoPixGateway,
+      );
 
       const createSpy = jest
         .spyOn(Payment.prototype, 'create')
@@ -386,8 +416,9 @@ describe('PaymentGateway', () => {
         ],
       }).compile();
 
-      const gatewaySemToken =
-        module.get<MercadoPagoPixGateway>(MercadoPagoPixGateway);
+      const gatewaySemToken = module.get<MercadoPagoPixGateway>(
+        MercadoPagoPixGateway,
+      );
 
       await expect(
         gatewaySemToken.criarCobranca({
