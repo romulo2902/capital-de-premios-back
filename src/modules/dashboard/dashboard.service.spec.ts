@@ -160,6 +160,9 @@ describe('DashboardService', () => {
           }),
         }),
       );
+      expect(mockPrisma.cliente.count).toHaveBeenCalledWith();
+      expect(mockPrisma.vendedor.count).toHaveBeenCalledWith();
+      expect(mockPrisma.distribuidor.count).toHaveBeenCalledWith();
     });
   });
 
@@ -519,6 +522,51 @@ describe('DashboardService', () => {
       );
     });
 
+    it('Distribuidor clientes por vendedor no Sena mantém contagem de clientes atribuídos mesmo com filtro', async () => {
+      mockPrisma.vendedor.findMany.mockResolvedValue([
+        {
+          id: 'vend-1',
+          nome: 'Carlos',
+          _count: { clientes: 4 },
+        },
+        {
+          id: 'vend-2',
+          nome: 'Bianca',
+          _count: { clientes: 0 },
+        },
+      ]);
+      const user = { distribuidorId: 'dist-1' } as RequestUser;
+
+      const res = await service.getDistribuidorClientesPorVendedor(user, {
+        tipo: 'SENA' as never,
+        edicaoIds: ['sena-1'],
+        dataInicio: '2026-06-01',
+        dataFim: '2026-06-30',
+      });
+
+      expect(res).toEqual([
+        {
+          vendedorId: 'vend-1',
+          nome: 'Carlos',
+          totalClientes: 4,
+        },
+        {
+          vendedorId: 'vend-2',
+          nome: 'Bianca',
+          totalClientes: 0,
+        },
+      ]);
+      expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith({
+        where: { distribuidorId: 'dist-1' },
+        select: {
+          id: true,
+          nome: true,
+          _count: { select: { clientes: true } },
+        },
+        orderBy: { nome: 'asc' },
+      });
+    });
+
     it('Vendedor timeline filters by vendedorId', async () => {
       mockPrisma.venda.findMany.mockResolvedValue(mockVendas);
       const user = { vendedorId: 'vend-1' } as RequestUser;
@@ -659,6 +707,39 @@ describe('DashboardService', () => {
           vendaSena: { edicaoSenaId: { in: ['sena-1'] } },
         },
         select: { valor: true },
+      });
+    });
+
+    it('Vendedor total clientes no Sena mantém clientes atribuídos mesmo com filtro', async () => {
+      mockPrisma.cliente.count.mockResolvedValue(5);
+      mockPrisma.vendaSena.findMany.mockResolvedValue([
+        { total: new Prisma.Decimal(40) },
+      ]);
+      mockPrisma.comissaoSena.findMany.mockResolvedValue([
+        { valor: new Prisma.Decimal(4) },
+      ]);
+      const user = { vendedorId: 'vend-1' } as RequestUser;
+
+      const res = await service.getVendedorTotalClientes(user, {
+        tipo: 'SENA' as never,
+        edicaoIds: ['sena-1'],
+      });
+
+      expect(res).toEqual({
+        totalClientes: 5,
+        totalVendasValor: 40,
+        totalComissao: 4,
+      });
+      expect(mockPrisma.cliente.count).toHaveBeenCalledWith({
+        where: { vendedorId: 'vend-1' },
+      });
+      expect(mockPrisma.vendaSena.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'APROVADO',
+          edicaoSenaId: { in: ['sena-1'] },
+          vendedorId: 'vend-1',
+        },
+        select: { total: true },
       });
     });
   });

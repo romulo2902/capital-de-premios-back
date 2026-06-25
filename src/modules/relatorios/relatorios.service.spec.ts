@@ -70,6 +70,7 @@ describe('RelatoriosService', () => {
         '/relatorios/distribuidores/pdf',
         '/relatorios/clientes/xlsx',
         '/relatorios/clientes/pdf',
+        '/relatorios/vendas/cdp',
         '/relatorios/vendas/sena',
       ],
     });
@@ -321,10 +322,17 @@ describe('RelatoriosService', () => {
     );
     expect(res.setHeader).toHaveBeenCalledWith(
       'Content-Disposition',
-      'attachment; filename=capital_de_premios_20260609.txt',
+      'attachment; filename="capital_de_premios_20260609.txt"; filename*=UTF-8\'\'capital_de_premios_20260609.txt',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'X-Filename',
+      'capital_de_premios_20260609.txt',
     );
     expect(res.send).toHaveBeenCalledWith(
       expect.stringContaining('D3;0980000;15.00;06790319107;Jair Rodrigues'),
+    );
+    expect(res.send).toHaveBeenCalledWith(
+      expect.stringContaining(';002\r\nD3;0980000;'),
     );
     expect(res.send).toHaveBeenCalledWith(
       expect.stringContaining('Adquirido pela Web;V;N;'),
@@ -401,11 +409,15 @@ describe('RelatoriosService', () => {
     );
     expect(res.setHeader).toHaveBeenCalledWith(
       'Content-Disposition',
-      'attachment; filename=capital_sena_20260609.txt',
+      'attachment; filename="capital_sena_20260609.txt"; filename*=UTF-8\'\'capital_sena_20260609.txt',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'X-Filename',
+      'capital_sena_20260609.txt',
     );
     expect(res.send).toHaveBeenCalledWith(
       [
-        'H;CAPDF;09/06/2026;09/06/2026;12',
+        'H;CAPDF;09/06/2026;09/06/2026;002',
         'D3;05348c792df543c0a6f493ed9cb64159;02,06,12,26,48,01,51;5;09392814115;Andreia Cristina Moreira;;;;61;995094000;DF;;Ceilândia Norte;Quadra QNO 19 Conjunto E;Ceilândia Norte;2;Link Brunna costa;V;',
         'T;1;',
       ].join('\r\n'),

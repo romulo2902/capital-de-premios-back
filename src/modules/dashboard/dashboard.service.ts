@@ -37,21 +37,9 @@ export class DashboardService {
     if (modo === 'SENA') {
       const [totalClientes, totalVendedores, totalDistribuidores, vendedores] =
         await Promise.all([
-          this.prisma.cliente.count({
-            where: { vendasSena: { some: { status: StatusVendaSena.APROVADO } } },
-          }),
-          this.prisma.vendedor.count({
-            where: { vendasSena: { some: { status: StatusVendaSena.APROVADO } } },
-          }),
-          this.prisma.distribuidor.count({
-            where: {
-              vendedores: {
-                some: {
-                  vendasSena: { some: { status: StatusVendaSena.APROVADO } },
-                },
-              },
-            },
-          }),
+          this.prisma.cliente.count(),
+          this.prisma.vendedor.count(),
+          this.prisma.distribuidor.count(),
           this.prisma.vendedor.findMany({
             select: {
               id: true,
@@ -512,35 +500,10 @@ export class DashboardService {
         select: {
           id: true,
           nome: true,
-          ...(possuiFiltros
-            ? {
-                vendasSena: {
-                  where: this.buildTimelineWhereSena(filtros),
-                  select: { clienteId: true },
-                },
-              }
-            : {
-                _count: { select: { clientes: true } },
-              }),
+          _count: { select: { clientes: true } },
         },
         orderBy: { nome: 'asc' },
       });
-
-      if (possuiFiltros) {
-        const vendedoresComVendas = vendedores as Array<{
-          id: string;
-          nome: string;
-          vendasSena: Array<{ clienteId: string }>;
-        }>;
-
-        return vendedoresComVendas.map((vendedor) => ({
-          vendedorId: vendedor.id,
-          nome: vendedor.nome,
-          totalClientes: new Set(
-            vendedor.vendasSena.map((venda) => venda.clienteId),
-          ).size,
-        }));
-      }
 
       const vendedoresComCount = vendedores as Array<{
         id: string;
@@ -735,25 +698,11 @@ export class DashboardService {
     this.logger.log(
       `Buscando total de clientes para Vendedor ${user.vendedorId} — modo ${modo}`,
     );
-    const possuiFiltros =
-      Boolean(filtros.edicaoIds?.length) ||
-      Boolean(filtros.dataInicio) ||
-      Boolean(filtros.dataFim);
 
     if (modo === 'SENA') {
       const [totalClientes, vendas, comissoes] = await Promise.all([
         this.prisma.cliente.count({
-          where: possuiFiltros
-            ? {
-                vendedorId: user.vendedorId,
-                vendasSena: {
-                  some: {
-                    ...this.buildTimelineWhereSena(filtros),
-                    vendedorId: user.vendedorId,
-                  },
-                },
-              }
-            : { vendedorId: user.vendedorId },
+          where: { vendedorId: user.vendedorId },
         }),
         this.prisma.vendaSena.findMany({
           where: {
@@ -774,6 +723,11 @@ export class DashboardService {
         ...totais,
       };
     }
+
+    const possuiFiltros =
+      Boolean(filtros.edicaoIds?.length) ||
+      Boolean(filtros.dataInicio) ||
+      Boolean(filtros.dataFim);
 
     const [totalClientes, vendas, comissoes] = await Promise.all([
       this.prisma.cliente.count({

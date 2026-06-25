@@ -39,6 +39,8 @@ import type {
   VendedorRelatorioRow,
 } from './relatorios.types';
 
+const CODIGO_VENDEDOR_ARQUIVO_CDP_SENA = 2;
+
 @Injectable()
 export class RelatoriosService {
   private readonly logger = new Logger(RelatoriosService.name);
@@ -699,6 +701,7 @@ export class RelatoriosService {
           '/relatorios/distribuidores/pdf',
           '/relatorios/clientes/xlsx',
           '/relatorios/clientes/pdf',
+          '/relatorios/vendas/cdp',
           '/relatorios/vendas/sena',
         ],
       },
@@ -739,7 +742,13 @@ export class RelatoriosService {
 
     const linhas: string[] = [];
 
-    linhas.push(`H;CAPDF;${dataSorteioFmt};${dataSorteioFmt};${edicao.numero}`);
+    const codigoVendedorArquivo = this.formatarCodigoVendedorArquivo(
+      CODIGO_VENDEDOR_ARQUIVO_CDP_SENA,
+    );
+
+    linhas.push(
+      `H;CAPDF;${dataSorteioFmt};${dataSorteioFmt};${codigoVendedorArquivo}`,
+    );
 
     for (const bilhete of bilhetes) {
       const { venda } = bilhete;
@@ -788,8 +797,7 @@ export class RelatoriosService {
     const conteudo = linhas.join('\r\n');
     const nomeArquivo = `capital_de_premios_${this.formatarDataNomeArquivo(new Date())}.txt`;
 
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
+    this.configurarRespostaTxt(res, nomeArquivo);
     res.send(conteudo);
   }
 
@@ -833,9 +841,12 @@ export class RelatoriosService {
       dataFim ? this.parseDataRelatorio(dataFim, 'fim') : hoje,
     );
     const valorCartela = this.formatarValorRelatorioSena(edicao.valorCartela);
+    const codigoVendedorArquivo = this.formatarCodigoVendedorArquivo(
+      CODIGO_VENDEDOR_ARQUIVO_CDP_SENA,
+    );
 
     const linhas: string[] = [
-      `H;CAPDF;${dataInicioFmt};${dataFimFmt};${edicao.numero}`,
+      `H;CAPDF;${dataInicioFmt};${dataFimFmt};${codigoVendedorArquivo}`,
     ];
 
     for (const cartela of cartelas) {
@@ -883,9 +894,19 @@ export class RelatoriosService {
     const conteudo = linhas.join('\r\n');
     const nomeArquivo = `capital_sena_${this.formatarDataNomeArquivo(new Date())}.txt`;
 
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
+    this.configurarRespostaTxt(res, nomeArquivo);
     res.send(conteudo);
+  }
+
+  private configurarRespostaTxt(res: Response, nomeArquivo: string): void {
+    const nomeArquivoCodificado = encodeURIComponent(nomeArquivo);
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${nomeArquivo}"; filename*=UTF-8''${nomeArquivoCodificado}`,
+    );
+    res.setHeader('X-Filename', nomeArquivo);
   }
 
   private async buscarVendedoresRelatorio(
@@ -1314,6 +1335,10 @@ export class RelatoriosService {
 
   private formatarNumeroRelatorioSena(value: number): string {
     return value.toString().padStart(2, '0');
+  }
+
+  private formatarCodigoVendedorArquivo(codigo: number): string {
+    return codigo.toString().padStart(3, '0');
   }
 
   private separarTelefoneRelatorioSena(telefone: string | null | undefined): {

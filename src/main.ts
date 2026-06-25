@@ -30,6 +30,13 @@ function parseCorsOrigins(value?: string): string[] {
     .filter((origin) => origin.length > 0);
 }
 
+const exposedCorsHeaders = [
+  'Content-Disposition',
+  'Content-Length',
+  'Content-Type',
+  'X-Filename',
+];
+
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
@@ -115,6 +122,7 @@ async function bootstrap(): Promise<void> {
         origin: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization'],
+        exposedHeaders: exposedCorsHeaders,
         credentials: true,
       });
     }
@@ -136,6 +144,7 @@ async function bootstrap(): Promise<void> {
         origin: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization'],
+        exposedHeaders: exposedCorsHeaders,
         credentials: true,
       });
     }
@@ -145,6 +154,7 @@ async function bootstrap(): Promise<void> {
       origin: false,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: exposedCorsHeaders,
       credentials: true,
     });
   });

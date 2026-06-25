@@ -1,7 +1,9 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -52,6 +54,19 @@ export class RelatoriosVendasController {
     summary:
       'Exportar relatório CDP de vendas (arquivo TXT) por edição (ADMIN)',
   })
+  @ApiProduces('text/plain')
+  @ApiOkResponse({
+    description:
+      'Arquivo TXT com nome capital_de_premios_YYYYMMDD.txt enviado via Content-Disposition.',
+    content: {
+      'text/plain': {
+        schema: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
   @ApiQuery({
     name: 'edicaoId',
     required: true,
@@ -68,6 +83,19 @@ export class RelatoriosVendasController {
   @ApiOperation({
     summary:
       'Exportar relatório Sena de vendas (arquivo TXT) por edição (ADMIN)',
+  })
+  @ApiProduces('text/plain')
+  @ApiOkResponse({
+    description:
+      'Arquivo TXT com nome capital_sena_YYYYMMDD.txt enviado via Content-Disposition.',
+    content: {
+      'text/plain': {
+        schema: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
   })
   @ApiQuery({
     name: 'edicaoSenaId',
