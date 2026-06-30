@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 
 import {
   buildPaginatedResponse,
@@ -20,9 +22,32 @@ const MATRIZ_BATCH_SIZE = 5000;
 
 type MatrizLinha = { numero: bigint; sequenciaBolas: number[] };
 
+export interface MatrizStatus {
+  status: 'sem_importacao_ativa';
+  registrosNaMatriz: number;
+  rangeInicio: string | null;
+  rangeFinal: string | null;
+}
+
+export interface ImportacaoJob {
+  jobId: string;
+  status: 'em_andamento' | 'concluido' | 'erro';
+  importados: number;
+  /** null quando o total não é conhecido antecipadamente (XLSX) */
+  total: number | null;
+  /** null enquanto total for desconhecido; 100 quando concluído */
+  porcentagem: number | null;
+  rangeInicio: string | null;
+  rangeFinal: string | null;
+  erro?: string;
+  criadoEm: Date;
+  concluidoEm?: Date;
+}
+
 @Injectable()
 export class RangesService {
   private readonly logger = new Logger(RangesService.name);
+  private currentJob: ImportacaoJob | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -71,41 +96,143 @@ export class RangesService {
 
   async importarMatriz(file: Express.Multer.File): Promise<{
     message: string;
-    data: { importados: number; total: number };
+    data: { jobId: string; status: string };
   }> {
     if (!file?.buffer) {
       throw new BadRequestException('Arquivo inválido ou vazio');
     }
 
-    this.logger.log(
-      `Iniciando importação de matriz: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(1)} MB)`,
-    );
-
-    let importados = 0;
-
-    if (this.isXlsx(file)) {
-      // XLSX: usa streaming (exceljs) para suportar 1 milhão+ linhas sem estourar memória.
-      importados = await this.parseXlsxEInserir(file.buffer);
-    } else {
-      // CSV: streaming real — insere enquanto lê, sem acumular tudo na memória
-      importados = await this.parseCsvEInserir(file.buffer);
-    }
-
-    if (importados === 0) {
-      throw new BadRequestException(
-        'Nenhuma linha válida encontrada no arquivo. Formatos aceitos: CSV e XLSX.',
+    if (this.currentJob?.status === 'em_andamento') {
+      throw new ConflictException(
+        'Já existe uma importação em andamento. Aguarde a conclusão antes de enviar um novo arquivo.',
       );
     }
 
-    this.logger.log(`Importação concluída: ${importados} registros`);
+    const jobId = randomUUID();
+    const job: ImportacaoJob = {
+      jobId,
+      status: 'em_andamento',
+      importados: 0,
+      total: null,
+      porcentagem: null,
+      rangeInicio: null,
+      rangeFinal: null,
+      criadoEm: new Date(),
+    };
+    this.currentJob = job;
+
+    this.logger.log(
+      `[Job ${jobId}] Criado — ${file.originalname} (${(file.size / 1024 / 1024).toFixed(1)} MB)`,
+    );
+
+    // Fire-and-forget: não bloqueia a requisição
+    this.executarImportacao(file, job).catch((err: Error) => {
+      job.status = 'erro';
+      job.erro = err.message;
+      this.logger.error(`[Job ${jobId}] Falhou: ${err.message}`);
+    });
 
     return {
-      message: `Matriz importada com sucesso. ${importados} registros processados.`,
-      data: { importados, total: importados },
+      message: 'Importação iniciada. Consulte o status em GET /admin/ranges/matriz/upload/status.',
+      data: { status: 'em_andamento' },
+    };
+  }
+
+  async consultarStatusImportacao(): Promise<{
+    message: string;
+    data: ImportacaoJob | MatrizStatus;
+  }> {
+    if (this.currentJob) {
+      const job = this.currentJob;
+      let message: string;
+      if (job.status === 'concluido') {
+        message = `Importação concluída — ${job.importados.toLocaleString('pt-BR')} registros`;
+      } else if (job.status === 'erro') {
+        message = 'Importação falhou';
+      } else if (job.porcentagem !== null) {
+        message = `Importação em andamento — ${job.porcentagem}%`;
+      } else {
+        message = `Importação em andamento — ${job.importados.toLocaleString('pt-BR')} registros processados`;
+      }
+      return { message, data: job };
+    }
+
+    const agg = await this.prisma.matrizRange.aggregate({
+      _count: { id: true },
+      _min: { numero: true },
+      _max: { numero: true },
+    });
+
+    const total = agg._count.id;
+    const rangeInicio = agg._min.numero?.toString() ?? null;
+    const rangeFinal = agg._max.numero?.toString() ?? null;
+
+    const message =
+      total === 0
+        ? 'Nenhuma importação realizada. A matriz está vazia.'
+        : `Matriz carregada com ${total.toLocaleString('pt-BR')} registros (range ${rangeInicio} – ${rangeFinal})`;
+
+    return {
+      message,
+      data: { status: 'sem_importacao_ativa', registrosNaMatriz: total, rangeInicio, rangeFinal } satisfies MatrizStatus,
     };
   }
 
   // ─── HELPERS PRIVADOS ────────────────────────────────────
+
+  private async executarImportacao(
+    file: Express.Multer.File,
+    job: ImportacaoJob,
+  ): Promise<void> {
+    this.logger.log(
+      `[Job ${job.jobId}] Iniciando: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(1)} MB)`,
+    );
+
+    let importados: number;
+
+    if (this.isXlsx(file)) {
+      // XLSX: total de linhas não é conhecido sem parse completo — porcentagem fica null até concluir
+      importados = await this.parseXlsxEInserir(file.buffer, job);
+    } else {
+      // CSV: conta \n antes de começar para ter percentagem real
+      job.total = this.contarLinhasCSV(file.buffer);
+      importados = await this.parseCsvEInserir(file.buffer, job);
+    }
+
+    if (importados === 0) {
+      throw new Error(
+        'Nenhuma linha válida encontrada no arquivo. Formatos aceitos: CSV e XLSX.',
+      );
+    }
+
+    job.status = 'concluido';
+    job.importados = importados;
+    job.porcentagem = 100;
+    job.concluidoEm = new Date();
+
+    this.logger.log(`[Job ${job.jobId}] Concluído: ${importados} registros`);
+  }
+
+  private contarLinhasCSV(buffer: Buffer): number {
+    let count = 0;
+    for (let i = 0; i < buffer.length; i++) {
+      if (buffer[i] === 0x0a) count++;
+    }
+    return count;
+  }
+
+  private atualizarRangeJob(
+    job: ImportacaoJob,
+    minNum: bigint,
+    maxNum: bigint,
+  ): void {
+    if (job.rangeInicio === null || minNum < BigInt(job.rangeInicio)) {
+      job.rangeInicio = minNum.toString();
+    }
+    if (job.rangeFinal === null || maxNum > BigInt(job.rangeFinal)) {
+      job.rangeFinal = maxNum.toString();
+    }
+  }
 
   private isXlsx(file: Express.Multer.File): boolean {
     const xlsxMimes = [
@@ -122,22 +249,10 @@ export class RangesService {
     );
   }
 
-
-  // Insere em lotes de MATRIZ_BATCH_SIZE — usado pelo fluxo XLSX
-  private async inserirEmLotes(linhas: MatrizLinha[]): Promise<number> {
-    let importados = 0;
-    for (let i = 0; i < linhas.length; i += MATRIZ_BATCH_SIZE) {
-      const lote = linhas.slice(i, i + MATRIZ_BATCH_SIZE);
-      await this.executarInsertLote(lote);
-      importados += lote.length;
-      this.logger.log(
-        `Lote ${Math.ceil((i + 1) / MATRIZ_BATCH_SIZE)} / ${Math.ceil(linhas.length / MATRIZ_BATCH_SIZE)} — ${importados}/${linhas.length} inseridos`,
-      );
-    }
-    return importados;
-  }
-
-  private async parseXlsxEInserir(buffer: Buffer): Promise<number> {
+  private async parseXlsxEInserir(
+    buffer: Buffer,
+    job: ImportacaoJob,
+  ): Promise<number> {
     const stream = Readable.from(buffer);
     const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
       entries: 'emit',
@@ -151,22 +266,26 @@ export class RangesService {
     let lote: MatrizLinha[] = [];
     let linhaAtual = 0;
     let loteNumero = 0;
+    let minNum: bigint | null = null;
+    let maxNum: bigint | null = null;
 
     const flushLote = async (loteAtual: MatrizLinha[], numero: number) => {
       if (loteAtual.length === 0) return;
       await this.executarInsertLote(loteAtual);
       importados += loteAtual.length;
+      job.importados = importados;
+      if (minNum !== null && maxNum !== null) {
+        this.atualizarRangeJob(job, minNum, maxNum);
+      }
       this.logger.log(
-        `Lote XLSX ${numero} inserido — ${importados} registros acumulados`,
+        `[Job ${job.jobId}] Lote XLSX ${numero} — ${importados} registros acumulados`,
       );
     };
 
     for await (const worksheetReader of workbookReader) {
-      // Processa apenas a primeira planilha por padrão
       for await (const row of worksheetReader) {
         linhaAtual++;
 
-        // ExcelJS pode emitir linhas vazias; row.values é 1-indexed (posição 0 vazia)
         const colA = row.getCell(1).value;
         const colB = row.getCell(2).value;
 
@@ -174,7 +293,7 @@ export class RangesService {
         const bolasRaw = String(colB ?? '').trim();
 
         if (!numeroRaw || !bolasRaw) continue;
-        if (isNaN(Number(numeroRaw))) continue; // ignora cabeçalho
+        if (isNaN(Number(numeroRaw))) continue;
 
         const sequenciaBolas = bolasRaw
           .split('-')
@@ -186,8 +305,10 @@ export class RangesService {
         try {
           const numero = BigInt(Math.round(Number(numeroRaw)));
           lote.push({ numero, sequenciaBolas });
+          if (minNum === null || numero < minNum) minNum = numero;
+          if (maxNum === null || numero > maxNum) maxNum = numero;
         } catch {
-          this.logger.warn(`Linha XLSX ${linhaAtual} inválida, ignorada`);
+          this.logger.warn(`[Job ${job.jobId}] Linha XLSX ${linhaAtual} inválida, ignorada`);
         }
 
         if (lote.length >= MATRIZ_BATCH_SIZE) {
@@ -197,7 +318,6 @@ export class RangesService {
         }
       }
 
-      // Flush final da planilha
       if (lote.length > 0) {
         loteNumero++;
         await flushLote(lote, loteNumero);
@@ -210,8 +330,10 @@ export class RangesService {
     return importados;
   }
 
-  // Parse CSV com streaming real: insere cada lote durante a leitura, sem acumular tudo na memória
-  private parseCsvEInserir(buffer: Buffer): Promise<number> {
+  private parseCsvEInserir(
+    buffer: Buffer,
+    job: ImportacaoJob,
+  ): Promise<number> {
     return new Promise((resolve, reject) => {
       const stream = Readable.from(buffer);
       const rl = readline.createInterface({
@@ -223,7 +345,8 @@ export class RangesService {
       let importados = 0;
       let linhaAtual = 0;
       let loteNumero = 0;
-      // Fila de promises de insert para não explodir conexões simultâneas
+      let minNum: bigint | null = null;
+      let maxNum: bigint | null = null;
       let insertPromise: Promise<void> = Promise.resolve();
 
       const processarLinha = (raw: string): MatrizLinha | null => {
@@ -254,13 +377,24 @@ export class RangesService {
       };
 
       const flushLote = (loteAtual: MatrizLinha[], numero: number) => {
-        // Encadeia o insert na fila de promises (sequencial, sem explodir conexões)
+        const loteMin = minNum;
+        const loteMax = maxNum;
         insertPromise = insertPromise
           .then(async () => {
             await this.executarInsertLote(loteAtual);
             importados += loteAtual.length;
+            job.importados = importados;
+            if (loteMin !== null && loteMax !== null) {
+              this.atualizarRangeJob(job, loteMin, loteMax);
+            }
+            if (job.total !== null && job.total > 0) {
+              job.porcentagem = Math.min(
+                99,
+                Math.round((importados / job.total) * 100),
+              );
+            }
             this.logger.log(
-              `Lote CSV ${numero} inserido — ${importados} registros acumulados`,
+              `[Job ${job.jobId}] Lote CSV ${numero} — ${importados}${job.total ? `/${job.total}` : ''} (${job.porcentagem ?? '?'}%)`,
             );
           })
           .catch(reject);
@@ -275,6 +409,8 @@ export class RangesService {
           const linha = processarLinha(raw);
           if (!linha) return;
           lote.push(linha);
+          if (minNum === null || linha.numero < minNum) minNum = linha.numero;
+          if (maxNum === null || linha.numero > maxNum) maxNum = linha.numero;
 
           if (lote.length >= MATRIZ_BATCH_SIZE) {
             loteNumero++;
@@ -282,17 +418,15 @@ export class RangesService {
             lote = [];
           }
         } catch {
-          this.logger.warn(`Linha CSV ${linhaAtual} inválida, ignorada`);
+          this.logger.warn(`[Job ${job.jobId}] Linha CSV ${linhaAtual} inválida, ignorada`);
         }
       });
 
       rl.on('close', () => {
-        // Flush lote final
         if (lote.length > 0) {
           loteNumero++;
           flushLote(lote, loteNumero);
         }
-        // Aguarda todos os inserts concluírem antes de resolver
         insertPromise.then(() => resolve(importados)).catch(reject);
       });
 

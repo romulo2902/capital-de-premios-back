@@ -42,6 +42,15 @@ export class RangesController {
     return this.rangesService.findAll(filtros);
   }
 
+  @Get('matriz/upload/status')
+  @ApiOperation({
+    summary:
+      'Consultar status da importação de matriz em andamento ou mais recente (ADMIN). Retorna porcentagem para CSV ou total de registros para XLSX. Inclui rangeInicio e rangeFinal detectados no arquivo.',
+  })
+  consultarStatus() {
+    return this.rangesService.consultarStatusImportacao();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Buscar registro da matriz por ID (ADMIN)' })
   findOne(@Param('id') id: string) {
@@ -51,7 +60,7 @@ export class RangesController {
   @Post('matriz/upload')
   @ApiOperation({
     summary:
-      'Importar/substituir a matriz global de ranges via CSV ou XLSX (ADMIN). CSV recomendado para 1 milhão+ linhas. Faz upsert — números existentes têm as bolas atualizadas.',
+      'Importar/substituir a matriz global via CSV ou XLSX (ADMIN). Retorna imediatamente — use GET /matriz/upload/status para acompanhar o progresso. Bloqueia novo upload enquanto há importação em andamento. CSV recomendado para 1 milhão+ linhas.',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
