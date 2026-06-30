@@ -127,4 +127,39 @@ export class RelatoriosVendasController {
       dataFim,
     );
   }
+
+  @Get('sena/ganhadores')
+  @ApiOperation({
+    summary:
+      'Exportar relatório de ganhadores do Sena (arquivo TXT) por edição, agrupado por prêmio (ADMIN)',
+  })
+  @ApiProduces('text/plain')
+  @ApiOkResponse({
+    description:
+      'Arquivo TXT com nome ganhadores_sena_{numeroEdicao}_YYYYMMDD.txt enviado via Content-Disposition. ' +
+      'Agrupa ganhadores por prêmio (Bola Extra, Sena, Quina, Quadra), trazendo nome, telefone, CPF, e-mail, ' +
+      'onde comprou (POS, WhatsApp ou Digital) e nome do vendedor (quando houver).',
+    content: {
+      'text/plain': {
+        schema: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @ApiQuery({
+    name: 'edicaoSenaId',
+    required: true,
+    description: 'ID da edição Sena',
+  })
+  async exportarGanhadoresSena(
+    @Res() res: Response,
+    @Query('edicaoSenaId') edicaoSenaId: string,
+  ) {
+    return this.relatoriosService.exportarRelatorioGanhadoresSena(
+      res,
+      edicaoSenaId,
+    );
+  }
 }
