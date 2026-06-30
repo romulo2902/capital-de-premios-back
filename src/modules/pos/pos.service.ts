@@ -13,7 +13,6 @@ import {
   StatusEdicaoSena,
   StatusVenda,
   StatusVendaSena,
-  TipoCartela,
   TipoPagamento,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -121,11 +120,6 @@ export class PosService {
         numero: true,
         status: true,
         valorCartela: true,
-        detalhes: {
-          where: { origemParticipacao: OrigemParticipacao.DIGITAL },
-          select: { tipoCartela: true, preco: true, indiceRange: true },
-          orderBy: { indiceRange: 'asc' },
-        },
         combos: {
           where: { origemParticipacao: OrigemParticipacao.DIGITAL },
           select: { id: true, tipoCartela: true, preco: true },
@@ -142,23 +136,12 @@ export class PosService {
       throw new BadRequestException('A edição não está ativa');
     }
 
-    const opcoesUnitarias = edicao.detalhes
-      .filter((detalhe) => detalhe.tipoCartela === TipoCartela.UMA_CHANCE)
-      .map((detalhe) => ({
-        tipoCompra: 'UNITARIO',
-        tipoCartela: detalhe.tipoCartela,
-        quantidadeCartelas: 1,
-        preco: (detalhe.preco ?? edicao.valorCartela).toString(),
-        indiceRange: detalhe.indiceRange,
-      }));
-
     const opcoesCombos = edicao.combos.map((combo) => ({
       id: combo.id,
       tipoCompra: 'COMBO',
       tipoCartela: combo.tipoCartela,
       quantidadeCartelas: obterQuantidadeCartelas(combo.tipoCartela),
       preco: combo.preco.toString(),
-      indiceRange: null,
     }));
 
     return {
@@ -167,7 +150,7 @@ export class PosService {
         edicaoId: edicao.id,
         edicaoNumero: edicao.numero,
         origemParticipacao: OrigemParticipacao.POS,
-        opcoes: [...opcoesUnitarias, ...opcoesCombos],
+        opcoes: opcoesCombos,
       },
     };
   }

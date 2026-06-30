@@ -235,6 +235,8 @@ describe('EdicoesService', () => {
           origemParticipacao: OrigemParticipacao.DIGITAL,
           tipoCartela: TipoCartela.UMA_CHANCE,
           preco: new Prisma.Decimal('10.00'),
+          rangeInicio: BigInt(1000000),
+          rangeFinal: BigInt(1999995),
           createdAt: new Date('2026-03-20T10:00:00.000Z'),
           updatedAt: new Date('2026-03-20T10:00:00.000Z'),
         },
@@ -281,25 +283,19 @@ describe('EdicoesService', () => {
       .mockResolvedValueOnce(edicao.premios[0].imagemUrl);
 
     const result = await service.create({
-      numero: 125,
+      numero: '125',
       dataSorteio: '2099-03-27T10:20',
       dataEncerramento: '2099-03-27T09:59',
       valorCartela: '10.00',
       raspadinha: false,
       imagemBase64: 'data:image/png;base64,Y2FwYQ==',
-      detalhes: [
-        {
-          origemParticipacao: OrigemParticipacao.DIGITAL,
-          rangeInicio: '1000000',
-          rangeFinal: '1999995',
-          quantidadeSetores: 12,
-        },
-      ],
       combos: [
         {
           origemParticipacao: OrigemParticipacao.DIGITAL,
           tipoCartela: TipoCartela.UMA_CHANCE,
           preco: '10.00',
+          rangeInicio: '1000000',
+          rangeFinal: '1999995',
         },
       ],
       premios: [
@@ -346,24 +342,18 @@ describe('EdicoesService', () => {
   it('create should reject when dataEncerramento is already past', async () => {
     await expect(
       service.create({
-        numero: 126,
+        numero: '126',
         dataSorteio: '2000-03-27T10:20',
         dataEncerramento: '2000-03-27T09:59',
         valorCartela: '10.00',
         raspadinha: false,
-        detalhes: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            rangeInicio: '1000000',
-            rangeFinal: '1000000',
-            quantidadeSetores: 1,
-          },
-        ],
         combos: [
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.UMA_CHANCE,
             preco: '10.00',
+            rangeInicio: '1000000',
+            rangeFinal: '1999995',
           },
         ],
         premios: [
@@ -428,6 +418,8 @@ describe('EdicoesService', () => {
           origemParticipacao: OrigemParticipacao.DIGITAL,
           tipoCartela: TipoCartela.UMA_CHANCE,
           preco: new Prisma.Decimal('10.00'),
+          rangeInicio: BigInt(1000000),
+          rangeFinal: BigInt(1999999),
           createdAt: new Date('2026-03-20T10:00:00.000Z'),
           updatedAt: new Date('2026-03-20T10:00:00.000Z'),
         },
@@ -448,35 +440,30 @@ describe('EdicoesService', () => {
     };
   }
 
-  it('create should reject detalhes whose derived sectors overlap', async () => {
+  it('create should reject when combo ranges overlap', async () => {
     mockPrisma.edicao.findFirst.mockResolvedValue(null);
 
     await expect(
       service.create({
-        numero: 126,
+        numero: '126',
         dataSorteio: '2099-03-27T10:20',
         dataEncerramento: '2099-03-27T09:59',
         valorCartela: '10.00',
         raspadinha: false,
-        detalhes: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            rangeInicio: '1000000',
-            rangeFinal: '1000199',
-            quantidadeSetores: 1,
-          },
-          {
-            origemParticipacao: OrigemParticipacao.FISICO,
-            rangeInicio: '1000150',
-            rangeFinal: '1000250',
-            quantidadeSetores: 1,
-          },
-        ],
         combos: [
           {
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.UMA_CHANCE,
             preco: '10.00',
+            rangeInicio: '1000000',
+            rangeFinal: '1000199',
+          },
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            preco: '20.00',
+            rangeInicio: '1000150',
+            rangeFinal: '1000350',
           },
         ],
         premios: [

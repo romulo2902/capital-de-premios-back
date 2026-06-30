@@ -1,5 +1,4 @@
 import { OrigemParticipacao, Prisma, TipoCartela } from '@prisma/client';
-import type { UploadFile } from '../../common/types/upload-file.type';
 
 export type EdicaoComRelacoes = Prisma.EdicaoGetPayload<{
   include: {

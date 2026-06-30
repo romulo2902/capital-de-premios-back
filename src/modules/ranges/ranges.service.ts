@@ -11,12 +11,10 @@ import {
   buildPaginatedResponse,
   normalizePagination,
 } from '../../common/utils/pagination.util';
-import { expandirSetoresDosDetalhes } from '../edicoes/edicoes-range.util';
 import { FiltroRangesDto } from './dto/filtro-ranges.dto';
 import { Readable } from 'stream';
 import * as readline from 'readline';
 import * as ExcelJS from 'exceljs';
-import { OrigemParticipacao, TipoCartela } from '@prisma/client';
 
 const MATRIZ_BATCH_SIZE = 5000;
 
@@ -344,7 +342,7 @@ export class RangesService {
         select: {
           id: true,
           createdAt: true,
-          detalhes: true,
+          combos: { select: { rangeInicio: true, rangeFinal: true } },
           rangeInicio: true,
           rangeFinal: true,
         },
@@ -354,35 +352,17 @@ export class RangesService {
         throw new NotFoundException('Edição não encontrada');
       }
 
-      const detalhes =
-        edicao.detalhes.length > 0
-          ? edicao.detalhes.map((detalhe) => ({
-              origemParticipacao: detalhe.origemParticipacao,
-              tipoCartela: detalhe.tipoCartela,
-              rangeInicio: detalhe.rangeInicio,
-              rangeFinal: detalhe.rangeFinal,
-              indiceRange: detalhe.indiceRange,
-            }))
-          : [
-              {
-                origemParticipacao: OrigemParticipacao.DIGITAL,
-                tipoCartela: TipoCartela.UMA_CHANCE,
-                rangeInicio: edicao.rangeInicio,
-                rangeFinal: edicao.rangeFinal,
-                indiceRange: 1,
-              },
-            ];
-
-      const setores = expandirSetoresDosDetalhes(detalhes);
-
-      and.push({
-        OR: setores.map((setor) => ({
-          numero: {
-            gte: setor.rangeInicio,
-            lte: setor.rangeFinal,
-          },
-        })),
-      });
+      if (edicao.combos.length > 0) {
+        and.push({
+          OR: edicao.combos.map((combo) => ({
+            numero: { gte: combo.rangeInicio, lte: combo.rangeFinal },
+          })),
+        });
+      } else {
+        and.push({
+          numero: { gte: edicao.rangeInicio, lte: edicao.rangeFinal },
+        });
+      }
     }
 
     if (and.length === 0) {

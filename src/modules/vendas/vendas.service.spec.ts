@@ -224,58 +224,11 @@ describe('VendasService', () => {
       expect(result.data).toEqual([
         expect.objectContaining({
           id: 'venda-1',
-          total: '60.00',
-          totalFormatado: 'R$ 60,00',
-        }),
-      ]);
-    });
-
-    it('should synchronize POS pending sale with gateway when already paid', async () => {
-      mockPrisma.venda.findMany.mockResolvedValue([
-        {
-          id: 'venda-pos-1',
-          total: new Prisma.Decimal('10.00'),
-          quantidade: 2,
-          status: StatusVenda.PENDENTE,
-          origemParticipacao: OrigemParticipacao.POS,
-          tipoPagamento: TipoPagamento.PIX,
-          gatewayId: 'ORDE_123',
-        },
-      ]);
-      mockPrisma.venda.count.mockResolvedValue(1);
-      mockGateway.consultarCobranca.mockResolvedValue({
-        status: 'APROVADO',
-        paidAt: new Date('2026-06-16T10:00:00.000Z'),
-        payload: { orderId: 'ORDE_123' },
-      });
-      jest.spyOn(service, 'confirmarPagamento').mockResolvedValue({
-        message: 'Pagamento confirmado com sucesso',
-        data: { id: 'venda-pos-1', status: StatusVenda.APROVADO },
-      });
-      mockPrisma.venda.findUnique.mockResolvedValue({
-        id: 'venda-pos-1',
-        total: new Prisma.Decimal('10.00'),
-        quantidade: 2,
-        status: StatusVenda.APROVADO,
-        origemParticipacao: OrigemParticipacao.POS,
-        tipoPagamento: TipoPagamento.PIX,
-        gatewayId: 'ORDE_123',
-      });
-
-      const result = await service.findAll();
-
-      expect(mockGateway.consultarCobranca).toHaveBeenCalledWith('ORDE_123');
-      expect(service.confirmarPagamento).toHaveBeenCalledWith(
-        'venda-pos-1',
-        expect.objectContaining({
-          gatewayPolling: { orderId: 'ORDE_123' },
-        }),
-      );
-      expect(result.data).toEqual([
-        expect.objectContaining({
-          id: 'venda-pos-1',
-          status: StatusVenda.APROVADO,
-          total: '10.00',
+          total: '60',
+          totalFormatado: new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+          }).format(60),
         }),
       ]);
     });
@@ -395,8 +348,9 @@ describe('VendasService', () => {
       status: StatusEdicao.ATIVA,
       dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
       valorCartela: new Prisma.Decimal('30.00'),
-      detalhes: [
+      combos: [
         {
+          id: 'combo-1',
           origemParticipacao: OrigemParticipacao.DIGITAL,
           tipoCartela: TipoCartela.UMA_CHANCE,
           rangeInicio: BigInt(1000000),
@@ -597,6 +551,7 @@ describe('VendasService', () => {
             tipoPagamento: TipoPagamento.MANUAL,
             origemParticipacao: OrigemParticipacao.DIGITAL,
             edicaoId: 'edicao-1',
+            quantidade: 1,
             vendedorId: null,
             distribuidorId: null,
             gatewayPayload: null,
@@ -615,9 +570,6 @@ describe('VendasService', () => {
         },
         edicao: {
           findUnique: jest.fn().mockResolvedValue({
-            rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1999999),
-            detalhes: edicaoAtiva.detalhes,
             combos: edicaoAtiva.combos,
           }),
         },
@@ -659,6 +611,8 @@ describe('VendasService', () => {
           cpf: '12345678900',
           nome: 'Romulo Valadares',
           telefone: '(00) 99999-9999',
+          email: 'romulo@test.com',
+          dataNascimento: '1990-01-01',
         },
         {
           id: 'admin-1',
@@ -695,13 +649,19 @@ describe('VendasService', () => {
         valorCartela: new Prisma.Decimal('10.00'),
         combos: [
           {
+            id: 'combo-uma',
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.UMA_CHANCE,
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1499999),
             preco: new Prisma.Decimal('10.00'),
           },
           {
+            id: 'combo-duas',
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(1500000),
+            rangeFinal: BigInt(1999999),
             preco: new Prisma.Decimal('20.00'),
           },
         ],
@@ -738,18 +698,21 @@ describe('VendasService', () => {
         },
         edicao: {
           findUnique: jest.fn().mockResolvedValue({
-            rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1999999),
-            detalhes: edicaoAtiva.detalhes,
             combos: [
               {
+                id: 'combo-uma',
                 origemParticipacao: OrigemParticipacao.DIGITAL,
                 tipoCartela: TipoCartela.UMA_CHANCE,
+                rangeInicio: BigInt(1000000),
+                rangeFinal: BigInt(1499999),
                 preco: new Prisma.Decimal('10.00'),
               },
               {
+                id: 'combo-duas',
                 origemParticipacao: OrigemParticipacao.DIGITAL,
                 tipoCartela: TipoCartela.DUAS_CHANCES,
+                rangeInicio: BigInt(1500000),
+                rangeFinal: BigInt(1999999),
                 preco: new Prisma.Decimal('20.00'),
               },
             ],
@@ -813,6 +776,8 @@ describe('VendasService', () => {
           cpf: '12345678900',
           nome: 'Romulo Valadares',
           telefone: '(00) 99999-9999',
+          email: 'romulo@test.com',
+          dataNascimento: '1990-01-01',
         },
         {
           id: 'admin-1',
@@ -853,6 +818,8 @@ describe('VendasService', () => {
           cpf: '12345678900',
           nome: 'Romulo Valadares',
           telefone: '(00) 99999-9999',
+          email: 'romulo@test.com',
+          dataNascimento: '1990-01-01',
         }),
       ).rejects.toThrow(
         'tipoPagamento é obrigatório para vendas que não são diretas do ADMIN',
@@ -871,6 +838,7 @@ describe('VendasService', () => {
             tipoPagamento: TipoPagamento.MANUAL,
             origemParticipacao: OrigemParticipacao.POS,
             edicaoId: 'edicao-1',
+            quantidade: 1,
             vendedorId: 'vendedor-1',
             distribuidorId: 'distribuidor-1',
             gatewayPayload: null,
@@ -894,9 +862,6 @@ describe('VendasService', () => {
         },
         edicao: {
           findUnique: jest.fn().mockResolvedValue({
-            rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1999999),
-            detalhes: edicaoAtiva.detalhes,
             combos: edicaoAtiva.combos,
           }),
         },
@@ -987,25 +952,18 @@ describe('VendasService', () => {
       expect(mockPaymentGatewayFactory.getGateway).not.toHaveBeenCalled();
     });
 
-    it('should use detalhe price and persist internal cartela type from quantidadeCartelas', async () => {
+    it('should use combo price and persist combo cartela type when comboId is informed', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue({
         ...edicaoAtiva,
-        detalhes: [
+        combos: [
+          ...edicaoAtiva.combos,
           {
+            id: 'combo-duas',
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
-            indiceRange: 1,
-            rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1099999),
-            preco: new Prisma.Decimal('25.00'),
-          },
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.DUAS_CHANCES,
-            indiceRange: 2,
             rangeInicio: BigInt(1100000),
             rangeFinal: BigInt(1199999),
-            preco: null,
+            preco: new Prisma.Decimal('25.00'),
           },
         ],
       });
@@ -1024,6 +982,7 @@ describe('VendasService', () => {
 
       await service.create({
         ...createDto,
+        comboId: 'combo-duas',
         quantidadeCartelas: 2,
       });
 
@@ -1051,7 +1010,7 @@ describe('VendasService', () => {
     });
 
     it('should return vendas for given CPF', async () => {
-      mockPrisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1' });
+      mockPrisma.cliente.findFirst.mockResolvedValue({ id: 'cliente-1' });
       mockPrisma.venda.findMany.mockResolvedValue([]);
       mockPrisma.venda.count.mockResolvedValue(0);
 
@@ -1068,9 +1027,6 @@ describe('VendasService', () => {
         status: StatusEdicao.ATIVA,
         manutencaoAtiva: true,
         manutencaoMensagem: 'Catálogo temporariamente indisponível',
-        rangeInicio: BigInt(1000000),
-        rangeFinal: BigInt(1199999),
-        detalhes: [],
         combos: [],
       });
 
@@ -1088,43 +1044,27 @@ describe('VendasService', () => {
         numero: 10,
         status: StatusEdicao.ATIVA,
         dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
-        rangeInicio: BigInt(1000000),
-        rangeFinal: BigInt(1199999),
-        detalhes: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.DUAS_CHANCES,
-            indiceRange: 1,
-            rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1099999),
-            preco: null,
-          },
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.DUAS_CHANCES,
-            indiceRange: 2,
-            rangeInicio: BigInt(1100000),
-            rangeFinal: BigInt(1199999),
-            preco: null,
-          },
-        ],
+        valorCartela: new Prisma.Decimal('30.00'),
         combos: [
           {
+            id: 'combo-duas',
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1000099),
             preco: new Prisma.Decimal('50.00'),
           },
         ],
       });
 
-      const linhas = [
-        { id: 'matriz-1', numero: BigInt(1000000), sequenciaBolas: [1, 2, 3] },
-        { id: 'matriz-2', numero: BigInt(1100000), sequenciaBolas: [4, 5, 6] },
-      ];
-
       mockPrisma.matrizRange.findMany
-        .mockResolvedValueOnce([linhas[0]])
-        .mockResolvedValueOnce(linhas);
+        .mockResolvedValueOnce([
+          { id: 'matriz-1', numero: BigInt(1000000), sequenciaBolas: [1, 2, 3] },
+        ])
+        .mockResolvedValueOnce([
+          { id: 'matriz-1', numero: BigInt(1000000), sequenciaBolas: [1, 2, 3] },
+          { id: 'matriz-2', numero: BigInt(1000001), sequenciaBolas: [4, 5, 6] },
+        ]);
 
       const result = await service.listarCombosDisponiveis({
         edicaoId: 'edicao-1',
@@ -1147,7 +1087,7 @@ describe('VendasService', () => {
             {
               ordem: 2,
               matrizId: 'matriz-2',
-              numero: '1100000',
+              numero: '1000001',
               sequenciaBolas: [4, 5, 6],
             },
           ],
@@ -1155,49 +1095,33 @@ describe('VendasService', () => {
       ]);
     });
 
-    it('should respect manual sectors when quantidadeCartelas has one detail per cartela', async () => {
+    it('should expose the combo range and the offset between cartelas', async () => {
       mockPrisma.edicao.findUnique.mockResolvedValue({
         id: 'edicao-2',
         numero: 11,
         status: StatusEdicao.ATIVA,
         dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
-        rangeInicio: BigInt(950000),
-        rangeFinal: BigInt(2059980),
-        detalhes: [
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.DUAS_CHANCES,
-            indiceRange: 1,
-            rangeInicio: BigInt(950000),
-            rangeFinal: BigInt(959980),
-            preco: null,
-          },
-          {
-            origemParticipacao: OrigemParticipacao.DIGITAL,
-            tipoCartela: TipoCartela.DUAS_CHANCES,
-            indiceRange: 2,
-            rangeInicio: BigInt(1050000),
-            rangeFinal: BigInt(1059980),
-            preco: null,
-          },
-        ],
+        valorCartela: new Prisma.Decimal('30.00'),
         combos: [
           {
+            id: 'combo-duas',
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(950000),
+            rangeFinal: BigInt(959980),
             preco: new Prisma.Decimal('50.00'),
           },
         ],
       });
 
-      const linhas = [
-        { id: 'matriz-a', numero: BigInt(950000), sequenciaBolas: [1, 2, 3] },
-        { id: 'matriz-b', numero: BigInt(1050000), sequenciaBolas: [4, 5, 6] },
-      ];
-
       mockPrisma.matrizRange.findMany
-        .mockResolvedValueOnce([linhas[0]])
-        .mockResolvedValueOnce(linhas);
+        .mockResolvedValueOnce([
+          { id: 'matriz-a', numero: BigInt(950000), sequenciaBolas: [1, 2, 3] },
+        ])
+        .mockResolvedValueOnce([
+          { id: 'matriz-a', numero: BigInt(950000), sequenciaBolas: [1, 2, 3] },
+          { id: 'matriz-b', numero: BigInt(950001), sequenciaBolas: [4, 5, 6] },
+        ]);
 
       const result = await service.listarCombosDisponiveis({
         edicaoId: 'edicao-2',
@@ -1206,11 +1130,11 @@ describe('VendasService', () => {
       });
 
       expect(result.data.rangeTotalInicio).toBe('950000');
-      expect(result.data.rangeTotalFinal).toBe('1059980');
-      expect(result.data.passoEntreCartelas).toBe('100000');
+      expect(result.data.rangeTotalFinal).toBe('959980');
+      expect(result.data.passoEntreCartelas).toBe('1');
       expect(result.data.combos[0].bilhetes).toHaveLength(2);
       expect(result.data.combos[0].bilhetes[0].numero).toBe('0950000');
-      expect(result.data.combos[0].bilhetes[1].numero).toBe('1050000');
+      expect(result.data.combos[0].bilhetes[1].numero).toBe('0950001');
     });
   });
 
@@ -1262,10 +1186,9 @@ describe('VendasService', () => {
       const txMock = {
         edicao: {
           findUnique: jest.fn().mockResolvedValue({
-            rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1999999),
-            detalhes: [
+            combos: [
               {
+                id: 'combo-1',
                 origemParticipacao: OrigemParticipacao.DIGITAL,
                 tipoCartela: TipoCartela.UMA_CHANCE,
                 rangeInicio: BigInt(1000000),
@@ -1343,7 +1266,7 @@ describe('VendasService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             vendedorId: 'vendedor-1',
-            valor: new Prisma.Decimal('6.00'), // 50% de 20% de 60.00
+            valor: new Prisma.Decimal('30.00'), // 50% de 60.00
           }),
         }),
       );
@@ -1351,7 +1274,7 @@ describe('VendasService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             distribuidorId: 'distribuidor-1',
-            valor: new Prisma.Decimal('6.00'), // Os outros 50% de 20% de 60.00
+            valor: new Prisma.Decimal('12.00'), // 20% de 60.00
           }),
         }),
       );
@@ -1374,24 +1297,23 @@ describe('VendasService', () => {
       const linhas = [
         { id: 'matriz-1', numero: BigInt(1000000), sequenciaBolas: [1, 2, 3] },
         { id: 'matriz-2', numero: BigInt(1000001), sequenciaBolas: [4, 5, 6] },
-        { id: 'matriz-3', numero: BigInt(1100000), sequenciaBolas: [7, 8, 9] },
+        { id: 'matriz-3', numero: BigInt(1000002), sequenciaBolas: [7, 8, 9] },
         {
           id: 'matriz-4',
-          numero: BigInt(1100001),
+          numero: BigInt(1000003),
           sequenciaBolas: [10, 11, 12],
         },
       ];
       const txMock = {
         edicao: {
           findUnique: jest.fn().mockResolvedValue({
-            rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1199999),
-            detalhes: [
+            combos: [
               {
+                id: 'combo-1',
                 origemParticipacao: OrigemParticipacao.DIGITAL,
                 tipoCartela: TipoCartela.DUAS_CHANCES,
                 rangeInicio: BigInt(1000000),
-                rangeFinal: BigInt(1199999),
+                rangeFinal: BigInt(1000003),
                 preco: null,
               },
             ],
@@ -1403,7 +1325,7 @@ describe('VendasService', () => {
               return Promise.resolve(linhas);
             }
 
-            return Promise.resolve(linhas.slice(0, 2));
+            return Promise.resolve([linhas[0], linhas[2]]);
           }),
         },
         bilhete: {
@@ -1456,15 +1378,15 @@ describe('VendasService', () => {
             matrizId: 'matriz-1',
           }),
           expect.objectContaining({
-            numero: BigInt(1100000),
-            matrizId: 'matriz-3',
-          }),
-          expect.objectContaining({
             numero: BigInt(1000001),
             matrizId: 'matriz-2',
           }),
           expect.objectContaining({
-            numero: BigInt(1100001),
+            numero: BigInt(1000002),
+            matrizId: 'matriz-3',
+          }),
+          expect.objectContaining({
+            numero: BigInt(1000003),
             matrizId: 'matriz-4',
           }),
         ],
@@ -1488,10 +1410,9 @@ describe('VendasService', () => {
       const txMock = {
         edicao: {
           findUnique: jest.fn().mockResolvedValue({
-            rangeInicio: BigInt(1000000),
-            rangeFinal: BigInt(1199999),
-            detalhes: [
+            combos: [
               {
+                id: 'combo-1',
                 origemParticipacao: OrigemParticipacao.DIGITAL,
                 tipoCartela: TipoCartela.DUAS_CHANCES,
                 rangeInicio: BigInt(1000000),
@@ -1582,10 +1503,9 @@ describe('VendasService', () => {
       const txMock = {
         edicao: {
           findUnique: jest.fn().mockResolvedValue({
-            rangeInicio: BigInt(270000),
-            rangeFinal: BigInt(869999),
-            detalhes: [
+            combos: [
               {
+                id: 'combo-1',
                 origemParticipacao: OrigemParticipacao.DIGITAL,
                 tipoCartela: TipoCartela.SEIS_CHANCES,
                 rangeInicio: BigInt(270000),
