@@ -23,4 +23,4 @@ ENV PORT=3000
 EXPOSE 3000
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && npx pm2-runtime start ecosystem.config.cjs --env production"]
