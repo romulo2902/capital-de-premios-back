@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   OrigemParticipacao,
+  StatusCartelaSena,
   StatusVenda,
   StatusVendaSena,
   TipoCartela,
@@ -896,6 +897,107 @@ export class RelatoriosService {
 
     this.configurarRespostaTxt(res, nomeArquivo);
     res.send(conteudo);
+  }
+
+  async exportarRelatorioGanhadoresSena(
+    res: Response,
+    edicaoSenaId: string,
+  ): Promise<void> {
+    this.logger.log(
+      `Gerando relatório de ganhadores Sena para edição ${edicaoSenaId}`,
+    );
+
+    const edicao = await this.prisma.edicaoSena.findUniqueOrThrow({
+      where: { id: edicaoSenaId },
+      select: { numero: true },
+    });
+
+    const cartelas = await this.prisma.cartelaSena.findMany({
+      where: {
+        edicaoSenaId,
+        status: {
+          in: [
+            StatusCartelaSena.SENA_BONUS,
+            StatusCartelaSena.SENA,
+            StatusCartelaSena.QUINA,
+            StatusCartelaSena.QUADRA,
+          ],
+        },
+      },
+      include: {
+        vendaSena: {
+          select: {
+            origemParticipacao: true,
+            gatewayPayload: true,
+            cliente: {
+              select: { nome: true, telefone: true, cpf: true, email: true },
+            },
+            vendedor: { select: { nome: true } },
+          },
+        },
+      },
+      orderBy: [{ status: 'desc' }, { vendaSena: { createdAt: 'asc' } }],
+    });
+
+    const faixas: { status: StatusCartelaSena; titulo: string }[] = [
+      { status: StatusCartelaSena.SENA_BONUS, titulo: 'Bola Extra' },
+      { status: StatusCartelaSena.SENA, titulo: 'Sena' },
+      { status: StatusCartelaSena.QUINA, titulo: 'Quina' },
+      { status: StatusCartelaSena.QUADRA, titulo: 'Quadra' },
+    ];
+
+    const blocos: string[] = [];
+
+    for (const faixa of faixas) {
+      const ganhadoresFaixa = cartelas.filter((c) => c.status === faixa.status);
+
+      const linhasFaixa = [`Premio: ${faixa.titulo}`];
+
+      if (ganhadoresFaixa.length === 0) {
+        linhasFaixa.push('Nenhum ganhador');
+      } else {
+        for (const cartela of ganhadoresFaixa) {
+          const venda = cartela.vendaSena;
+          const cliente = venda.cliente;
+          const ondeComprou = this.resolverOndeComprouGanhadorSena(venda);
+          const vendedor = venda.vendedor?.nome ?? '-';
+
+          linhasFaixa.push(
+            [
+              cliente.nome,
+              cliente.telefone,
+              formatarCpfUtil(cliente.cpf),
+              cliente.email ?? '-',
+              ondeComprou,
+              vendedor,
+            ].join(', '),
+          );
+        }
+      }
+
+      blocos.push(linhasFaixa.join('\r\n'));
+    }
+
+    const conteudo = blocos.join('\r\n\r\n');
+    const nomeArquivo = `ganhadores_sena_${edicao.numero}_${this.formatarDataNomeArquivo(new Date())}.txt`;
+
+    this.configurarRespostaTxt(res, nomeArquivo);
+    res.send(conteudo);
+  }
+
+  private resolverOndeComprouGanhadorSena(venda: {
+    origemParticipacao: OrigemParticipacao;
+    gatewayPayload?: unknown;
+  }): string {
+    if (this.gatewayPayloadTemOrigem(venda.gatewayPayload, 'WHATSAPP')) {
+      return 'WhatsApp';
+    }
+
+    if (venda.origemParticipacao === OrigemParticipacao.POS) {
+      return 'POS';
+    }
+
+    return 'Digital';
   }
 
   private configurarRespostaTxt(res: Response, nomeArquivo: string): void {

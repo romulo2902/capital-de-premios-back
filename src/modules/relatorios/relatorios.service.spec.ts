@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import { OrigemParticipacao, StatusVendaSena } from '@prisma/client';
+import {
+  OrigemParticipacao,
+  StatusCartelaSena,
+  StatusVendaSena,
+} from '@prisma/client';
 import { RelatoriosService } from './relatorios.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -606,5 +610,77 @@ describe('RelatoriosService', () => {
         },
       },
     });
+  });
+
+  it('deve exportar relatorio de ganhadores Sena agrupado por premio', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-09T12:00:00-03:00'));
+
+    mockPrisma.edicaoSena.findUniqueOrThrow.mockResolvedValue({
+      numero: '12',
+    });
+    mockPrisma.cartelaSena.findMany.mockResolvedValue([
+      {
+        status: StatusCartelaSena.SENA_BONUS,
+        vendaSena: {
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          gatewayPayload: null,
+          cliente: {
+            nome: 'Andreia Cristina Moreira',
+            telefone: '+5561995094000',
+            cpf: '09392814115',
+            email: 'andreia@test.com',
+          },
+          vendedor: { nome: 'Brunna costa' },
+        },
+      },
+      {
+        status: StatusCartelaSena.QUINA,
+        vendaSena: {
+          origemParticipacao: OrigemParticipacao.POS,
+          gatewayPayload: null,
+          cliente: {
+            nome: 'Jair Rodrigues',
+            telefone: '+5561999999999',
+            cpf: '06790319107',
+            email: null,
+          },
+          vendedor: null,
+        },
+      },
+    ]);
+
+    const res = {
+      setHeader: jest.fn(),
+      send: jest.fn(),
+    };
+
+    await service.exportarRelatorioGanhadoresSena(
+      res as never,
+      'edicao-sena-1',
+    );
+
+    expect(mockPrisma.edicaoSena.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 'edicao-sena-1' },
+      select: { numero: true },
+    });
+
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'X-Filename',
+      'ganhadores_sena_12_20260609.txt',
+    );
+
+    const conteudo = res.send.mock.calls[0][0] as string;
+
+    expect(conteudo).toContain('Premio: Bola Extra');
+    expect(conteudo).toContain(
+      'Andreia Cristina Moreira, +5561995094000, 093.928.141-15, andreia@test.com, Digital, Brunna costa',
+    );
+    expect(conteudo).toContain('Premio: Sena');
+    expect(conteudo).toContain('Nenhum ganhador');
+    expect(conteudo).toContain('Premio: Quina');
+    expect(conteudo).toContain(
+      'Jair Rodrigues, +5561999999999, 067.903.191-07, -, POS, -',
+    );
+    expect(conteudo).toContain('Premio: Quadra');
   });
 });
