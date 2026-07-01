@@ -134,7 +134,7 @@ export class RangesService {
 
     return {
       message: 'Importação iniciada. Consulte o status em GET /admin/ranges/matriz/upload/status.',
-      data: { status: 'em_andamento' },
+      data: { jobId, status: 'em_andamento' },
     };
   }
 
