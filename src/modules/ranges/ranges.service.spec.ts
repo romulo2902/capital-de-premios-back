@@ -45,10 +45,8 @@ describe('RangesService', () => {
       createdAt: new Date('2026-03-20T10:00:00.000Z'),
       rangeInicio: BigInt(1000000),
       rangeFinal: BigInt(1100099),
-      detalhes: [
+      combos: [
         {
-          origemParticipacao: 'DIGITAL',
-          tipoCartela: 'DUAS_CHANCES',
           rangeInicio: BigInt(1000000),
           rangeFinal: BigInt(1000099),
         },
@@ -66,12 +64,6 @@ describe('RangesService', () => {
             {
               numero: {
                 gte: BigInt(1000000),
-                lte: BigInt(1000049),
-              },
-            },
-            {
-              numero: {
-                gte: BigInt(1000050),
                 lte: BigInt(1000099),
               },
             },

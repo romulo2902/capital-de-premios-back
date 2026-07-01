@@ -16,7 +16,7 @@ describe('CreateVendaDto', () => {
       cpf: '16158982636',
       dataNascimento: '2000-05-05',
       distribuidorId: 'ae7eeaa3-f692-49b2-9529-88a7fac023c0',
-      email: '',
+      email: 'jair.teste2@email.com',
       nome: 'Jair Teste 2',
       origemParticipacao: OrigemParticipacao.DIGITAL,
       telefone: '(62) 99570-2191',
@@ -38,6 +38,7 @@ describe('CreateVendaDto', () => {
       dataNascimento: '2000-05-05',
       nome: 'Jair Teste 2',
       telefone: '(62) 99570-2191',
+      email: 'jair.teste2@email.com',
     });
 
     const errors = validateSync(dto, {

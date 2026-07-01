@@ -249,7 +249,7 @@ describe('RelatoriosService', () => {
       id: 'edicao-1',
       numero: 'ED-126-RASCUNHO',
       dataSorteio: new Date('2026-05-27'),
-      detalhes: [
+      combos: [
         {
           rangeInicio: 980000n,
           rangeFinal: 983000n,

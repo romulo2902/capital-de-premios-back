@@ -22,37 +22,26 @@ import {
 } from '../../common/utils/pagination.util';
 import { CreateEdicaoDto } from './dto/create-edicao.dto';
 import { CreateEdicaoComboDto } from './dto/create-edicao-combo.dto';
-import { CreateEdicaoDetalheDto } from './dto/create-edicao-detalhe.dto';
 import { CreateEdicaoPremioDto } from './dto/create-edicao-premio.dto';
 import { UpdateEdicaoDto } from './dto/update-edicao.dto';
 import {
   EDICAO_INCLUDE,
   STATUSS_EDICAO_EM_OPERACAO,
 } from './edicoes.constants';
-import { obterTotalCombinacoesCartela } from './edicoes-sequencia.util';
 import {
-  calcularTotalBilhetesDosDetalhes as calcularTotalBilhetesDosDetalhesUtil,
-  calcularResumoDosRanges as calcularResumoDosRangesUtil,
-  expandirSetoresDosDetalhes as expandirSetoresDosDetalhesUtil,
-  inferirDestinoPorDetalhes as inferirDestinoPorDetalhesUtil,
-  normalizarDetalhes as normalizarDetalhesUtil,
-  normalizarDetalhesExistentes as normalizarDetalhesExistentesUtil,
   obterQuantidadeCartelas as obterQuantidadeCartelasUtil,
   obterTipoCartelaPorQuantidadeCartelas as obterTipoCartelaPorQuantidadeCartelasUtil,
-  possuiSobreposicao as possuiSobreposicaoUtil,
-  validarDestinoComDetalhes as validarDestinoComDetalhesUtil,
-  validarDetalhesInternos as validarDetalhesInternosUtil,
 } from './edicoes-range.util';
+import { obterTotalCombinacoesCartela as obterTotalCombinacoesCartelaUtil } from './edicoes-sequencia.util';
 import { serializarEdicao as serializarEdicaoUtil } from './edicoes-serialization.util';
-import type {
-  DetalheRangeNormalizado,
-  EdicaoComRelacoes,
-} from './edicoes.types';
+import type { EdicaoComRelacoes } from './edicoes.types';
 
 interface ComboEdicaoNormalizado {
   origemParticipacao: OrigemParticipacao;
   tipoCartela: TipoCartela;
   preco: Prisma.Decimal;
+  rangeInicio: bigint;
+  rangeFinal: bigint;
 }
 
 interface PremioDetalhadoNormalizado {
@@ -73,19 +62,12 @@ export class EdicoesService {
   ) {}
 
   async create(dto: CreateEdicaoDto) {
-    const detalhes = this.normalizarDetalhes(dto.detalhes);
     const combos = this.normalizarCombos(dto.combos);
-    this.validarDetalhesInternos(detalhes);
-    this.validarCombosComDetalhes(combos, detalhes);
-    const qtdNumerosCartela =
-      await this.resolverQtdNumerosCartelaPelaMatriz(detalhes);
-    this.validarCapacidadeCartelas(detalhes, qtdNumerosCartela);
+    this.validarCombos(combos);
+    const qtdNumerosCartela = await this.resolverQtdNumerosCartela(combos);
+    this.validarCapacidadeCombos(combos, qtdNumerosCartela);
     const qtdPremios = dto.premios.length;
-
-    const status = StatusEdicao.RASCUNHO;
-
-    const destino = dto.destino ?? this.inferirDestinoPorDetalhes(detalhes);
-    this.validarDestinoComDetalhes(destino, detalhes);
+    const { rangeInicio, rangeFinal } = this.calcularRangesDosCombosDaEdicao(combos);
 
     const dataSorteio = this.parseDateTime(dto.dataSorteio, 'dataSorteio');
     const dataEncerramento = dto.dataEncerramento
@@ -94,7 +76,6 @@ export class EdicoesService {
     this.validarDatas(dataEncerramento, dataSorteio);
     this.validarDataEncerramentoFutura(dataEncerramento);
 
-    const { rangeInicio, rangeFinal } = this.calcularResumoDosRanges(detalhes);
     const imagemUrl = await this.resolverImagemUrl(
       `edicoes/${dto.numero}`,
       dto.imagemBase64,
@@ -110,63 +91,41 @@ export class EdicoesService {
           numero: dto.numero,
           dataSorteio,
           dataEncerramento,
-          valorCartela: this.resolverValorCartelaEdicao(
-            dto.valorCartela,
-            combos,
-          ),
+          valorCartela: this.resolverValorCartelaEdicao(dto.valorCartela, combos),
           qtdNumerosCartela,
           rangeInicio,
           rangeFinal,
           qtdPremios,
-          destino,
+          destino: dto.destino ?? DestinoEdicao.SITE,
           raspadinha: dto.raspadinha,
           frase: dto.frase,
           imagemUrl: imagemUrl ?? null,
           manutencaoAtiva: dto.manutencaoAtiva ?? false,
-          manutencaoMensagem: this.normalizarMensagemManutencao(
-            dto.manutencaoMensagem,
-          ),
-          status,
-          detalhes: {
-            create: detalhes.map((detalhe) => ({
-              origemParticipacao: detalhe.origemParticipacao,
-              tipoCartela: detalhe.tipoCartela,
-              indiceRange: detalhe.indiceRange,
-              rangeInicio: detalhe.rangeInicio,
-              rangeFinal: detalhe.rangeFinal,
-              preco: null,
-            })),
-          },
+          manutencaoMensagem: this.normalizarMensagemManutencao(dto.manutencaoMensagem),
+          status: StatusEdicao.RASCUNHO,
           combos: {
             create: combos.map((combo) => ({
               origemParticipacao: combo.origemParticipacao,
               tipoCartela: combo.tipoCartela,
               preco: combo.preco,
+              rangeInicio: combo.rangeInicio,
+              rangeFinal: combo.rangeFinal,
             })),
           },
         },
         include: EDICAO_INCLUDE,
       });
 
-      await this.sincronizarPremiosDetalhados(
-        tx,
-        created.id,
-        premiosDetalhados,
-      );
+      await this.sincronizarPremiosDetalhados(tx, created.id, premiosDetalhados);
 
-      return tx.edicao.findUnique({
-        where: { id: created.id },
-        include: EDICAO_INCLUDE,
-      });
+      return tx.edicao.findUnique({ where: { id: created.id }, include: EDICAO_INCLUDE });
     });
 
     if (!item) {
       throw new NotFoundException('Edição não encontrada após a criação');
     }
 
-    this.logger.log(
-      `Edição ${item.numero} criada com ${detalhes.length} detalhe(s)`,
-    );
+    this.logger.log(`Edição ${item.numero} criada com ${combos.length} combo(s)`);
     return {
       message: 'Edição criada com sucesso.',
       data: await this.serializarEdicaoComEstoque(item),
@@ -229,43 +188,26 @@ export class EdicoesService {
     };
   }
 
-  async update(
-    id: string,
-    dto: UpdateEdicaoDto,
-  ) {
+  async update(id: string, dto: UpdateEdicaoDto) {
     const atual = await this.obterEdicaoOuFalhar(id);
 
-    const detalhesEfetivos = dto.detalhes
-      ? this.normalizarDetalhes(dto.detalhes)
-      : this.normalizarDetalhesExistentes(atual);
-    const qtdNumerosCartelaEfetivo = dto.detalhes
-      ? await this.resolverQtdNumerosCartelaPelaMatriz(detalhesEfetivos)
-      : atual.qtdNumerosCartela;
     const combosEfetivos = dto.combos
       ? this.normalizarCombos(dto.combos)
       : this.normalizarCombosExistentes(atual);
-    const qtdPremiosEfetivo = dto.premios
-      ? dto.premios.length
-      : atual.qtdPremios;
 
-    if (dto.detalhes) {
-      this.validarDetalhesInternos(detalhesEfetivos);
-      this.validarCapacidadeCartelas(
-        detalhesEfetivos,
-        qtdNumerosCartelaEfetivo,
-      );
+    if (dto.combos) {
+      this.validarCombos(combosEfetivos);
     }
 
-    if (dto.combos || dto.detalhes) {
-      this.validarCombosComDetalhes(combosEfetivos, detalhesEfetivos);
+    const qtdNumerosCartelaEfetivo = dto.combos
+      ? await this.resolverQtdNumerosCartela(combosEfetivos)
+      : atual.qtdNumerosCartela;
+
+    if (dto.combos) {
+      this.validarCapacidadeCombos(combosEfetivos, qtdNumerosCartelaEfetivo);
     }
 
-    const destinoEfetivo =
-      dto.destino ??
-      (dto.detalhes
-        ? this.inferirDestinoPorDetalhes(detalhesEfetivos)
-        : atual.destino);
-    this.validarDestinoComDetalhes(destinoEfetivo, detalhesEfetivos);
+    const qtdPremiosEfetivo = dto.premios ? dto.premios.length : atual.qtdPremios;
 
     const dataSorteio = dto.dataSorteio
       ? this.parseDateTime(dto.dataSorteio, 'dataSorteio')
@@ -276,13 +218,15 @@ export class EdicoesService {
         : atual.dataEncerramento;
     this.validarDatas(dataEncerramento, dataSorteio);
 
-    const resumoRanges = dto.detalhes
-      ? this.calcularResumoDosRanges(detalhesEfetivos)
+    const resumoRanges = dto.combos
+      ? this.calcularRangesDosCombosDaEdicao(combosEfetivos)
       : undefined;
+
     const valorCartelaEfetivo =
       dto.valorCartela !== undefined
         ? this.normalizarValorCartela(dto.valorCartela)
         : undefined;
+
     const imagemUrl = await this.resolverImagemUrl(
       `edicoes/${dto.numero ?? atual.numero}`,
       dto.imagemBase64,
@@ -305,43 +249,19 @@ export class EdicoesService {
         ...(dto.numero !== undefined ? { numero: dto.numero } : {}),
         ...(dto.dataSorteio ? { dataSorteio } : {}),
         ...(dto.dataEncerramento !== undefined ? { dataEncerramento } : {}),
-        ...(valorCartelaEfetivo !== undefined
-          ? { valorCartela: valorCartelaEfetivo }
-          : {}),
-        ...(dto.detalhes
-          ? { qtdNumerosCartela: qtdNumerosCartelaEfetivo }
-          : {}),
+        ...(valorCartelaEfetivo !== undefined ? { valorCartela: valorCartelaEfetivo } : {}),
+        ...(dto.combos ? { qtdNumerosCartela: qtdNumerosCartelaEfetivo } : {}),
         ...(dto.premios ? { qtdPremios: qtdPremiosEfetivo } : {}),
         ...(dto.destino ? { destino: dto.destino } : {}),
         ...(dto.raspadinha !== undefined ? { raspadinha: dto.raspadinha } : {}),
         ...(dto.frase !== undefined ? { frase: dto.frase } : {}),
-        ...(dto.manutencaoAtiva !== undefined
-          ? { manutencaoAtiva: dto.manutencaoAtiva }
-          : {}),
+        ...(dto.manutencaoAtiva !== undefined ? { manutencaoAtiva: dto.manutencaoAtiva } : {}),
         ...(dto.manutencaoMensagem !== undefined
-          ? {
-              manutencaoMensagem: this.normalizarMensagemManutencao(
-                dto.manutencaoMensagem,
-              ),
-            }
+          ? { manutencaoMensagem: this.normalizarMensagemManutencao(dto.manutencaoMensagem) }
           : {}),
         ...(imagemUrl !== undefined ? { imagemUrl } : {}),
-        ...(resumoRanges ? resumoRanges : {}),
+        ...(resumoRanges ?? {}),
       };
-
-      if (dto.detalhes) {
-        data.detalhes = {
-          deleteMany: {},
-          create: detalhesEfetivos.map((detalhe) => ({
-            origemParticipacao: detalhe.origemParticipacao,
-            tipoCartela: detalhe.tipoCartela,
-            indiceRange: detalhe.indiceRange,
-            rangeInicio: detalhe.rangeInicio,
-            rangeFinal: detalhe.rangeFinal,
-            preco: null,
-          })),
-        };
-      }
 
       if (dto.combos) {
         data.combos = {
@@ -350,23 +270,19 @@ export class EdicoesService {
             origemParticipacao: combo.origemParticipacao,
             tipoCartela: combo.tipoCartela,
             preco: combo.preco,
+            rangeInicio: combo.rangeInicio,
+            rangeFinal: combo.rangeFinal,
           })),
         };
       }
 
-      await tx.edicao.update({
-        where: { id },
-        data,
-      });
+      await tx.edicao.update({ where: { id }, data });
 
       if (premiosDetalhados) {
         await this.sincronizarPremiosDetalhados(tx, id, premiosDetalhados);
       }
 
-      return tx.edicao.findUnique({
-        where: { id },
-        include: EDICAO_INCLUDE,
-      });
+      return tx.edicao.findUnique({ where: { id }, include: EDICAO_INCLUDE });
     });
 
     if (!item) throw new NotFoundException('Edição não encontrada');
@@ -619,49 +535,6 @@ export class EdicoesService {
     };
   }
 
-  private normalizarDetalhes(
-    detalhes: CreateEdicaoDetalheDto[],
-  ): DetalheRangeNormalizado[] {
-    return normalizarDetalhesUtil(detalhes);
-  }
-
-  private normalizarDetalhesExistentes(
-    edicao: EdicaoComRelacoes,
-  ): DetalheRangeNormalizado[] {
-    return normalizarDetalhesExistentesUtil(edicao);
-  }
-
-  private validarDetalhesInternos(detalhes: DetalheRangeNormalizado[]): void {
-    validarDetalhesInternosUtil(detalhes);
-  }
-
-  private validarCapacidadeCartelas(
-    detalhes: DetalheRangeNormalizado[],
-    qtdNumerosCartela: number,
-  ): void {
-    const totalCartelas = this.calcularTotalBilhetesDosDetalhes(detalhes);
-    const totalCombinacoes = obterTotalCombinacoesCartela(qtdNumerosCartela);
-
-    if (totalCartelas > totalCombinacoes) {
-      throw new BadRequestException(
-        `A edição exige ${totalCartelas.toString()} cartelas, mas só existem ${totalCombinacoes.toString()} combinações únicas possíveis com ${qtdNumerosCartela} números entre 1 e 50`,
-      );
-    }
-  }
-
-  private validarDestinoComDetalhes(
-    destino: DestinoEdicao,
-    detalhes: DetalheRangeNormalizado[],
-  ): void {
-    validarDestinoComDetalhesUtil(destino, detalhes);
-  }
-
-  private inferirDestinoPorDetalhes(
-    detalhes: DetalheRangeNormalizado[],
-  ): DestinoEdicao {
-    return inferirDestinoPorDetalhesUtil(detalhes);
-  }
-
   private validarDatas(dataEncerramento: Date, dataSorteio: Date): void {
     if (
       Number.isNaN(dataEncerramento.getTime()) ||
@@ -728,78 +601,44 @@ export class EdicoesService {
     faltantes: number;
     pronto: boolean;
   }> {
-    const detalhes = this.normalizarDetalhesExistentes(edicao);
-
-    if (detalhes.length === 0) {
-      return {
-        esperados: 0,
-        existentes: 0,
-        faltantes: 0,
-        pronto: true,
-      };
+    if (edicao.combos.length === 0) {
+      return { esperados: 0, existentes: 0, faltantes: 0, pronto: true };
     }
 
-    const esperadosBigInt = this.calcularTotalBilhetesDosDetalhes(detalhes);
-    const esperados = Number(esperadosBigInt);
-    const setores = this.expandirSetoresDosDetalhes(detalhes);
+    const esperados = edicao.combos.reduce(
+      (total, combo) => total + Number(combo.rangeFinal - combo.rangeInicio + 1n),
+      0,
+    );
 
-    // Conta quantas linhas da MatrizRange existem dentro de todos os setores
-    // derivados da matriz base de cada tipo de cartela.
     const existentes = await this.prisma.matrizRange.count({
       where: {
-        OR: setores.map((setor) => ({
-          numero: {
-            gte: setor.rangeInicio,
-            lte: setor.rangeFinal,
-          },
+        OR: edicao.combos.map((combo) => ({
+          numero: { gte: combo.rangeInicio, lte: combo.rangeFinal },
         })),
       },
     });
 
     const faltantes = Math.max(esperados - existentes, 0);
-
-    return {
-      esperados,
-      existentes,
-      faltantes,
-      pronto: faltantes === 0,
-    };
+    return { esperados, existentes, faltantes, pronto: faltantes === 0 };
   }
 
-  private calcularResumoDosRanges(detalhes: DetalheRangeNormalizado[]): {
-    rangeInicio: bigint;
-    rangeFinal: bigint;
-  } {
-    return calcularResumoDosRangesUtil(detalhes);
-  }
-
-  private expandirSetoresDosDetalhes(detalhes: DetalheRangeNormalizado[]) {
-    return expandirSetoresDosDetalhesUtil(detalhes);
-  }
-
-  private calcularTotalBilhetesDosDetalhes(
-    detalhes: DetalheRangeNormalizado[],
-  ): bigint {
-    return calcularTotalBilhetesDosDetalhesUtil(detalhes);
-  }
-
-  private normalizarCombos(
-    combos: CreateEdicaoComboDto[],
-  ): ComboEdicaoNormalizado[] {
+  private normalizarCombos(combos: CreateEdicaoComboDto[]): ComboEdicaoNormalizado[] {
     return combos.map((combo) => ({
       origemParticipacao: combo.origemParticipacao,
       tipoCartela: this.resolverTipoCartelaCombo(combo),
       preco: this.normalizarValorCartela(combo.preco),
+      rangeInicio: BigInt(combo.rangeInicio),
+      rangeFinal: BigInt(combo.rangeFinal),
     }));
   }
 
-  private normalizarCombosExistentes(
-    edicao: EdicaoComRelacoes,
-  ): ComboEdicaoNormalizado[] {
+  private normalizarCombosExistentes(edicao: EdicaoComRelacoes): ComboEdicaoNormalizado[] {
     return edicao.combos.map((combo) => ({
       origemParticipacao: combo.origemParticipacao,
       tipoCartela: combo.tipoCartela,
       preco: combo.preco,
+      rangeInicio: combo.rangeInicio,
+      rangeFinal: combo.rangeFinal,
     }));
   }
 
@@ -811,92 +650,113 @@ export class EdicoesService {
 
     if (combo.quantidadeCartelas !== undefined && !tipoCartelaPelaQuantidade) {
       throw new BadRequestException(
-        `quantidadeCartelas inválida no combo da origem ${combo.origemParticipacao}: ${combo.quantidadeCartelas}. Informe um valor entre 1 e 12`,
+        `quantidadeCartelas inválida no combo: ${combo.quantidadeCartelas}. Informe um valor entre 1 e 12`,
       );
     }
 
-    if (
-      combo.tipoCartela &&
-      tipoCartelaPelaQuantidade &&
-      combo.tipoCartela !== tipoCartelaPelaQuantidade
-    ) {
+    if (combo.tipoCartela && tipoCartelaPelaQuantidade && combo.tipoCartela !== tipoCartelaPelaQuantidade) {
       throw new BadRequestException(
-        `Combo da origem ${combo.origemParticipacao} possui conflito entre o campo legado de cartelas e quantidadeCartelas (${combo.quantidadeCartelas})`,
+        `Conflito entre tipoCartela e quantidadeCartelas (${combo.quantidadeCartelas}) no combo`,
       );
     }
 
-    if (combo.tipoCartela) {
-      return combo.tipoCartela;
-    }
+    if (combo.tipoCartela) return combo.tipoCartela;
+    if (tipoCartelaPelaQuantidade) return tipoCartelaPelaQuantidade;
 
-    if (tipoCartelaPelaQuantidade) {
-      return tipoCartelaPelaQuantidade;
-    }
-
-    throw new BadRequestException(
-      `Informe quantidadeCartelas para o combo da origem ${combo.origemParticipacao}`,
-    );
+    throw new BadRequestException('Informe quantidadeCartelas para o combo');
   }
 
-  private validarCombosComDetalhes(
-    combos: ComboEdicaoNormalizado[],
-    detalhes: DetalheRangeNormalizado[],
-  ): void {
+  private validarCombos(combos: ComboEdicaoNormalizado[]): void {
     if (combos.length === 0) {
       throw new BadRequestException('Informe ao menos um combo para a edição');
     }
 
-    const chavesCombos = new Set<string>();
+    const chaves = new Set<string>();
+    for (const combo of combos) {
+      const qtd = this.obterQuantidadeCartelas(combo.tipoCartela);
+      const chave = `${combo.origemParticipacao}:${qtd}`;
+      if (chaves.has(chave)) {
+        throw new ConflictException(`Combo duplicado: ${qtd} cartela(s) para ${combo.origemParticipacao}`);
+      }
+      chaves.add(chave);
+
+      if (combo.rangeFinal < combo.rangeInicio) {
+        throw new BadRequestException(
+          `rangeFinal deve ser maior ou igual ao rangeInicio no combo de ${qtd} cartela(s)`,
+        );
+      }
+    }
+
+    const ordenados = [...combos].sort((a, b) =>
+      a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0,
+    );
+    for (let i = 1; i < ordenados.length; i++) {
+      const prev = ordenados[i - 1];
+      const curr = ordenados[i];
+      if (curr.rangeInicio <= prev.rangeFinal) {
+        throw new ConflictException(
+          `Ranges dos combos se sobrepõem: ${prev.rangeInicio}-${prev.rangeFinal} e ${curr.rangeInicio}-${curr.rangeFinal}`,
+        );
+      }
+    }
+  }
+
+  private calcularRangesDosCombosDaEdicao(combos: ComboEdicaoNormalizado[]): {
+    rangeInicio: bigint;
+    rangeFinal: bigint;
+  } {
+    const rangeInicio = combos.reduce(
+      (min, c) => (c.rangeInicio < min ? c.rangeInicio : min),
+      combos[0].rangeInicio,
+    );
+    const rangeFinal = combos.reduce(
+      (max, c) => (c.rangeFinal > max ? c.rangeFinal : max),
+      combos[0].rangeFinal,
+    );
+    return { rangeInicio, rangeFinal };
+  }
+
+  private async resolverQtdNumerosCartela(combos: ComboEdicaoNormalizado[]): Promise<number> {
+    let qtdNumerosCartela: number | null = null;
 
     for (const combo of combos) {
-      if (
-        combo.origemParticipacao !== OrigemParticipacao.DIGITAL &&
-        combo.origemParticipacao !== OrigemParticipacao.POS
-      ) {
+      const linhaMatriz = await this.prisma.matrizRange.findFirst({
+        where: { numero: { gte: combo.rangeInicio, lte: combo.rangeFinal } },
+        orderBy: { numero: 'asc' },
+        select: { sequenciaBolas: true },
+      });
+
+      if (!linhaMatriz) {
         throw new BadRequestException(
-          `origemParticipacao em combos aceita apenas DIGITAL ou POS. Recebido: ${combo.origemParticipacao}`,
+          `A matriz precisa estar carregada para o intervalo ${combo.rangeInicio}-${combo.rangeFinal} antes de salvar. Faça o upload do XLSX/CSV e tente novamente.`,
+        );
+      }
+      if (linhaMatriz.sequenciaBolas.length === 0) {
+        throw new BadRequestException(
+          `A matriz carregada para o intervalo ${combo.rangeInicio}-${combo.rangeFinal} não possui sequência de bolas válida`,
         );
       }
 
-      const quantidadeCartelasCombo = this.obterQuantidadeCartelas(
-        combo.tipoCartela,
+      qtdNumerosCartela ??= linhaMatriz.sequenciaBolas.length;
+    }
+
+    return qtdNumerosCartela as number;
+  }
+
+  private validarCapacidadeCombos(
+    combos: ComboEdicaoNormalizado[],
+    qtdNumerosCartela: number,
+  ): void {
+    const totalCartelas = combos.reduce(
+      (total, combo) => total + (combo.rangeFinal - combo.rangeInicio + 1n),
+      0n,
+    );
+    const totalCombinacoes = obterTotalCombinacoesCartelaUtil(qtdNumerosCartela);
+
+    if (totalCartelas > totalCombinacoes) {
+      throw new BadRequestException(
+        `Os combos exigem ${totalCartelas.toString()} cartelas, mas só existem ${totalCombinacoes.toString()} combinações únicas possíveis com ${qtdNumerosCartela} números entre 1 e 50`,
       );
-      const chave = `${combo.origemParticipacao}:${quantidadeCartelasCombo}`;
-
-      if (chavesCombos.has(chave)) {
-        throw new ConflictException(
-          `Combo duplicado para ${combo.origemParticipacao}/${quantidadeCartelasCombo} cartela(s)`,
-        );
-      }
-
-      chavesCombos.add(chave);
-
-      const detalheDaOrigem = detalhes.find(
-        (detalhe) =>
-          detalhe.origemParticipacao ===
-          (combo.origemParticipacao === OrigemParticipacao.POS
-            ? OrigemParticipacao.FISICO
-            : OrigemParticipacao.DIGITAL),
-      );
-
-      if (!detalheDaOrigem) {
-        throw new BadRequestException(
-          `A origem ${combo.origemParticipacao} do combo não possui ranges configurados`,
-        );
-      }
-
-      const origemDetalhe =
-        combo.origemParticipacao === OrigemParticipacao.POS
-          ? OrigemParticipacao.FISICO
-          : OrigemParticipacao.DIGITAL;
-      const quantidadeRangesDaOrigem = detalhes.filter(
-        (detalhe) => detalhe.origemParticipacao === origemDetalhe,
-      ).length;
-      if (quantidadeCartelasCombo > quantidadeRangesDaOrigem) {
-        throw new BadRequestException(
-          `O combo da origem ${combo.origemParticipacao} exige ${quantidadeCartelasCombo} cartela(s), mas essa origem possui apenas ${quantidadeRangesDaOrigem} ranges configurados`,
-        );
-      }
     }
   }
 
@@ -907,79 +767,18 @@ export class EdicoesService {
     if (valorCartela !== undefined) {
       return this.normalizarValorCartela(valorCartela);
     }
-
-    const comboUmaChanceDigital = combos.find(
-      (combo) =>
-        combo.origemParticipacao === OrigemParticipacao.DIGITAL &&
-        combo.tipoCartela === TipoCartela.UMA_CHANCE,
-    );
-
-    if (comboUmaChanceDigital) {
-      return comboUmaChanceDigital.preco;
-    }
-
-    const comboUmaChance = combos.find(
-      (combo) => combo.tipoCartela === TipoCartela.UMA_CHANCE,
-    );
-
-    if (comboUmaChance) {
-      return comboUmaChance.preco;
-    }
-
+    const comboUmaChance = combos.find((c) => c.tipoCartela === TipoCartela.UMA_CHANCE);
+    if (comboUmaChance) return comboUmaChance.preco;
     if (combos.length === 0) {
-      throw new BadRequestException(
-        'Não foi possível definir valorCartela sem combos configurados',
-      );
+      throw new BadRequestException('Não foi possível definir valorCartela sem combos configurados');
     }
-
     throw new BadRequestException(
-      'valorCartela é obrigatório quando os combos não incluem cartela única',
+      'valorCartela é obrigatório quando os combos não incluem cartela única (1 cartela)',
     );
   }
 
   private normalizarValorCartela(valorCartela: string): Prisma.Decimal {
     return new Prisma.Decimal(valorCartela.replace(',', '.'));
-  }
-
-  private async resolverQtdNumerosCartelaPelaMatriz(
-    detalhes: DetalheRangeNormalizado[],
-  ): Promise<number> {
-    const setores = this.expandirSetoresDosDetalhes(detalhes);
-
-    if (setores.length === 0) {
-      throw new BadRequestException(
-        'Não foi possível calcular a cartela sem setores válidos na edição',
-      );
-    }
-
-    const linhaMatriz = await this.prisma.matrizRange.findFirst({
-      where: {
-        OR: setores.map((setor) => ({
-          numero: {
-            gte: setor.rangeInicio,
-            lte: setor.rangeFinal,
-          },
-        })),
-      },
-      orderBy: { numero: 'asc' },
-      select: {
-        sequenciaBolas: true,
-      },
-    });
-
-    if (!linhaMatriz) {
-      throw new BadRequestException(
-        'A matriz precisa estar carregada para o intervalo da edição antes de salvar. Faça o upload do XLSX/CSV e tente novamente.',
-      );
-    }
-
-    if (linhaMatriz.sequenciaBolas.length === 0) {
-      throw new BadRequestException(
-        'A matriz carregada não possui sequência de bolas válida para a edição',
-      );
-    }
-
-    return linhaMatriz.sequenciaBolas.length;
   }
 
   private normalizarValorPremio(valor: string): Prisma.Decimal {
@@ -1091,13 +890,6 @@ export class EdicoesService {
         });
       }
     }
-  }
-
-  private possuiSobreposicao(
-    atual: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
-    comparado: Pick<DetalheRangeNormalizado, 'rangeInicio' | 'rangeFinal'>,
-  ): boolean {
-    return possuiSobreposicaoUtil(atual, comparado);
   }
 
   private serializarEdicao(edicao: EdicaoComRelacoes) {

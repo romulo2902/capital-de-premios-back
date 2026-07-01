@@ -714,7 +714,7 @@ export class RelatoriosService {
 
     const edicao = await this.prisma.edicao.findUniqueOrThrow({
       where: { id: edicaoId },
-      include: { detalhes: true },
+      include: { combos: true },
     });
 
     const bilhetes = await this.prisma.bilhete.findMany({
@@ -773,19 +773,11 @@ export class RelatoriosService {
       );
     }
 
-    const rangesMap = new Map<string, { inicio: bigint; fim: bigint }>();
-    for (const detalhe of edicao.detalhes) {
-      const key = String(detalhe.rangeInicio);
-      if (!rangesMap.has(key)) {
-        rangesMap.set(key, {
-          inicio: detalhe.rangeInicio,
-          fim: detalhe.rangeFinal,
-        });
-      }
-    }
-    const ranges = [...rangesMap.values()].sort((a, b) =>
-      a.inicio < b.inicio ? -1 : a.inicio > b.inicio ? 1 : 0,
-    );
+    const ranges = [...edicao.combos]
+      .sort((a, b) =>
+        a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0,
+      )
+      .map((c) => ({ inicio: c.rangeInicio, fim: c.rangeFinal }));
     const rangesStr = ranges
       .map(
         (r) =>

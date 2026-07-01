@@ -8,8 +8,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  EdicaoCombo,
-  EdicaoDetalhe,
   OrigemParticipacao,
   Prisma,
   PrismaClient,
@@ -38,7 +36,6 @@ import {
 } from './vendas.constants';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 import {
-  expandirSetoresDosDetalhes,
   obterQuantidadeCartelas,
   obterTipoCartelaPorQuantidadeCartelas,
 } from '../edicoes/edicoes-range.util';
@@ -51,20 +48,22 @@ import {
 } from '../../common/utils/data-nascimento.util';
 import { EmailService } from '../../common/email/email.service';
 
-type DetalheVenda = Pick<
-  EdicaoDetalhe,
-  | 'origemParticipacao'
-  | 'tipoCartela'
-  | 'rangeInicio'
-  | 'rangeFinal'
-  | 'preco'
-  | 'indiceRange'
->;
 
-type ComboVenda = Pick<
-  EdicaoCombo,
-  'origemParticipacao' | 'tipoCartela' | 'preco'
->;
+type ComboVenda = {
+  id: string;
+  origemParticipacao: OrigemParticipacao;
+  tipoCartela: TipoCartela;
+  preco: Prisma.Decimal;
+  rangeInicio: bigint;
+  rangeFinal: bigint;
+};
+
+type SetorCombo = {
+  rangeInicio: bigint;
+  rangeFinal: bigint;
+  rangeTotalInicio: bigint;
+  rangeTotalFinal: bigint;
+};
 
 type MatrizDisponivel = {
   id: string;
@@ -79,9 +78,9 @@ type ComboSelecionadoPersistido = {
 };
 
 interface ConfiguracaoVendaResolvida {
-  detalhes: DetalheVenda[];
+  combo: ComboVenda;
   tipoCartelaSelecionada: TipoCartela;
-  precoCombo: Prisma.Decimal | null;
+  precoCombo: Prisma.Decimal;
   quantidadeCartelas: number;
 }
 
@@ -121,9 +120,17 @@ export class VendasService {
     // 1. Validar edição
     const edicao = await this.prisma.edicao.findUnique({
       where: { id: dto.edicaoId },
-      include: {
-        detalhes: true,
-        combos: true,
+      select: {
+        id: true,
+        numero: true,
+        status: true,
+        manutencaoAtiva: true,
+        manutencaoMensagem: true,
+        dataEncerramento: true,
+        valorCartela: true,
+        combos: {
+          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
+        },
       },
     });
 
@@ -148,34 +155,23 @@ export class VendasService {
     const quantidadeCartelasSolicitada =
       this.resolverQuantidadeCartelasSolicitada(dto);
 
-    let comboSelecionado: EdicaoCombo | null = null;
-    let tipoCartelaSolicitada: TipoCartela = TipoCartela.UMA_CHANCE;
+    let tipoCartelaSolicitada: TipoCartela | undefined;
 
     if (dto.comboId) {
-      comboSelecionado =
-        edicao.combos.find((c) => c.id === dto.comboId) ?? null;
-      if (!comboSelecionado) {
+      const comboEncontrado = edicao.combos.find((c) => c.id === dto.comboId);
+      if (!comboEncontrado) {
         throw new BadRequestException(
           'Combo selecionado não foi encontrado na edição',
         );
       }
-      tipoCartelaSolicitada = comboSelecionado.tipoCartela;
+      tipoCartelaSolicitada = comboEncontrado.tipoCartela;
     }
 
     const configuracaoVenda = this.resolverConfiguracaoDaVenda(
-      edicao.detalhes,
       edicao.combos,
       origemParticipacao,
       tipoCartelaSolicitada,
     );
-    const detalhesVenda = configuracaoVenda.detalhes;
-    const detalheVenda = detalhesVenda[0];
-
-    if (!detalheVenda) {
-      throw new BadRequestException(
-        'Não foi possível resolver os ranges da venda para a configuração informada',
-      );
-    }
 
     // 2. Buscar ou criar cliente por CPF
     const cpfLimpo = dto.cpf.replace(/\D/g, '');
@@ -450,25 +446,8 @@ export class VendasService {
         manutencaoMensagem: true,
         dataEncerramento: true,
         valorCartela: true,
-        rangeInicio: true,
-        rangeFinal: true,
-        detalhes: {
-          select: {
-            origemParticipacao: true,
-            tipoCartela: true,
-            rangeInicio: true,
-            rangeFinal: true,
-            preco: true,
-            indiceRange: true,
-          },
-          orderBy: [{ origemParticipacao: 'asc' }, { indiceRange: 'asc' }],
-        },
         combos: {
-          select: {
-            origemParticipacao: true,
-            tipoCartela: true,
-            preco: true,
-          },
+          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
         },
       },
@@ -496,7 +475,6 @@ export class VendasService {
     let configuracaoVenda: ConfiguracaoVendaResolvida;
     try {
       configuracaoVenda = this.resolverConfiguracaoDaVenda(
-        edicao.detalhes,
         edicao.combos,
         origemParticipacao,
         tipoCartelaSolicitada,
@@ -516,9 +494,7 @@ export class VendasService {
                 ? 'UNITARIO'
                 : 'COMBO',
             quantidadeCartelas: 0,
-            valorUnitarioCartela: this.formatarValorMonetario(
-              edicao.valorCartela,
-            ),
+            valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
             valorCombo: null,
             preco: null,
             passoEntreCartelas: '0',
@@ -534,51 +510,9 @@ export class VendasService {
       throw e;
     }
 
-    let detalhesEfetivos = configuracaoVenda.detalhes;
-    if (params.indiceRange) {
-      const detalheRange = detalhesEfetivos.find(
-        (d) => d.indiceRange === params.indiceRange,
-      );
-      if (detalheRange) {
-        detalhesEfetivos = [detalheRange];
-      } else {
-        // Se o indiceRange não existe para este combo/tipoCartela, podemos tentar pegar da edicao.detalhes direto (fallback para listagem isolada)
-        const detalheEdicao = edicao.detalhes.find(
-          (d) =>
-            d.indiceRange === params.indiceRange &&
-            d.origemParticipacao === origemParticipacao,
-        );
-        if (detalheEdicao) {
-          detalhesEfetivos = [
-            {
-              ...detalheEdicao,
-              tipoCartela: TipoCartela.UMA_CHANCE,
-              preco: null,
-            },
-          ];
-        } else {
-          throw new BadRequestException(
-            'O range especificado não está disponível nesta edição',
-          );
-        }
-      }
-    }
-    const detalheBase = detalhesEfetivos[0];
-
-    if (!detalheBase) {
-      throw new BadRequestException(
-        'Não foi possível resolver setores para os combos disponíveis',
-      );
-    }
-
     const quantidadeCartelas = configuracaoVenda.quantidadeCartelas;
-    const setores = expandirSetoresDosDetalhes(
-      detalhesEfetivos.map((detalhe, index) => ({
-        ...detalhe,
-        indiceRange: detalhe.indiceRange ?? index + 1,
-        ordemConfiguracao: index,
-      })),
-    );
+    const comboRange = configuracaoVenda.combo;
+    const setores = this.expandirSetoresDoCombo(comboRange, quantidadeCartelas);
     const primeiroSetor = setores[0];
     const segundoSetor = setores[1];
     const quantidadeCombosParaListar =
@@ -587,7 +521,8 @@ export class VendasService {
     const grupos = await this.selecionarGruposDisponiveisParaVenda(
       this.prisma,
       edicao.id,
-      detalhesEfetivos,
+      comboRange,
+      quantidadeCartelas,
       quantidadeCombosParaListar,
       {
         cursorNumeroBase: params.cursorNumeroBase
@@ -613,10 +548,7 @@ export class VendasService {
     const primeiroCombo = combos[0];
     const comboAtual =
       primeiroCombo && primeiroCombo.numeroBase
-        ? {
-            numeroBase: primeiroCombo.numeroBase,
-            bilhetes: primeiroCombo.bilhetes,
-          }
+        ? { numeroBase: primeiroCombo.numeroBase, bilhetes: primeiroCombo.bilhetes }
         : null;
 
     return {
@@ -632,20 +564,16 @@ export class VendasService {
             : 'COMBO',
         quantidadeCartelas,
         valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
-        valorCombo: configuracaoVenda.precoCombo
-          ? this.formatarValorMonetario(configuracaoVenda.precoCombo)
-          : null,
-        preco: this.formatarValorMonetario(
-          configuracaoVenda.precoCombo ?? edicao.valorCartela,
-        ),
+        valorCombo: this.formatarValorMonetario(configuracaoVenda.precoCombo),
+        preco: this.formatarValorMonetario(configuracaoVenda.precoCombo),
         passoEntreCartelas:
           primeiroSetor && segundoSetor
             ? (segundoSetor.rangeInicio - primeiroSetor.rangeInicio).toString()
             : '0',
         rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
         rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
-        setores: setores.map((setor) => ({
-          indiceCartela: setor.indiceCartela,
+        setores: setores.map((setor, i) => ({
+          indiceCartela: i + 1,
           rangeInicio: setor.rangeInicio.toString(),
           rangeFinal: setor.rangeFinal.toString(),
         })),
@@ -1899,25 +1827,8 @@ export class VendasService {
     const edicao = await tx.edicao.findUnique({
       where: { id: venda.edicaoId },
       select: {
-        rangeInicio: true,
-        rangeFinal: true,
-        detalhes: {
-          select: {
-            origemParticipacao: true,
-            tipoCartela: true,
-            rangeInicio: true,
-            rangeFinal: true,
-            preco: true,
-            indiceRange: true,
-          },
-          orderBy: [{ origemParticipacao: 'asc' }, { indiceRange: 'asc' }],
-        },
         combos: {
-          select: {
-            origemParticipacao: true,
-            tipoCartela: true,
-            preco: true,
-          },
+          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
         },
       },
@@ -1928,82 +1839,42 @@ export class VendasService {
     }
 
     const configuracaoVenda = this.resolverConfiguracaoDaVenda(
-      edicao.detalhes,
       edicao.combos,
       venda.origemParticipacao,
-      venda.tipoCartela,
+      venda.tipoCartela ?? undefined,
     );
-    const detalhesEfetivos = configuracaoVenda.detalhes;
+    const comboRange = configuracaoVenda.combo;
+    const quantidadeCartelasPorCombo = configuracaoVenda.quantidadeCartelas;
     const combosSelecionados =
       this.extrairCombosSelecionadosDaVenda(venda.gatewayPayload) ?? [];
 
     let matrizDisponiveis: MatrizDisponivel[] = [];
 
-    if (
-      venda.tipoCartela === TipoCartela.UMA_CHANCE &&
-      combosSelecionados.length > 0
-    ) {
-      // Quando é unitário e enviou números explícitos, os números já são ABSOLUTOS (podem ser de qualquer range)
+    if (combosSelecionados.length > 0) {
       const linhas = await tx.matrizRange.findMany({
         where: {
-          numero: { in: combosSelecionados },
+          numero: {
+            in: combosSelecionados,
+            gte: comboRange.rangeInicio,
+            lte: comboRange.rangeFinal,
+          },
           bilhetes: { none: { edicaoId: venda.edicaoId } },
         },
       });
       if (linhas.length < combosSelecionados.length) {
         throw new BadRequestException(
-          'Alguns bilhetes selecionados não estão mais disponíveis.',
+          'Alguns bilhetes selecionados não estão disponíveis ou estão fora do range deste combo.',
         );
       }
       matrizDisponiveis = linhas;
-    } else if (venda.tipoCartela === TipoCartela.UMA_CHANCE) {
-      const origemRanges = this.resolverOrigemDosRangesParaCombo(
-        venda.origemParticipacao,
-      );
-      const detalhesOrigem = edicao.detalhes
-        .filter((d) => d.origemParticipacao === origemRanges)
-        .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
-
-      if (detalhesOrigem.length === 0) {
-        throw new BadRequestException('Edição sem ranges configurados');
-      }
-
-      const gruposDisponiveis: MatrizDisponivel[][] = [];
-      const numerosReservadosAEvitar: string[] = [];
-      let indiceDetalheAtual = 0;
-
-      for (let i = 0; i < venda.quantidade; i++) {
-        const detalheAtual = detalhesOrigem[indiceDetalheAtual];
-        const res = await this.selecionarGruposDisponiveisParaVenda(
-          tx,
-          venda.edicaoId,
-          [detalheAtual],
-          1,
-          {
-            strict: true,
-            numerosReservadosAEvitar,
-          },
-        );
-        gruposDisponiveis.push(...res);
-        res
-          .flat()
-          .forEach((linha) =>
-            numerosReservadosAEvitar.push(linha.numero.toString()),
-          );
-        indiceDetalheAtual = (indiceDetalheAtual + 1) % detalhesOrigem.length;
-      }
-      matrizDisponiveis = gruposDisponiveis.flat();
     } else {
       const gruposDisponiveis = await this.selecionarGruposDisponiveisParaVenda(
         tx,
         venda.edicaoId,
-        detalhesEfetivos,
+        comboRange,
+        quantidadeCartelasPorCombo,
         venda.quantidade,
-        {
-          strict: true,
-          numerosBaseSelecionados:
-            combosSelecionados.length > 0 ? combosSelecionados : undefined,
-        },
+        { strict: true },
       );
       matrizDisponiveis = gruposDisponiveis.flat();
     }
@@ -2027,8 +1898,9 @@ export class VendasService {
   private async selecionarGruposDisponiveisParaVenda(
     client: Prisma.TransactionClient | PrismaService | PrismaClient,
     edicaoId: string,
-    detalhes: DetalheVenda[],
-    quantidadeCartelas: number,
+    combo: { rangeInicio: bigint; rangeFinal: bigint },
+    quantidadeCartelasPorCombo: number,
+    quantidadeGrupos: number,
     options: {
       cursorNumeroBase?: bigint;
       direcao?: DirecaoCombo;
@@ -2037,25 +1909,16 @@ export class VendasService {
       numerosReservadosAEvitar?: string[];
     } = {},
   ): Promise<MatrizDisponivel[][]> {
-    const setores = expandirSetoresDosDetalhes(
-      detalhes.map((detalhe, index) => ({
-        ...detalhe,
-        indiceRange: detalhe.indiceRange ?? index + 1,
-        ordemConfiguracao: index,
-      })),
-    );
+    const setores = this.expandirSetoresDoCombo(combo, quantidadeCartelasPorCombo);
     const primeiroSetor = setores[0];
-    const quantidadeCartelasPorCombo = setores.length;
-    const rangeDescricao =
-      primeiroSetor && setores[setores.length - 1]
-        ? `${primeiroSetor.rangeTotalInicio.toString()}-${setores[setores.length - 1].rangeTotalFinal.toString()}`
-        : 'indefinido';
 
     if (!primeiroSetor) {
       throw new BadRequestException(
-        `O intervalo ${rangeDescricao} não suporta ${quantidadeCartelasPorCombo} cartelas`,
+        `O range ${combo.rangeInicio}-${combo.rangeFinal} não suporta ${quantidadeCartelasPorCombo} cartela(s)`,
       );
     }
+
+    const quantidadeCartelas = quantidadeGrupos;
 
     if ((options.numerosBaseSelecionados?.length ?? 0) > 0) {
       return this.montarGruposPorNumerosBaseSelecionados(
@@ -2328,206 +2191,51 @@ export class VendasService {
   }
 
   private resolverConfiguracaoDaVenda(
-    detalhes: DetalheVenda[],
-    combos: ComboVenda[] | undefined,
+    combos: ComboVenda[],
     origemParticipacao: OrigemParticipacao,
-    tipoCartela?: TipoCartela | null,
+    tipoCartela?: TipoCartela,
   ): ConfiguracaoVendaResolvida {
-    // POS reusa a configuração DIGITAL (não possui ranges/combos próprios).
-    const origemConfig = this.resolverOrigemDosRangesParaCombo(origemParticipacao);
+    const origemEfetiva = this.resolverOrigemDosRangesParaCombo(origemParticipacao);
+    const combosDaOrigem = combos.filter((c) => c.origemParticipacao === origemEfetiva);
 
-    if (tipoCartela === TipoCartela.UMA_CHANCE) {
-      return this.resolverConfiguracaoUnitariaDaVenda(detalhes, origemConfig);
-    }
-
-    const combosDaOrigem = (combos ?? []).filter(
-      (combo) => combo.origemParticipacao === origemConfig,
-    );
-
-    if (combosDaOrigem.length > 0) {
-      return this.resolverConfiguracaoDaVendaPorCombos(
-        detalhes,
-        combosDaOrigem,
-        origemConfig,
-        tipoCartela,
-      );
-    }
-
-    return this.resolverConfiguracaoDaVendaLegado(
-      detalhes,
-      origemConfig,
-      tipoCartela,
-    );
-  }
-
-  private resolverConfiguracaoUnitariaDaVenda(
-    detalhes: DetalheVenda[],
-    origemParticipacao: OrigemParticipacao,
-  ): ConfiguracaoVendaResolvida {
-    const origemRanges =
-      this.resolverOrigemDosRangesParaCombo(origemParticipacao);
-    const detalheUnitario = detalhes
-      .filter((detalhe) => detalhe.origemParticipacao === origemRanges)
-      .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0))[0];
-
-    if (!detalheUnitario) {
+    if (combosDaOrigem.length === 0) {
       throw new BadRequestException(
-        `A edição não possui range base para a origem ${origemParticipacao}`,
+        `A edição não possui combos configurados para a origem ${origemParticipacao}`,
       );
     }
 
-    return {
-      detalhes: [
-        {
-          ...detalheUnitario,
-          origemParticipacao: origemRanges,
-          tipoCartela: TipoCartela.UMA_CHANCE,
-          preco: null,
-          indiceRange: 1,
-        },
-      ],
-      tipoCartelaSelecionada: TipoCartela.UMA_CHANCE,
-      precoCombo: null,
-      quantidadeCartelas: 1,
-    };
-  }
-
-  private resolverConfiguracaoDaVendaPorCombos(
-    detalhes: DetalheVenda[],
-    combosDaOrigem: ComboVenda[],
-    origemParticipacao: OrigemParticipacao,
-    tipoCartela?: TipoCartela | null,
-  ): ConfiguracaoVendaResolvida {
-    const origemRanges =
-      this.resolverOrigemDosRangesParaCombo(origemParticipacao);
-    const detalhesDaOrigem = detalhes
-      .filter((detalhe) => detalhe.origemParticipacao === origemRanges)
-      .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
-
-    if (detalhesDaOrigem.length === 0) {
-      throw new BadRequestException(
-        `A edição não possui range base para a origem ${origemParticipacao}`,
-      );
-    }
-
-    const comboSelecionado = this.selecionarComboDaOrigem(
-      combosDaOrigem,
-      origemParticipacao,
-      tipoCartela,
-    );
-    const quantidadeCartelas = this.obterQuantidadeCartelasDaVenda(
-      comboSelecionado.tipoCartela,
-    );
-
-    if (detalhesDaOrigem.length < quantidadeCartelas) {
-      throw new BadRequestException(
-        `A origem ${origemParticipacao} possui ${detalhesDaOrigem.length} range(s), insuficiente para ${quantidadeCartelas} cartela(s)`,
-      );
-    }
-
-    const detalhesSelecionados: DetalheVenda[] = detalhesDaOrigem
-      .slice(0, quantidadeCartelas)
-      .map((detalhe, index) => ({
-        ...detalhe,
-        origemParticipacao: origemRanges,
-        tipoCartela: comboSelecionado.tipoCartela,
-        preco: comboSelecionado.preco,
-        indiceRange: index + 1,
-      }));
-
-    return {
-      detalhes: detalhesSelecionados,
-      tipoCartelaSelecionada: comboSelecionado.tipoCartela,
-      precoCombo: comboSelecionado.preco,
-      quantidadeCartelas,
-    };
-  }
-
-  private selecionarComboDaOrigem(
-    combosDaOrigem: ComboVenda[],
-    origemParticipacao: OrigemParticipacao,
-    tipoCartela?: TipoCartela | null,
-  ): ComboVenda {
+    let comboSelecionado: ComboVenda | undefined;
     if (tipoCartela) {
-      const comboDoTipo = combosDaOrigem.find(
-        (combo) => combo.tipoCartela === tipoCartela,
-      );
-
-      if (!comboDoTipo) {
-        const quantidadeCartelas =
-          this.obterQuantidadeCartelasDaVenda(tipoCartela);
+      comboSelecionado = combosDaOrigem.find((c) => c.tipoCartela === tipoCartela);
+      if (!comboSelecionado) {
         throw new BadRequestException(
-          `Quantidade de cartelas (${quantidadeCartelas}) não está disponível para a origem ${origemParticipacao}`,
+          `Tipo de cartela solicitado não está disponível para a origem ${origemParticipacao}`,
         );
       }
-
-      return comboDoTipo;
+    } else {
+      comboSelecionado =
+        combosDaOrigem.find((c) => c.tipoCartela === TipoCartela.UMA_CHANCE) ??
+        combosDaOrigem[0];
     }
-
-    const comboUmaChance = combosDaOrigem.find(
-      (combo) => combo.tipoCartela === TipoCartela.UMA_CHANCE,
-    );
-
-    if (comboUmaChance) {
-      return comboUmaChance;
-    }
-
-    // Sem tipo especificado e múltiplos combos: retorna o primeiro (menor quantidade de cartelas).
-    // Isso suporta navegação sem filtro no POS e outros canais.
-    return combosDaOrigem[0];
-  }
-
-  private resolverConfiguracaoDaVendaLegado(
-    detalhes: DetalheVenda[],
-    origemParticipacao: OrigemParticipacao,
-    tipoCartela?: TipoCartela | null,
-  ): ConfiguracaoVendaResolvida {
-    if (detalhes.length === 0) {
-      throw new BadRequestException(
-        'A edição não possui configuração de ranges para venda',
-      );
-    }
-
-    const origemRanges =
-      this.resolverOrigemDosRangesParaCombo(origemParticipacao);
-    const detalhesDaOrigem = detalhes
-      .filter((detalhe) => detalhe.origemParticipacao === origemRanges)
-      .sort((a, b) => (a.indiceRange ?? 0) - (b.indiceRange ?? 0));
-
-    if (detalhesDaOrigem.length === 0) {
-      throw new BadRequestException(
-        `A edição não possui configuração para a origem ${origemParticipacao}`,
-      );
-    }
-
-    const tipoCartelaSelecionada = tipoCartela ?? TipoCartela.UMA_CHANCE;
-    const quantidadeCartelas = this.obterQuantidadeCartelasDaVenda(
-      tipoCartelaSelecionada,
-    );
-
-    if (detalhesDaOrigem.length < quantidadeCartelas) {
-      throw new BadRequestException(
-        `A origem ${origemParticipacao} possui ${detalhesDaOrigem.length} range(s), insuficiente para ${quantidadeCartelas} cartela(s)`,
-      );
-    }
-
-    const detalhesSelecionados = detalhesDaOrigem
-      .slice(0, quantidadeCartelas)
-      .map((detalhe, index) => ({
-        ...detalhe,
-        tipoCartela: tipoCartelaSelecionada,
-        indiceRange: index + 1,
-      }));
-    const precoCombo =
-      detalhesSelecionados.find((detalhe) => detalhe.preco !== null)?.preco ??
-      null;
 
     return {
-      detalhes: detalhesSelecionados,
-      tipoCartelaSelecionada,
-      precoCombo,
-      quantidadeCartelas,
+      combo: comboSelecionado,
+      tipoCartelaSelecionada: comboSelecionado.tipoCartela,
+      precoCombo: comboSelecionado.preco,
+      quantidadeCartelas: this.obterQuantidadeCartelasDaVenda(comboSelecionado.tipoCartela),
     };
+  }
+
+  private expandirSetoresDoCombo(
+    combo: { rangeInicio: bigint; rangeFinal: bigint },
+    quantidadeCartelas: number,
+  ): SetorCombo[] {
+    return Array.from({ length: quantidadeCartelas }, (_, i) => ({
+      rangeInicio: combo.rangeInicio + BigInt(i),
+      rangeFinal: combo.rangeFinal - BigInt(quantidadeCartelas - 1 - i),
+      rangeTotalInicio: combo.rangeInicio,
+      rangeTotalFinal: combo.rangeFinal,
+    }));
   }
 
   private obterQuantidadeCartelasDaVenda(

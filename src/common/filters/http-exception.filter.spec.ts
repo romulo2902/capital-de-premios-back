@@ -55,6 +55,7 @@ describe('HttpExceptionFilter', () => {
       statusCode: 404,
       message: 'Cliente não encontrado',
       data: null,
+      error: 'Not Found',
     });
   });
 });

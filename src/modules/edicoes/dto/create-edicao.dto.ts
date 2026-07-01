@@ -12,10 +12,8 @@ import {
 } from 'class-validator';
 import { DestinoEdicao } from '@prisma/client';
 import { CreateEdicaoComboDto } from './create-edicao-combo.dto';
-import { CreateEdicaoDetalheDto } from './create-edicao-detalhe.dto';
 import {
   parseCombosInput,
-  parseDetalhesInput,
   parsePremiosInput,
 } from './edicao-input-parsers.util';
 import { CreateEdicaoPremioDto } from './create-edicao-premio.dto';
@@ -86,7 +84,7 @@ export class CreateEdicaoDto {
     enum: DestinoEdicao,
     example: DestinoEdicao.AMBOS,
     description:
-      'Destino da edição/cartela: site, loja física ou ambos. Se omitido, a API infere a partir dos detalhes enviados.',
+      'Destino da edição/cartela: site, loja física ou ambos. Se omitido, assume SITE.',
   })
   @IsOptional()
   @IsEnum(DestinoEdicao, { message: 'destino deve ser SITE, FISICO ou AMBOS' })
@@ -128,60 +126,25 @@ export class CreateEdicaoDto {
   manutencaoMensagem?: string;
 
   @ApiProperty({
-    type: 'object',
-    additionalProperties: {
-      type: 'array',
-      items: {
-        type: 'object',
-      },
-    },
-    example: {
-      DIGITAL: [
-        {
-          indiceRange: 1,
-          rangeInicio: '0000001',
-          rangeFinal: '0001000',
-        },
-        {
-          indiceRange: 2,
-          rangeInicio: '0001001',
-          rangeFinal: '0002000',
-        },
-      ],
-      FISICO: [
-        {
-          indiceRange: 1,
-          rangeInicio: '0000001',
-          rangeFinal: '0000500',
-        },
-      ],
-    },
-    description:
-      'Ranges por setor da edição. Aceita objeto agrupado por origem (`DIGITAL` e `FISICO`) ou array plano legado. Cada item representa um setor/range individual.',
-  })
-  @Transform(parseDetalhesInput)
-  @Type(() => CreateEdicaoDetalheDto)
-  @IsArray({ message: 'detalhes deve ser um array' })
-  @ArrayMinSize(1, { message: 'detalhes deve ter no mínimo 1 item' })
-  @ValidateNested({ each: true })
-  detalhes: CreateEdicaoDetalheDto[];
-
-  @ApiProperty({
     type: [CreateEdicaoComboDto],
     example: [
       {
         origemParticipacao: 'DIGITAL',
         quantidadeCartelas: 1,
         preco: '10.00',
+        rangeInicio: '0951000',
+        rangeFinal: '0952000',
       },
       {
         origemParticipacao: 'DIGITAL',
         quantidadeCartelas: 2,
         preco: '20.00',
+        rangeInicio: '0960000',
+        rangeFinal: '0961000',
       },
     ],
     description:
-      'Combos da edição com preço total por origem e quantidade de cartelas. Use sempre `quantidadeCartelas` como inteiro positivo. A cartela única usa `valorCartela` como valor unitário.',
+      'Combos da edição com preço, origem, quantidade de cartelas e range próprio (rangeInicio/rangeFinal). Use sempre `quantidadeCartelas` como inteiro entre 1 e 12. Os ranges dos combos não podem se sobrepor entre si.',
   })
   @Transform(parseCombosInput)
   @Type(() => CreateEdicaoComboDto)

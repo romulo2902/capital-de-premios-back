@@ -5,12 +5,14 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { FaixaPremiacao, Prisma, StatusEdicaoSena } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   buildPaginatedResponse,
   normalizePagination,
 } from '../../../common/utils/pagination.util';
+import { parseBusinessDateTime } from '../../../common/utils/business-date-time.util';
 import { S3UploadService } from '../../../common/s3/s3-upload.service';
 import { CreateEdicaoSenaDto } from './dto/create-edicao-sena.dto';
 import { UpdateEdicaoSenaDto } from './dto/update-edicao-sena.dto';
@@ -29,12 +31,17 @@ export class EdicoesSenaService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly s3UploadService: S3UploadService,
+    private readonly config: ConfigService,
   ) {}
 
   // ─── CREATE ────────────────────────────────────────────
 
   async create(dto: CreateEdicaoSenaDto) {
-    this.validarDatas(dto.dataEncerramento, dto.dataSorteioMegaSena);
+    const tz = this.getBusinessTimeZone();
+    const dataSorteioMegaSena = parseBusinessDateTime(dto.dataSorteioMegaSena, 'dataSorteioMegaSena', tz).date;
+    const dataEncerramento = parseBusinessDateTime(dto.dataEncerramento, 'dataEncerramento', tz).date;
+
+    this.validarDatas(dataEncerramento.toISOString(), dataSorteioMegaSena.toISOString());
     this.validarPremios(dto.premios);
 
     const existente = await this.prisma.edicaoSena.findUnique({
@@ -59,8 +66,8 @@ export class EdicoesSenaService {
         data: {
           numero: dto.numero,
           descricao: dto.descricao ?? null,
-          dataSorteioMegaSena: new Date(dto.dataSorteioMegaSena),
-          dataEncerramento: new Date(dto.dataEncerramento),
+          dataSorteioMegaSena,
+          dataEncerramento,
           valorCartela: new Prisma.Decimal(dto.valorCartela),
           imagemUrl: imagemUrl ?? null,
           premios: {
@@ -209,6 +216,7 @@ export class EdicoesSenaService {
 
   async update(id: string, dto: UpdateEdicaoSenaDto) {
     const atual = await this.obterOuFalhar(id);
+    const tz = this.getBusinessTimeZone();
 
     if (
       atual.status === StatusEdicaoSena.FINALIZADA ||
@@ -219,13 +227,16 @@ export class EdicoesSenaService {
       );
     }
 
-    if (dto.dataEncerramento || dto.dataSorteioMegaSena) {
-      const enc = dto.dataEncerramento
-        ? new Date(dto.dataEncerramento)
-        : atual.dataEncerramento;
-      const sort = dto.dataSorteioMegaSena
-        ? new Date(dto.dataSorteioMegaSena)
-        : atual.dataSorteioMegaSena;
+    const novaDataEncerramento = dto.dataEncerramento
+      ? parseBusinessDateTime(dto.dataEncerramento, 'dataEncerramento', tz).date
+      : null;
+    const novaDataSorteio = dto.dataSorteioMegaSena
+      ? parseBusinessDateTime(dto.dataSorteioMegaSena, 'dataSorteioMegaSena', tz).date
+      : null;
+
+    if (novaDataEncerramento || novaDataSorteio) {
+      const enc = novaDataEncerramento ?? atual.dataEncerramento;
+      const sort = novaDataSorteio ?? atual.dataSorteioMegaSena;
       this.validarDatas(enc.toISOString(), sort.toISOString());
     }
 
@@ -253,12 +264,8 @@ export class EdicoesSenaService {
         data: {
           ...(dto.numero ? { numero: dto.numero } : {}),
           ...(dto.descricao !== undefined ? { descricao: dto.descricao } : {}),
-          ...(dto.dataSorteioMegaSena
-            ? { dataSorteioMegaSena: new Date(dto.dataSorteioMegaSena) }
-            : {}),
-          ...(dto.dataEncerramento
-            ? { dataEncerramento: new Date(dto.dataEncerramento) }
-            : {}),
+          ...(novaDataSorteio ? { dataSorteioMegaSena: novaDataSorteio } : {}),
+          ...(novaDataEncerramento ? { dataEncerramento: novaDataEncerramento } : {}),
           ...(dto.valorCartela !== undefined
             ? { valorCartela: new Prisma.Decimal(dto.valorCartela) }
             : {}),
@@ -441,6 +448,10 @@ export class EdicoesSenaService {
         };
       }),
     );
+  }
+
+  private getBusinessTimeZone(): string {
+    return this.config.get<string>('APP_TIMEZONE', 'America/Sao_Paulo');
   }
 
   private validarDatas(dataEncerramento: string, dataSorteio: string): void {

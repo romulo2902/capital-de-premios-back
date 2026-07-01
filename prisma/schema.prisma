@@ -307,6 +307,8 @@ model EdicaoCombo {
   origemParticipacao OrigemParticipacao
   tipoCartela        TipoCartela
   preco              Decimal
+  rangeInicio        BigInt
+  rangeFinal         BigInt
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   edicao             Edicao             @relation(fields: [edicaoId], references: [id], onDelete: Cascade)
