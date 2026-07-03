@@ -362,8 +362,7 @@ a reserva (para 30 minutos) enquanto a cobrança PIX está pendente.
   @ApiResponse({ status: 401, description: 'Token inválido.' })
   @ApiResponse({
     status: 409,
-    description:
-      'Alguma cartela já está reservada em outra pré-compra (outro cliente/canal).',
+    description: 'Alguma cartela já está reservada em outra pré-compra (outro cliente/canal).',
   })
   @ApiResponse({ status: 404, description: 'Campanha não encontrada.' })
   @ApiResponse({
@@ -806,10 +805,10 @@ Cria um pedido Capital Sena com status **PENDENTE** e gera automaticamente a cob
 retornando o código Copia-e-Cola e a URL do QR Code para o bot enviar ao cliente.
 
 **Seleção das cartelas:**
-- \`modoSelecao\`: MANUAL ou SURPRESINHA, aplicado a todas as cartelas da venda.
-- \`numeros\`: lista enviada pelo frontend. Cada item tem exatamente 6 números de 1 a 60 e \`bola_extra\`.
-- \`quantidade\`: quantidade esperada de cartelas. Quando omitida, a API usa o tamanho de \`numeros\`.
-- \`comboSenaId\`: compra de combo — a quantidade de itens em \`numeros\` deve bater com a quantidade do combo.
+- \`cartelas\`: lista explícita (cada item \`MANUAL\` com 6 números de 1 a 60, ou \`SURPRESINHA\`).
+- \`quantidade\`: compra rápida unitária — gera N cartelas surpresinha automaticamente.
+- \`comboSenaId\`: compra de combo — se \`cartelas\` for omitido, gera automaticamente a
+  quantidade de cartelas do combo (surpresinha).
 
 **Autenticação:** Requer \`Authorization: Bearer {accessToken}\` obtido em \`POST /whatsapp/auth\`
 — os dados do cliente (CPF, nome, telefone, e-mail, data de nascimento) são resolvidos pelo token,
@@ -822,35 +821,22 @@ humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
   @ApiBody({
     type: CriarPedidoSenaWhatsappDto,
     examples: {
+      compraRapida: {
+        summary: 'Compra rápida unitária (surpresinha)',
+        value: { edicaoSenaId: 'c3d4e5f6-a7b8-9012-cdef-123456789012', quantidade: 2 },
+      },
       cartelaManual: {
-        summary: 'Cartela com números enviados pelo frontend',
+        summary: 'Cartela manual com números escolhidos',
         value: {
           edicaoSenaId: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
-          modoSelecao: 'MANUAL',
-          numeros: [
-            {
-              numeros: [3, 12, 24, 37, 45, 58],
-              bola_extra: 7,
-            },
-          ],
+          cartelas: [{ modoSelecao: 'MANUAL', numeros: [3, 12, 24, 37, 45, 58] }],
         },
       },
       combo: {
-        summary: 'Compra de combo com números enviados pelo frontend',
+        summary: 'Compra de combo (surpresinha automática)',
         value: {
           edicaoSenaId: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
           comboSenaId: 'fd2f8a0e-8ce6-4aa2-9c94-668c7530a111',
-          modoSelecao: 'SURPRESINHA',
-          numeros: [
-            {
-              numeros: [1, 2, 3, 4, 5, 6],
-              bola_extra: 7,
-            },
-            {
-              numeros: [8, 9, 10, 11, 12, 13],
-              bola_extra: 14,
-            },
-          ],
         },
       },
     },
@@ -869,12 +855,7 @@ humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
           totalFormatado: 'R$ 12,00',
           quantidadeCartelas: 3,
           campanha: { id: 'c3d4e5f6...', numero: '2026-15' },
-          cartelas: [
-            {
-              numerosEscolhidos: [3, 12, 24, 37, 45, 58],
-              modoSelecao: 'MANUAL',
-            },
-          ],
+          cartelas: [{ numerosEscolhidos: [3, 12, 24, 37, 45, 58], modoSelecao: 'MANUAL' }],
           pagamento: {
             tipo: 'PIX',
             pixCopiaECola: '00020126580014br.gov.bcb.pix0136...',
@@ -888,18 +869,13 @@ humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
   })
   @ApiResponse({
     status: 400,
-    description:
-      'Edição inativa, cartelas/combo inválidos ou cliente sem data de nascimento.',
+    description: 'Edição inativa, cartelas/combo inválidos ou cliente sem data de nascimento.',
   })
   @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
-  @ApiResponse({
-    status: 404,
-    description: 'Campanha ou combo não encontrado.',
-  })
+  @ApiResponse({ status: 404, description: 'Campanha ou combo não encontrado.' })
   @ApiResponse({
     status: 502,
-    description:
-      'Não foi possível gerar o PIX. O bot deve informar o cliente para tentar novamente.',
+    description: 'Não foi possível gerar o PIX. O bot deve informar o cliente para tentar novamente.',
   })
   criarPedidoSena(
     @Body() dto: CriarPedidoSenaWhatsappDto,
@@ -981,7 +957,7 @@ Retorna os números das cartelas Sena de um pedido **aprovado**.
 retorna a lista vazia com uma mensagem de aviso.
 
 **Estrutura retornada:** cada cartela tem \`numerosEscolhidos\` (6 números, 1 a 60),
-\`setimoNumero\` (a \`bola_extra\` recebida na compra) e \`modoSelecao\` (MANUAL ou SURPRESINHA).
+\`setimoNumero\` (gerado pelo sistema após a confirmação) e \`modoSelecao\` (MANUAL ou SURPRESINHA).
     `.trim(),
   })
   @ApiParam({
@@ -1006,11 +982,7 @@ retorna a lista vazia com uma mensagem de aviso.
           },
           totalCartelas: 1,
           cartelas: [
-            {
-              numerosEscolhidos: [3, 12, 24, 37, 45, 58],
-              setimoNumero: 41,
-              modoSelecao: 'MANUAL',
-            },
+            { numerosEscolhidos: [3, 12, 24, 37, 45, 58], setimoNumero: 41, modoSelecao: 'MANUAL' },
           ],
         },
       },
@@ -1046,28 +1018,10 @@ telefone ou ID específico.
 **Paginação:** Use \`page\` e \`limit\` para navegar pelo histórico.
     `.trim(),
   })
-  @ApiQuery({
-    name: 'pedidoId',
-    required: false,
-    description: 'Filtrar por ID de pedido específico.',
-  })
-  @ApiQuery({
-    name: 'telefone',
-    required: false,
-    description: 'Confirmar identidade por telefone.',
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Página (default: 1).',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Itens por página (default: 10, máx: 50).',
-  })
+  @ApiQuery({ name: 'pedidoId', required: false, description: 'Filtrar por ID de pedido específico.' })
+  @ApiQuery({ name: 'telefone', required: false, description: 'Confirmar identidade por telefone.' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Página (default: 1).' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página (default: 10, máx: 50).' })
   @ApiResponse({
     status: 200,
     description: 'Pedidos Sena retornados.',

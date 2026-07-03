@@ -966,8 +966,7 @@ export class WhatsappApiService {
 
     const vendaSenaDto: CreateVendaSenaDto = {
       edicaoSenaId: dto.edicaoSenaId,
-      modoSelecao: dto.modoSelecao,
-      numeros: dto.numeros,
+      cartelas: dto.cartelas,
       quantidade: dto.quantidade,
       comboSenaId: dto.comboSenaId,
       tipoPagamento: TipoPagamento.PIX,

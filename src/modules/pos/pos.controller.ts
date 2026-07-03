@@ -76,11 +76,10 @@ const POS_PREMIOS_VENDA_MANUAL_REQUEST_EXAMPLE = {
 const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
   tipoPagamento: 'PIX',
-  modoSelecao: 'MANUAL',
-  numeros: [
+  cartelas: [
     {
+      modoSelecao: 'MANUAL',
       numeros: [3, 12, 24, 37, 45, 58],
-      bola_extra: 7,
     },
   ],
   cpf: '98765432100',
@@ -94,11 +93,10 @@ const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
   comboSenaId: 'fd2f8a0e-8ce6-4aa2-9c94-668c7530a111',
   tipoPagamento: 'PIX',
-  modoSelecao: 'SURPRESINHA',
-  numeros: [
-    { numeros: [1, 2, 3, 4, 5, 6], bola_extra: 7 },
-    { numeros: [8, 9, 10, 11, 12, 13], bola_extra: 14 },
-    { numeros: [15, 16, 17, 18, 19, 20], bola_extra: 21 },
+  cartelas: [
+    { modoSelecao: 'SURPRESINHA' },
+    { modoSelecao: 'SURPRESINHA' },
+    { modoSelecao: 'SURPRESINHA' },
   ],
   cpf: '98765432100',
   nome: 'Maria Cliente',
@@ -225,8 +223,7 @@ a ele.
   })
   @ApiResponse({
     status: 401,
-    description:
-      'CPF não vinculado a vendedor/distribuidor, ou operador inativo.',
+    description: 'CPF não vinculado a vendedor/distribuidor, ou operador inativo.',
   })
   login(@Body() dto: LoginPosDto) {
     return this.posAuthService.login(dto);
@@ -238,8 +235,7 @@ a ele.
   @ApiTags(POS_AUTH_TAG)
   @ApiOperation({
     summary: '2. 🔒 Dados do operador logado (VENDEDOR + DISTRIBUIDOR)',
-    description:
-      'Retorna o operador atual do token — útil para o cabeçalho do terminal.',
+    description: 'Retorna o operador atual do token — útil para o cabeçalho do terminal.',
   })
   @ApiResponse({
     status: 200,
@@ -408,7 +404,8 @@ fazer um novo \`POST /pos/auth/login\`.
   @ApiBearerAuth()
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
-    summary: '5. 🔒 Listar opções configuradas — Prêmios (unitário e combos)',
+    summary:
+      '5. 🔒 Listar opções configuradas — Prêmios (unitário e combos)',
     description: `
 Lista as opções de venda configuradas para o canal **POS** na edição: compra
 unitária e combos, com quantidade de cartelas e preço. Use este endpoint para
@@ -466,7 +463,8 @@ Para itens do tipo **COMBO**, o campo \`id\` retornado nesta lista é o
   @ApiBearerAuth()
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
-    summary: '6. 🔒 Navegar cartelas/combos disponíveis — Prêmios',
+    summary:
+      '6. 🔒 Navegar cartelas/combos disponíveis — Prêmios',
     description: `
 Lista os combos/cotas disponíveis (1 por vez, navegação por cursor). A venda POS
 usa a configuração **DIGITAL** de ranges e preços e ignora cartelas já vendidas ou
@@ -656,7 +654,8 @@ reservadas em pré-compra.
   @ApiBearerAuth()
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
-    summary: '7. 🔒 Reservar cartelas/combos para pré-compra — Prêmios',
+    summary:
+      '7. 🔒 Reservar cartelas/combos para pré-compra — Prêmios',
     description: `
 Marca as cartelas escolhidas como **pré-compra** por 5 minutos para o operador
 do POS. Para combo, envie todos os números de \`comboAtual.bilhetes\` retornados
@@ -713,7 +712,8 @@ estende a reserva durante a cobrança PIX.
   @ApiBearerAuth()
   @ApiTags(POS_PREMIOS_TAG)
   @ApiOperation({
-    summary: '8. 🔒 Criar venda POS — Prêmios (VENDEDOR + DISTRIBUIDOR)',
+    summary:
+      '8. 🔒 Criar venda POS — Prêmios (VENDEDOR + DISTRIBUIDOR)',
     description: `
 Cria a venda com origem **POS**. O vendedor/distribuidor é definido pelo token
 (não envie no corpo).
@@ -791,10 +791,7 @@ Guarde o \`id\` retornado: ele pode ser usado para consultar status em
       },
     },
   })
-  @ApiResponse({
-    status: 400,
-    description: 'Edição inativa ou dados inválidos.',
-  })
+  @ApiResponse({ status: 400, description: 'Edição inativa ou dados inválidos.' })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
   criarVenda(@Body() dto: CreatePosVendaDto, @CurrentUser() user: RequestUser) {
     return this.posService.criarVenda(dto, user);
@@ -878,12 +875,7 @@ Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`, \`RECUSADO\` ou
             dataSorteioMegaSena: '2026-06-05T20:00:00.000Z',
             dataEncerramento: '2026-06-05T18:00:00.000Z',
             combos: [
-              {
-                id: 'combo-1',
-                nome: 'Combo 3 cartelas',
-                quantidade: 3,
-                preco: '12.00',
-              },
+              { id: 'combo-1', nome: 'Combo 3 cartelas', quantidade: 3, preco: '12.00' },
             ],
           },
         ],
@@ -905,10 +897,8 @@ Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`, \`RECUSADO\` ou
     description: `
 Cria a venda Sena com origem **POS**, status **PENDENTE** e cobrança no gateway
 pela própria API.
-Informe \`numeros\` com as cartelas já escolhidas pelo frontend
-e \`modoSelecao\` uma única vez para a venda. Cada item tem 6 números +
-\`bola_extra\`. Opcionalmente, informe \`comboSenaId\`. O vendedor/distribuidor vem
-do token.
+Informe as \`cartelas\` (MANUAL com 6 números, ou SURPRESINHA) e, opcionalmente,
+\`comboSenaId\`. O vendedor/distribuidor vem do token.
 
 Guarde o \`id\` para consultar status em
 \`GET /pos/capital-sena/vendas/{id}/pagamento\`. O terminal deve fazer polling a
@@ -926,7 +916,7 @@ cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
         value: POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE,
       },
       vendaComboSurpresinha: {
-        summary: 'Venda combo com números enviados pelo frontend',
+        summary: 'Venda combo com Surpresinha',
         value: POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE,
       },
     },
@@ -952,10 +942,7 @@ cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
       },
     },
   })
-  @ApiResponse({
-    status: 400,
-    description: 'Edição inativa ou cartelas inválidas.',
-  })
+  @ApiResponse({ status: 400, description: 'Edição inativa ou cartelas inválidas.' })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
   criarVendaSena(
     @Body() dto: CreatePosVendaSenaDto,
@@ -982,8 +969,7 @@ Sena. Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`,
   })
   @ApiParam({
     name: 'id',
-    description:
-      'ID da venda Sena (retornado em POST /pos/capital-sena/vendas)',
+    description: 'ID da venda Sena (retornado em POST /pos/capital-sena/vendas)',
     example: 'd4e5f6a7-b8c9-0123-defa-234567890123',
   })
   @ApiResponse({
