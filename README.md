@@ -276,13 +276,29 @@ npm run docker:up
 
 ## Deploy com Docker (Homologacao/Producao)
 
-1. Atualize o codigo e configure o arquivo de ambiente correto (`.env.homolog` ou `.env.production`).
+Homologacao e producao rodam em **pastas separadas** no servidor, cada uma com sua propria branch
+(`dev`/`develop` em homolog, `main` em producao) e seu proprio `.env` — o mesmo `docker-compose.yml`
+serve os dois ambientes, diferenciados só pelas variaveis do `.env` de cada pasta:
 
-   Em Docker Compose, o servico `api` le o arquivo `.env`. Na VPS, copie ou sincronize o
-   ambiente escolhido antes de subir:
+| Variavel | Producao | Homologacao |
+|---|---|---|
+| `NODE_ENV` | `production` | `homolog` |
+| `HOST` | `127.0.0.1` (atras de Nginx) | `0.0.0.0` (acesso direto por IP) |
+| `PORT` | `3000` | `3010` |
+| `COMPOSE_PROJECT_NAME` | `capital-premios-producao` | `capital-premios-homologacao` |
+
+`container_name` no `docker-compose.yml` usa `${NODE_ENV:-capital-premios-api}`, entao o container fica
+`production` ou `homolog` automaticamente. `COMPOSE_PROJECT_NAME` evita que as duas pastas (se tiverem o
+mesmo nome de diretorio) sejam tratadas como o mesmo projeto Compose.
+
+1. Atualize o codigo (`git pull origin main` em producao, `git pull origin develop` em homolog) e
+   confira o `.env` da pasta (`NODE_ENV`, `HOST`, `PORT`, `COMPOSE_PROJECT_NAME`, `DATABASE_URL`,
+   `REDIS_URL`).
+
+   Em Docker Compose, o servico `api` le o arquivo `.env`:
 
 ```bash
-cp .env.production .env
+cp .env.production .env   # ou .env.homolog, conforme a pasta
 ```
 
 2. Rebuild da imagem:
@@ -291,7 +307,8 @@ cp .env.production .env
 docker compose build api
 ```
 
-3. Suba a API:
+3. Suba a API — em producao, isso substitui o container anterior (mesmo nome/porta, breve indisponibilidade
+   ate o healthcheck ficar `healthy`); em homolog, sobe ao lado da producao sem conflito, portas diferentes:
 
 ```bash
 docker compose up -d api
@@ -303,11 +320,21 @@ docker compose up -d api
 docker compose logs -f api
 ```
 
+5. Confirme saude e porta certas:
+
+```bash
+docker ps --filter "name=production" --filter "name=homolog"
+curl -s http://127.0.0.1:${PORT:-3000}/api/health
+```
+
 Observacoes:
 
 - O container da API executa `npx prisma migrate deploy` no startup antes de subir o Nest.
 - Se precisar rodar migration manualmente: `docker compose exec api npx prisma migrate deploy`.
 - Se estiver usando Postgres/Redis locais no host, mantenha `network_mode: host` e URLs apontando para `localhost`.
+- `ecosystem.config.cjs` (PM2) nao fixa `PORT`/`HOST` no bloco `env` de proposito — se fixasse, o PM2
+  sobrescreveria o valor herdado do `.env` do container e os dois ambientes tentariam subir na mesma porta
+  (`EADDRINUSE`).
 
 ## Dominio da API na VPS
 
