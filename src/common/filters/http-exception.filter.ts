@@ -51,7 +51,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
       `[${request.method}] ${request.url} — ${status}: ${JSON.stringify(message)}`,
       stack,
     );
-    this.logPrismaDetails(exception, request);
 
     response.status(status).json({
       statusCode: status,
@@ -59,21 +58,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
       data: data ?? null,
       ...extras,
     });
-  }
-
-  private logPrismaDetails(exception: unknown, request: Request): void {
-    if (exception instanceof Prisma.PrismaClientKnownRequestError) {
-      this.logger.error(
-        `[${request.method}] ${request.url} — Prisma ${exception.code}: ${exception.message} | meta=${JSON.stringify(exception.meta)}`,
-      );
-      return;
-    }
-
-    if (exception instanceof Prisma.PrismaClientValidationError) {
-      this.logger.error(
-        `[${request.method}] ${request.url} — Prisma validation: ${exception.message}`,
-      );
-    }
   }
 
   private normalizeException(

@@ -10,7 +10,7 @@
  *   15% → Prêmios: combo 2 cartelas (navega + reserva + compra)
  *   15% → Prêmios: combo 3 cartelas (navega + reserva + compra)
  *   10% → Prêmios: combo 4 cartelas (navega + reserva + compra)
- *   13% → Sena: números gerados no cliente
+ *   13% → Sena: surpresinha
  *   12% → Sena: números manuais (6 dezenas aleatórias)
  *
  * Perfil de carga (RATE = compras/minuto, default 20):
@@ -94,17 +94,12 @@ export function setup() {
   const h = authHeaders(token);
 
   const edicoesRes = http.get(`${BASE_URL}/api/pos/edicoes`, { headers: h });
-  const edicoes =
-    edicoesRes.status === 200 ? JSON.parse(edicoesRes.body).data : [];
+  const edicoes = edicoesRes.status === 200 ? JSON.parse(edicoesRes.body).data : [];
   const edicaoId = edicoes && edicoes.length > 0 ? edicoes[0].id : null;
 
-  const senaRes = http.get(`${BASE_URL}/api/pos/capital-sena/edicoes`, {
-    headers: h,
-  });
-  const senaEdicoes =
-    senaRes.status === 200 ? JSON.parse(senaRes.body).data : [];
-  const edicaoSenaId =
-    senaEdicoes && senaEdicoes.length > 0 ? senaEdicoes[0].id : null;
+  const senaRes = http.get(`${BASE_URL}/api/pos/capital-sena/edicoes`, { headers: h });
+  const senaEdicoes = senaRes.status === 200 ? JSON.parse(senaRes.body).data : [];
+  const edicaoSenaId = senaEdicoes && senaEdicoes.length > 0 ? senaEdicoes[0].id : null;
 
   console.log(
     `Setup OK | RATE=${RATE}/min | edicaoId=${edicaoId} | edicaoSenaId=${edicaoSenaId}`,
@@ -138,8 +133,8 @@ export default function (data) {
     comprasPorTipo.add(1, { tipo: 'premios_combo4' });
     compraCombo(token, edicaoId, 4);
   } else if (rnd < 0.88 && edicaoSenaId) {
-    comprasPorTipo.add(1, { tipo: 'sena_cliente' });
-    compraSenaNumerosCliente(token, edicaoSenaId);
+    comprasPorTipo.add(1, { tipo: 'sena_surpresinha' });
+    compraSenaSurpresinha(token, edicaoSenaId);
   } else if (edicaoSenaId) {
     comprasPorTipo.add(1, { tipo: 'sena_manual' });
     compraSenaManual(token, edicaoSenaId);
@@ -234,15 +229,13 @@ function compraCombo(token, edicaoId, qtd) {
 
 // ─── Capital Sena ───────────────────────────────────────────────────────────
 
-function compraSenaNumerosCliente(token, edicaoSenaId) {
-  const cartela = sortearCartelaSena();
+function compraSenaSurpresinha(token, edicaoSenaId) {
   const start = Date.now();
   const res = http.post(
     `${BASE_URL}/api/pos/capital-sena/vendas`,
     JSON.stringify({
       edicaoSenaId,
-      modoSelecao: 'SURPRESINHA',
-      numeros: [cartela],
+      cartelas: [{ modoSelecao: 'SURPRESINHA' }],
       ...CLIENTE,
     }),
     { headers: authHeaders(token) },
@@ -250,22 +243,21 @@ function compraSenaNumerosCliente(token, edicaoSenaId) {
   gatewayMs.add(Date.now() - start);
 
   const ok = check(res, {
-    'sena_cliente: 201': (r) => r.status === 201,
-    'sena_cliente: tem pix': (r) => temPix(r),
+    'sena_surpresinha: 201': (r) => r.status === 201,
+    'sena_surpresinha: tem pix': (r) => temPix(r),
   });
   compraOk.add(ok ? 1 : 0);
-  if (!ok) logFalha('sena_cliente', res);
+  if (!ok) logFalha('sena_surpresinha', res);
 }
 
 function compraSenaManual(token, edicaoSenaId) {
-  const cartela = sortearCartelaSena();
+  const numeros = sortear6Dezenas();
   const start = Date.now();
   const res = http.post(
     `${BASE_URL}/api/pos/capital-sena/vendas`,
     JSON.stringify({
       edicaoSenaId,
-      modoSelecao: 'MANUAL',
-      numeros: [cartela],
+      cartelas: [{ modoSelecao: 'MANUAL', numeros }],
       ...CLIENTE,
     }),
     { headers: authHeaders(token) },
@@ -283,10 +275,7 @@ function compraSenaManual(token, edicaoSenaId) {
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 function authHeaders(token) {
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
+  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
 function temPix(res) {
@@ -298,9 +287,7 @@ function temPix(res) {
 }
 
 function logFalha(tipo, res) {
-  console.error(
-    `${tipo} FALHOU (${res.status}): ${res.body.substring(0, 250)}`,
-  );
+  console.error(`${tipo} FALHOU (${res.status}): ${res.body.substring(0, 250)}`);
 }
 
 function sortear6Dezenas() {
@@ -312,14 +299,4 @@ function sortear6Dezenas() {
     resultado.push(pool[i]);
   }
   return resultado.sort((a, b) => a - b);
-}
-
-function sortearCartelaSena() {
-  const dezenas = sortear6Dezenas();
-  let bolaExtra;
-  do {
-    bolaExtra = Math.floor(Math.random() * 60) + 1;
-  } while (dezenas.includes(bolaExtra));
-
-  return { numeros: dezenas, bola_extra: bolaExtra };
 }
