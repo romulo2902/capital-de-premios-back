@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsEmail,
   IsEnum,
@@ -12,8 +14,6 @@ import {
   Min,
   MinLength,
   ValidateNested,
-  ArrayMinSize,
-  ArrayMaxSize,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ModoSelecaoSena, TipoPagamento } from '@prisma/client';
@@ -28,25 +28,30 @@ const emptyStringToUndefined = ({ value }: { value: unknown }): unknown => {
   return trimmedValue ? trimmedValue : undefined;
 };
 
-export class ItemCartelaSenaDto {
-  @ApiPropertyOptional({
+export class ItemNumerosSenaDto {
+  @ApiProperty({
     type: [Number],
     example: [3, 12, 24, 37, 45, 58],
     description:
-      '6 números escolhidos (1–60). Obrigatório se modoSelecao=MANUAL. Omita para SURPRESINHA.',
+      '6 números escolhidos pelo frontend para a cartela Sena (1–60).',
   })
-  @IsOptional()
   @IsArray({ message: 'numeros deve ser um array' })
   @IsInt({ each: true, message: 'cada número deve ser um inteiro' })
   @Min(1, { each: true, message: 'números devem ser entre 1 e 60' })
   @Max(60, { each: true, message: 'números devem ser entre 1 e 60' })
   @ArrayMinSize(6, { message: 'numeros deve conter exatamente 6 números' })
   @ArrayMaxSize(6, { message: 'numeros deve conter exatamente 6 números' })
-  numeros?: number[];
+  numeros: number[];
 
-  @ApiProperty({ enum: ModoSelecaoSena, example: ModoSelecaoSena.MANUAL })
-  @IsEnum(ModoSelecaoSena, { message: 'modoSelecao deve ser MANUAL ou SURPRESINHA' })
-  modoSelecao: ModoSelecaoSena;
+  @ApiProperty({
+    example: 7,
+    description:
+      'Bola extra enviada pelo frontend. É persistida como o 7º número da cartela.',
+  })
+  @IsInt({ message: 'bola_extra deve ser um inteiro' })
+  @Min(1, { message: 'bola_extra deve estar entre 1 e 60' })
+  @Max(60, { message: 'bola_extra deve estar entre 1 e 60' })
+  bola_extra: number;
 }
 
 export class CreateVendaSenaDto {
@@ -54,24 +59,40 @@ export class CreateVendaSenaDto {
   @IsUUID('4', { message: 'edicaoSenaId deve ser um UUID válido' })
   edicaoSenaId: string;
 
-  @ApiPropertyOptional({
-    type: [ItemCartelaSenaDto],
+  @ApiProperty({
+    enum: ModoSelecaoSena,
+    example: ModoSelecaoSena.MANUAL,
     description:
-      'Lista explícita de cartelas (MANUAL=cliente digita os 6 números, SURPRESINHA=sistema gera). Omita para compra rápida — neste caso informe `quantidade` ou `comboSenaId` e o sistema gera todas as cartelas (surpresinha).',
+      'Origem da escolha dos números para todas as cartelas da venda. O frontend sempre envia os números, inclusive para SURPRESINHA.',
   })
-  @IsOptional()
-  @IsArray({ message: 'cartelas deve ser um array' })
+  @IsEnum(ModoSelecaoSena, {
+    message: 'modoSelecao deve ser MANUAL ou SURPRESINHA',
+  })
+  modoSelecao: ModoSelecaoSena;
+
+  @ApiProperty({
+    type: [ItemNumerosSenaDto],
+    example: [
+      {
+        numeros: [1, 2, 3, 4, 5, 6],
+        bola_extra: 7,
+      },
+    ],
+    description:
+      'Lista de cartelas Sena enviada pelo frontend. Cada item tem exatamente 6 números e a bola extra (7º número).',
+  })
+  @IsArray({ message: 'numeros deve ser um array' })
   @ValidateNested({ each: true })
-  @Type(() => ItemCartelaSenaDto)
-  @ArrayMinSize(1, { message: 'cartelas deve ter no mínimo 1 item' })
-  cartelas?: ItemCartelaSenaDto[];
+  @Type(() => ItemNumerosSenaDto)
+  @ArrayMinSize(1, { message: 'numeros deve ter no mínimo 1 item' })
+  numeros: ItemNumerosSenaDto[];
 
   @ApiPropertyOptional({
-    example: 5,
+    example: 3,
     minimum: 1,
     maximum: 1000,
     description:
-      'Compra rápida unitária: quantidade de cartelas a serem geradas automaticamente pelo sistema (todas SURPRESINHA, com 6 números + 7º aleatório). Ignorado quando `cartelas` é informado.',
+      'Quantidade esperada de cartelas. Quando omitida, a API usa a quantidade de itens em `numeros`.',
   })
   @IsOptional()
   @IsInt({ message: 'quantidade deve ser um número inteiro' })
@@ -82,7 +103,7 @@ export class CreateVendaSenaDto {
   @ApiPropertyOptional({
     example: 'uuid-do-combo',
     description:
-      'ID do combo. Quando informado sem `cartelas`, o sistema gera automaticamente `combo.quantidade` cartelas surpresinha (compra rápida combo).',
+      'ID do combo. Quando informado, a quantidade de itens em `numeros` deve bater com a quantidade do combo.',
   })
   @IsOptional()
   @IsUUID('4', { message: 'comboSenaId deve ser um UUID válido' })
@@ -109,7 +130,8 @@ export class CreateVendaSenaDto {
 
   @ApiProperty({
     example: 'maria@email.com',
-    description: 'E-mail do cliente. Obrigatório para envio do comprovante de compra.',
+    description:
+      'E-mail do cliente. Obrigatório para envio do comprovante de compra.',
   })
   @IsEmail({}, { message: 'e-mail inválido' })
   email!: string;

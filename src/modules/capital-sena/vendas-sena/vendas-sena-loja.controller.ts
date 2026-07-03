@@ -7,11 +7,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -31,7 +27,7 @@ export class VendasSenaLojaController {
   @Post('comprar')
   @ApiOperation({
     summary:
-      'Comprar cartela(s) Sena — aceita cartelas MANUAL/SURPRESINHA explícitas ou compra rápida via `quantidade` (unitário) ou `comboSenaId` (combo). Gera PIX/Cartão e aguarda confirmação.',
+      'Comprar cartela(s) Sena — recebe `numeros` do frontend com 6 números + bola extra. Gera PIX/Cartão e aguarda confirmação.',
   })
   comprar(@Body() dto: CreateVendaSenaDto) {
     return this.vendasSenaService.create(dto);
