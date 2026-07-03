@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
 
 @Injectable()
 export class BilhetesService {
@@ -7,9 +11,14 @@ export class BilhetesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  findAll(page = 1, limit = 20) {
     this.logger.log('Listando bilhete');
-    return { message: 'bilhete listados com sucesso', data: [] };
+    const pagination = normalizePagination(page, limit);
+
+    return buildPaginatedResponse([], 0, pagination.page, pagination.limit, {
+      successMessage: 'Bilhetes listados com sucesso',
+      emptyMessage: 'Nenhum bilhete encontrado',
+    });
   }
 
   async findOne(id: string) {

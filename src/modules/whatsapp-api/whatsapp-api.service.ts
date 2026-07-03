@@ -1,0 +1,1589 @@
+import {
+  BadGatewayException,
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../../prisma/prisma.service';
+import { VendasService } from '../vendas/vendas.service';
+import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
+import { PagamentosService } from '../pagamentos/pagamentos.service';
+import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
+import { RedisService } from '../../common/redis/redis.service';
+import {
+  OrigemParticipacao,
+  Prisma,
+  StatusEdicao,
+  StatusEdicaoSena,
+  StatusVenda,
+  StatusVendaSena,
+  TipoCartela,
+  TipoPagamento,
+} from '@prisma/client';
+import type { AuthWhatsappDto } from './dto/auth-whatsapp.dto';
+import type { CriarPedidoWhatsappDto } from './dto/criar-pedido-whatsapp.dto';
+import type { CriarPedidoSenaWhatsappDto } from './dto/criar-pedido-sena-whatsapp.dto';
+import type { PreviewCotasWhatsappDto } from './dto/preview-cotas-whatsapp.dto';
+import type { ConsultarPedidosWhatsappDto } from './dto/consultar-pedidos-whatsapp.dto';
+import type { ReservarCartelasWhatsappDto } from './dto/reservar-cartelas-whatsapp.dto';
+import type { CreateVendaSenaDto } from '../capital-sena/vendas-sena/dto/create-venda-sena.dto';
+import type { JwtPayload } from '../auth/auth.service';
+import {
+  obterQuantidadeCartelas,
+  obterTipoCartelaPorQuantidadeCartelas,
+} from '../edicoes/edicoes-range.util';
+import { mapearErroPagamento } from '../../common/errors/payment-error.util';
+import {
+  parseEValidarDataNascimento,
+  validarMaioridade,
+} from '../../common/utils/data-nascimento.util';
+
+const WHATSAPP_RESERVA_TTL_SEGUNDOS = 300;
+const WHATSAPP_PRE_COMPRA_TTL_SEGUNDOS = 1800;
+
+export type TipoCompraWhatsapp = 'UNITARIO' | 'COMBO';
+
+export interface OpcaoCompraWhatsapp {
+  tipoCompra: TipoCompraWhatsapp;
+  isCombo: boolean;
+  quantidadeCartelas: number;
+  valorUnitarioCartela: string;
+  valorUnitario: string;
+  valorCombo: string | null;
+  preco: string;
+  precoFormatado: string;
+}
+
+@Injectable()
+export class WhatsappApiService {
+  private readonly logger = new Logger(WhatsappApiService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+    private readonly config: ConfigService,
+    private readonly vendasService: VendasService,
+    private readonly vendasSenaService: VendasSenaService,
+    private readonly pagamentosService: PagamentosService,
+    private readonly paymentGatewayFactory: PaymentGatewayFactory,
+    private readonly redisService: RedisService,
+  ) {}
+
+  // ─── AUTH ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Registra ou autentica um cliente via CPF.
+   * Telefone é sempre obrigatório nesta rota.
+   * Se o cliente já existe, atualiza nome/telefone/email com os dados enviados.
+   */
+  async autenticarOuCriar(dto: AuthWhatsappDto) {
+    const cpfLimpo = dto.cpf.replace(/\D/g, '');
+    const telefoneLimpo = dto.telefone.replace(/\D/g, '');
+    const emailNormalizado = dto.email?.trim() || null;
+    if (!dto.dataNascimento) {
+      throw new BadRequestException(
+        'dataNascimento é obrigatória para cadastro do cliente',
+      );
+    }
+    const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
+
+    let cliente = await this.prisma.cliente.findUnique({
+      where: { cpf: cpfLimpo },
+    });
+
+    if (!cliente) {
+      cliente = await this.prisma.cliente.create({
+        data: {
+          cpf: cpfLimpo,
+          nome: dto.nome,
+          telefone: telefoneLimpo,
+          email: emailNormalizado,
+          dataNascimento,
+        },
+      });
+      this.logger.log(`Novo cliente criado via WhatsApp API: CPF ${cpfLimpo}`);
+    } else {
+      if (cliente.dataNascimento) {
+        validarMaioridade(cliente.dataNascimento);
+      }
+
+      await this.prisma.cliente.update({
+        where: { id: cliente.id },
+        data: {
+          nome: dto.nome,
+          telefone: telefoneLimpo,
+          ...(emailNormalizado ? { email: emailNormalizado } : {}),
+          ...(cliente.dataNascimento ? {} : { dataNascimento }),
+        },
+      });
+      cliente = {
+        ...cliente,
+        nome: dto.nome,
+        telefone: telefoneLimpo,
+        email: emailNormalizado ?? cliente.email,
+        dataNascimento: cliente.dataNascimento ?? dataNascimento,
+      };
+      this.logger.log(`Autenticação WhatsApp API: CPF ${cpfLimpo}`);
+    }
+
+    const payload: JwtPayload = {
+      sub: cliente.id,
+      perfil: 'CLIENTE',
+      cpf: cpfLimpo,
+    };
+
+    const accessToken = this.jwtService.sign(
+      payload,
+      this.getAccessTokenOptions(),
+    );
+    const refreshToken = this.jwtService.sign(
+      payload,
+      this.getRefreshTokenOptions(),
+    );
+
+    return {
+      message: cliente
+        ? 'Autenticação realizada com sucesso'
+        : 'Cliente cadastrado com sucesso',
+      data: {
+        accessToken,
+        refreshToken,
+        perfil: 'CLIENTE',
+        cliente: {
+          id: cliente.id,
+          nome: cliente.nome,
+          cpf: this.mascararCpf(cpfLimpo),
+          telefone: cliente.telefone,
+          email: cliente.email,
+        },
+      },
+    };
+  }
+
+  // ─── CAMPANHA ATIVA ────────────────────────────────────────────────────────
+
+  /**
+   * Retorna a edição ativa com todos os detalhes necessários para o bot:
+   * preços, opções de cartela, deadline de vendas e sorteio.
+   */
+  async consultarCampanhaAtiva() {
+    const edicao = await this.prisma.edicao.findFirst({
+      where: { status: StatusEdicao.ATIVA },
+      include: {
+        premios: { orderBy: { ordem: 'asc' } },
+        detalhes: {
+          where: { origemParticipacao: OrigemParticipacao.DIGITAL },
+          orderBy: { indiceRange: 'asc' },
+        },
+        combos: {
+          where: { origemParticipacao: OrigemParticipacao.DIGITAL },
+          orderBy: { tipoCartela: 'asc' },
+        },
+      },
+    });
+
+    if (!edicao) {
+      return {
+        message: 'Nenhuma campanha ativa no momento',
+        data: null,
+      };
+    }
+
+    const valorUnitarioCartela = this.formatarValorMonetario(
+      edicao.valorCartela,
+    );
+    const opcoesCompra = this.mapearOpcoesCompraDaCampanha(
+      edicao.combos,
+      edicao.valorCartela,
+    );
+
+    return {
+      message: 'Campanha ativa encontrada',
+      data: {
+        id: edicao.id,
+        numero: edicao.numero,
+        titulo: `Edição ${edicao.numero}`,
+        frase: edicao.frase,
+        imagemUrl: edicao.imagemUrl,
+        status: edicao.status,
+        dataSorteio: edicao.dataSorteio,
+        dataEncerramento: edicao.dataEncerramento,
+        valorCartela: valorUnitarioCartela,
+        valorUnitarioCartela,
+        qtdNumerosCartela: edicao.qtdNumerosCartela,
+        opcoesCompra,
+        premios: edicao.premios.map((p) => ({
+          ordem: p.ordem,
+          descricao: p.descricao,
+          valor: p.valor.toString(),
+          imagemUrl: p.imagemUrl,
+          valorFormatado: new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+          }).format(Number(p.valor)),
+        })),
+      },
+    };
+  }
+
+  // ─── PREVIEW DE COTAS ──────────────────────────────────────────────────────
+
+  /**
+   * Gera preview de combos disponíveis para a campanha informada.
+   * Exclui números já reservados (por este ou outro canal — POS/loja/WhatsApp
+   * compartilham o mesmo namespace `reserva:{edicaoId}:{numero}` no Redis).
+   * Não reserva nada: para travar a seleção antes de finalizar, use
+   * POST /whatsapp/campanhas/:id/reservas.
+   */
+  async previewCotas(edicaoId: string, dto: PreviewCotasWhatsappDto) {
+    const numerosReservados = await this.listarNumerosReservados(edicaoId);
+    return this.vendasService.listarCombosDisponiveis({
+      edicaoId,
+      origemParticipacao: OrigemParticipacao.DIGITAL,
+      tipoCartela: dto.tipoCartela,
+      quantidadeCartelas:
+        dto.quantidadeCartelas ?? (dto.tipoCartela ? undefined : 1),
+      cursorNumeroBase: dto.cursorNumeroBase,
+      direcao: dto.direcao ?? 'PROXIMO',
+      limit: dto.quantidade ?? 1,
+      numerosReservados,
+    });
+  }
+
+  // ─── RESERVA DE CARTELAS/COMBOS ─────────────────────────────────────────────
+
+  /**
+   * Reserva os números escolhidos por 5 minutos para o cliente autenticado —
+   * mesmo esquema usado no POS (`POST /pos/edicoes/:edicaoId/reservas`).
+   * Use antes de POST /whatsapp/pedidos para garantir que a seleção mostrada
+   * no preview não seja vendida para outro cliente/canal nesse intervalo.
+   */
+  async reservarCartelas(
+    edicaoId: string,
+    dto: ReservarCartelasWhatsappDto,
+    clienteId: string,
+  ) {
+    const edicao = await this.prisma.edicao.findUnique({
+      where: { id: edicaoId },
+      select: { id: true, numero: true, status: true },
+    });
+
+    if (!edicao) {
+      throw new NotFoundException('Campanha não encontrada');
+    }
+
+    if (edicao.status !== StatusEdicao.ATIVA) {
+      throw new BadRequestException('A campanha não está ativa');
+    }
+
+    const numeros = this.normalizarNumerosReserva(dto.cartelas);
+    const comprados = await this.prisma.bilhete.findMany({
+      where: {
+        edicaoId: edicao.id,
+        numero: { in: numeros.map((numero) => BigInt(numero)) },
+      },
+      select: { numero: true },
+    });
+
+    if (comprados.length > 0) {
+      throw new BadRequestException(
+        'Algumas cartelas selecionadas já foram vendidas',
+      );
+    }
+
+    await this.reservarNumerosNoRedis(
+      edicao.id,
+      numeros,
+      clienteId,
+      WHATSAPP_RESERVA_TTL_SEGUNDOS,
+    );
+
+    return {
+      message: 'Cartelas reservadas para pré-compra',
+      data: {
+        edicaoId: edicao.id,
+        edicaoNumero: edicao.numero,
+        reservadas: numeros.length,
+        cartelas: numeros.map((numero) => this.formatarNumeroBilhete(numero)),
+        expiresIn: WHATSAPP_RESERVA_TTL_SEGUNDOS,
+      },
+    };
+  }
+
+  // ─── CRIAR PEDIDO COM PIX ─────────────────────────────────────────────────
+
+  /**
+   * Cria o pedido (venda PENDENTE) e já dispara a geração do PIX no PagBank,
+   * tudo em uma única chamada. Retorna o `pixCopiaECola` para o bot
+   * enviar ao cliente via WhatsApp.
+   */
+  async criarPedidoComPix(dto: CriarPedidoWhatsappDto, clienteId: string) {
+    // Buscar cliente para obter CPF e nome
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: { id: true, cpf: true, nome: true },
+    });
+
+    if (!cliente) {
+      throw new UnauthorizedException('Cliente não encontrado');
+    }
+
+    // Buscar edição ativa
+    const edicao = await this.prisma.edicao.findUnique({
+      where: { id: dto.edicaoId },
+      include: { detalhes: true, combos: true },
+    });
+
+    if (!edicao) {
+      throw new NotFoundException('Campanha não encontrada');
+    }
+
+    if (edicao.status !== StatusEdicao.ATIVA) {
+      throw new BadRequestException(
+        `A campanha ${edicao.numero} não está ativa (status: ${edicao.status})`,
+      );
+    }
+
+    // Resolver tipo de cartela
+    const tipoCartela = this.resolverTipoCartela(dto);
+    const quantidadeCartelasPorCombo = obterQuantidadeCartelas(tipoCartela);
+    const compraUnitaria = this.isCartelaUnitaria(tipoCartela);
+    const combo = edicao.combos.find(
+      (c) =>
+        c.origemParticipacao === OrigemParticipacao.DIGITAL &&
+        c.tipoCartela === tipoCartela,
+    );
+
+    if (!compraUnitaria && !combo) {
+      throw new BadRequestException(
+        `Quantidade de cartelas (${quantidadeCartelasPorCombo}) não disponível para esta campanha`,
+      );
+    }
+
+    const valorSelecionado = compraUnitaria
+      ? Number(edicao.valorCartela)
+      : Number(combo!.preco);
+    const total = valorSelecionado * dto.quantidade;
+    const quantidadeCartelasCompra =
+      quantidadeCartelasPorCombo * dto.quantidade;
+
+    // Se o bot reservou números via POST /whatsapp/campanhas/:id/reservas,
+    // valida que a seleção ainda pertence a este cliente antes de criar a venda.
+    await this.garantirReservasSelecionadas(dto, clienteId);
+
+    // Criar venda PENDENTE
+    const venda = await this.prisma.venda.create({
+      data: {
+        edicaoId: edicao.id,
+        clienteId: cliente.id,
+        quantidade: dto.quantidade,
+        tipoCartela,
+        total: new Prisma.Decimal(total.toFixed(2)),
+        status: StatusVenda.PENDENTE,
+        origemParticipacao: OrigemParticipacao.DIGITAL,
+        tipoPagamento: TipoPagamento.PIX,
+        gatewayPayload: dto.combosSelecionados
+          ? ({
+              combosSelecionados: dto.combosSelecionados.map((c) => ({
+                numeroBase: c.numeroBase,
+              })),
+              origem: 'WHATSAPP',
+            } as unknown as Prisma.InputJsonValue)
+          : ({ origem: 'WHATSAPP' } as unknown as Prisma.InputJsonValue),
+      },
+    });
+
+    this.logger.log(
+      `Pedido WhatsApp criado: vendaId=${venda.id} clienteId=${clienteId} total=R$${total.toFixed(2)}`,
+    );
+
+    // Gerar cobrança PIX
+    let dadosPix: {
+      pixCopiaECola?: string;
+      qrCodeUrl?: string;
+      expiracaoMinutos: number;
+    } = { expiracaoMinutos: 60 };
+
+    try {
+      const gateway = this.paymentGatewayFactory.getGateway(TipoPagamento.PIX);
+      const cobranca = await gateway.criarCobranca({
+        vendaId: venda.id,
+        valorCentavos: Math.round(total * 100),
+        quantidadeItens: dto.quantidade,
+        valorUnitarioCentavos: Math.round(valorSelecionado * 100),
+        descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
+        cpfPagador: cliente.cpf,
+        nomePagador: cliente.nome,
+        expiracaoSegundos: 3600, // 60 minutos
+      });
+
+      await this.prisma.venda.update({
+        where: { id: venda.id },
+        data: {
+          gatewayId: cobranca.gatewayId,
+          gatewayPayload: {
+            ...((cobranca.payload as Record<string, unknown>) ?? {}),
+            origem: 'WHATSAPP',
+            ...(dto.combosSelecionados
+              ? {
+                  combosSelecionados: dto.combosSelecionados.map((c) => ({
+                    numeroBase: c.numeroBase,
+                  })),
+                }
+              : {}),
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      dadosPix = {
+        pixCopiaECola: cobranca.pixCopiaECola,
+        qrCodeUrl: cobranca.qrCodeBase64, // URL da imagem do QR Code
+        expiracaoMinutos: 60,
+      };
+
+      this.logger.log(
+        `PIX gerado para venda WhatsApp: vendaId=${venda.id} gatewayId=${cobranca.gatewayId}`,
+      );
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Erro ao gerar PIX para venda WhatsApp ${venda.id}: ${errorMessage}`,
+      );
+      const gatewayPayloadAtual =
+        venda.gatewayPayload &&
+        typeof venda.gatewayPayload === 'object' &&
+        !Array.isArray(venda.gatewayPayload)
+          ? (venda.gatewayPayload as Record<string, unknown>)
+          : {};
+
+      await this.prisma.venda.update({
+        where: { id: venda.id },
+        data: {
+          status: StatusVenda.RECUSADO,
+          gatewayPayload: {
+            ...gatewayPayloadAtual,
+            erroPagamento: errorMessage,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      const erroPagamento = mapearErroPagamento(errorMessage);
+      throw new BadGatewayException({
+        message: erroPagamento.userMessage,
+        errorCode: erroPagamento.errorCode,
+      });
+    }
+
+    // Estende a reserva (5min → 30min) para sobreviver ao tempo de pagamento do PIX.
+    await this.estenderReservasSelecionadas(dto, clienteId);
+
+    return {
+      message: 'Pedido criado com sucesso. Aguardando pagamento PIX.',
+      data: {
+        pedidoId: venda.id,
+        status: StatusVenda.PENDENTE,
+        total: total.toFixed(2),
+        totalFormatado: new Intl.NumberFormat('pt-BR', {
+          style: 'currency',
+          currency: 'BRL',
+        }).format(total),
+        quantidade: quantidadeCartelasCompra,
+        quantidadeCombos: dto.quantidade,
+        quantidadeCartelasPorCombo,
+        quantidadeCartelas: quantidadeCartelasCompra,
+        tipoCompra: compraUnitaria ? 'UNITARIO' : 'COMBO',
+        valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
+        valorCombo: compraUnitaria
+          ? null
+          : this.formatarValorMonetario(combo!.preco),
+        campanha: {
+          id: edicao.id,
+          numero: edicao.numero,
+        },
+        pagamento: {
+          tipo: 'PIX',
+          ...dadosPix,
+          instrucoes: dadosPix.pixCopiaECola
+            ? 'Copie o código PIX e pague no seu banco. O pedido é confirmado automaticamente após o pagamento.'
+            : 'PIX temporariamente indisponível. Entre em contato com o suporte.',
+        },
+      },
+    };
+  }
+
+  // ─── STATUS DO PAGAMENTO ───────────────────────────────────────────────────
+
+  /**
+   * Consulta o status do pagamento de um pedido.
+   * Valida que o pedido pertence ao cliente autenticado.
+   */
+  async consultarStatusPagamento(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.venda.findFirst({
+      where: { id: pedidoId, clienteId },
+      select: {
+        id: true,
+        status: true,
+        gatewayId: true,
+        gatewayPayload: true,
+        tipoPagamento: true,
+        total: true,
+        createdAt: true,
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    const statusLabel: Record<StatusVenda, string> = {
+      [StatusVenda.PENDENTE]: 'Aguardando pagamento',
+      [StatusVenda.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVenda.CANCELADO]: 'Pedido cancelado',
+      [StatusVenda.RECUSADO]: 'Pagamento recusado',
+    };
+
+    let statusGateway: string | undefined;
+
+    // Polling no gateway se pendente e com gatewayId
+    if (venda.status === StatusVenda.PENDENTE && venda.gatewayId) {
+      try {
+        const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
+          venda.tipoPagamento,
+          venda.gatewayPayload,
+        );
+        const resultado = await gateway.consultarCobranca(venda.gatewayId);
+        statusGateway = resultado.status;
+      } catch (error) {
+        this.logger.warn(
+          `Erro ao consultar gateway para venda ${pedidoId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    return {
+      message: 'Status do pagamento consultado',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        statusLabel: statusLabel[venda.status],
+        statusGateway,
+        total: venda.total.toString(),
+        criadoEm: venda.createdAt,
+        pago: venda.status === StatusVenda.APROVADO,
+      },
+    };
+  }
+
+  // ─── WEBHOOK PAGAMENTO ────────────────────────────────────────────────────
+
+  /**
+   * Alias do webhook PagBank para o canal WhatsApp.
+   * Delega ao PagamentosService — mesma lógica de confirmação.
+   */
+  async processarWebhookPagamento(body: Record<string, unknown>) {
+    this.logger.log(
+      'Webhook WhatsApp API recebido — delegando ao PagamentosService',
+    );
+    return this.pagamentosService.processarWebhookPix(body);
+  }
+
+  // ─── CARTELAS COMPRADAS ────────────────────────────────────────────────────
+
+  /**
+   * Retorna os números/bilhetes de um pedido aprovado.
+   * Equivalente ao "Meus Números" da loja pública.
+   */
+  async consultarCartelas(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.venda.findFirst({
+      where: { id: pedidoId, clienteId },
+      include: {
+        edicao: {
+          select: {
+            id: true,
+            numero: true,
+            dataSorteio: true,
+            qtdNumerosCartela: true,
+          },
+        },
+        bilhetes: { orderBy: { numero: 'asc' } },
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    if (venda.status !== StatusVenda.APROVADO) {
+      return {
+        message: 'Pedido ainda não confirmado',
+        data: {
+          pedidoId: venda.id,
+          status: venda.status,
+          statusLabel:
+            venda.status === StatusVenda.PENDENTE
+              ? 'Aguardando pagamento'
+              : 'Pedido cancelado/recusado',
+          cartelas: [],
+        },
+      };
+    }
+
+    const quantidadeCartelasPorCombo = venda.tipoCartela
+      ? obterQuantidadeCartelas(venda.tipoCartela)
+      : 1;
+    const totalBilhetes = venda.bilhetes.length;
+    const totalCartelas = totalBilhetes / quantidadeCartelasPorCombo;
+
+    // Agrupar bilhetes em cartelas/combos
+    const cartelas: Array<{
+      ordemCartela: number;
+      bilhetes: Array<{ numero: string; sequenciaBolas: number[] }>;
+    }> = [];
+
+    for (let i = 0; i < totalBilhetes; i += quantidadeCartelasPorCombo) {
+      const grupo = venda.bilhetes.slice(i, i + quantidadeCartelasPorCombo);
+      cartelas.push({
+        ordemCartela: Math.floor(i / quantidadeCartelasPorCombo) + 1,
+        bilhetes: grupo.map((b) => ({
+          numero: b.numero.toString().padStart(7, '0'),
+          sequenciaBolas: b.sequenciaBolas,
+        })),
+      });
+    }
+
+    return {
+      message: 'Cartelas encontradas com sucesso',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        campanha: {
+          id: venda.edicao.id,
+          numero: venda.edicao.numero,
+          dataSorteio: venda.edicao.dataSorteio,
+          qtdNumerosCartela: venda.edicao.qtdNumerosCartela,
+        },
+        totalCartelas,
+        totalBilhetes,
+        quantidadeCartelasPorCombo,
+        cartelas,
+      },
+    };
+  }
+
+  // ─── CONSULTAR PEDIDOS ────────────────────────────────────────────────────
+
+  /**
+   * Lista pedidos do cliente autenticado, com filtros opcionais.
+   * Segurança: sempre restrito ao clienteId do JWT.
+   */
+  async consultarPedidos(
+    clienteId: string,
+    filtros: ConsultarPedidosWhatsappDto,
+  ) {
+    // Validar cliente
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: { id: true, telefone: true },
+    });
+
+    if (!cliente) {
+      throw new UnauthorizedException('Cliente não encontrado');
+    }
+
+    // Validar filtro de telefone (confirmação — não permite acesso a outros clientes)
+    if (filtros.telefone) {
+      const telefoneLimpo = filtros.telefone.replace(/\D/g, '');
+      const clienteTelefone = cliente.telefone?.replace(/\D/g, '');
+      if (telefoneLimpo !== clienteTelefone) {
+        throw new BadRequestException(
+          'O telefone informado não corresponde ao cadastro do cliente autenticado',
+        );
+      }
+    }
+
+    const page = filtros.page ?? 1;
+    const limit = Math.min(filtros.limit ?? 10, 50);
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.VendaWhereInput = {
+      clienteId,
+      ...(filtros.pedidoId ? { id: filtros.pedidoId } : {}),
+    };
+
+    const [vendas, total] = await Promise.all([
+      this.prisma.venda.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          status: true,
+          tipoPagamento: true,
+          tipoCartela: true,
+          quantidade: true,
+          total: true,
+          gatewayId: true,
+          createdAt: true,
+          edicao: {
+            select: { id: true, numero: true, dataSorteio: true },
+          },
+          bilhetes: { select: { numero: true }, orderBy: { numero: 'asc' } },
+        },
+      }),
+      this.prisma.venda.count({ where }),
+    ]);
+
+    const statusLabel: Record<StatusVenda, string> = {
+      [StatusVenda.PENDENTE]: 'Aguardando pagamento',
+      [StatusVenda.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVenda.CANCELADO]: 'Cancelado',
+      [StatusVenda.RECUSADO]: 'Recusado',
+    };
+
+    return {
+      message: total > 0 ? 'Pedidos encontrados' : 'Nenhum pedido encontrado',
+      data: {
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+        pedidos: vendas.map((v) => {
+          const quantidadeCartelasPorCombo = v.tipoCartela
+            ? obterQuantidadeCartelas(v.tipoCartela)
+            : 1;
+          const quantidadeCartelas = this.obterQuantidadeCartelasDaCompra(
+            v.quantidade,
+            v.tipoCartela,
+            v.bilhetes.length,
+          );
+
+          return {
+            pedidoId: v.id,
+            status: v.status,
+            statusLabel: statusLabel[v.status],
+            campanha: {
+              id: v.edicao.id,
+              numero: v.edicao.numero,
+              dataSorteio: v.edicao.dataSorteio,
+            },
+            quantidade: quantidadeCartelas,
+            quantidadeCombos: v.quantidade,
+            quantidadeCartelasPorCombo,
+            quantidadeCartelas,
+            totalBilhetes: v.bilhetes.length,
+            total: v.total.toString(),
+            totalFormatado: new Intl.NumberFormat('pt-BR', {
+              style: 'currency',
+              currency: 'BRL',
+            }).format(Number(v.total)),
+            criadoEm: v.createdAt,
+            temCartelas: v.bilhetes.length > 0,
+          };
+        }),
+      },
+    };
+  }
+
+  // ─── DETALHE DE PEDIDO ────────────────────────────────────────────────────
+
+  async detalharPedido(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.venda.findFirst({
+      where: { id: pedidoId, clienteId },
+      select: {
+        id: true,
+        status: true,
+        tipoPagamento: true,
+        tipoCartela: true,
+        quantidade: true,
+        total: true,
+        gatewayId: true,
+        createdAt: true,
+        edicao: {
+          select: {
+            id: true,
+            numero: true,
+            dataSorteio: true,
+            dataEncerramento: true,
+            qtdNumerosCartela: true,
+          },
+        },
+        bilhetes: {
+          select: { numero: true, sequenciaBolas: true },
+          orderBy: { numero: 'asc' },
+        },
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    const statusLabel: Record<StatusVenda, string> = {
+      [StatusVenda.PENDENTE]: 'Aguardando pagamento',
+      [StatusVenda.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVenda.CANCELADO]: 'Cancelado',
+      [StatusVenda.RECUSADO]: 'Recusado',
+    };
+    const quantidadeCartelas = this.obterQuantidadeCartelasDaCompra(
+      venda.quantidade,
+      venda.tipoCartela,
+      venda.bilhetes.length,
+    );
+    const quantidadeCartelasPorCombo = venda.tipoCartela
+      ? obterQuantidadeCartelas(venda.tipoCartela)
+      : 1;
+
+    return {
+      message: 'Pedido encontrado',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        statusLabel: statusLabel[venda.status],
+        campanha: {
+          id: venda.edicao.id,
+          numero: venda.edicao.numero,
+          dataSorteio: venda.edicao.dataSorteio,
+          dataEncerramento: venda.edicao.dataEncerramento,
+          qtdNumerosCartela: venda.edicao.qtdNumerosCartela,
+        },
+        quantidade: quantidadeCartelas,
+        quantidadeCombos: venda.quantidade,
+        quantidadeCartelasPorCombo,
+        quantidadeCartelas,
+        total: venda.total.toString(),
+        totalFormatado: new Intl.NumberFormat('pt-BR', {
+          style: 'currency',
+          currency: 'BRL',
+        }).format(Number(venda.total)),
+        criadoEm: venda.createdAt,
+        totalBilhetes: venda.bilhetes.length,
+        bilhetes: venda.bilhetes.map((b) => ({
+          numero: b.numero.toString().padStart(7, '0'),
+          sequenciaBolas: b.sequenciaBolas,
+        })),
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — CAMPANHA ATIVA ─────────────────────────────────────────
+
+  /**
+   * Retorna a edição Sena ativa com combos e premiação, para o bot montar
+   * a oferta antes de criar o pedido.
+   */
+  async consultarCampanhaSenaAtiva() {
+    const edicao = await this.prisma.edicaoSena.findFirst({
+      where: { status: StatusEdicaoSena.ATIVA },
+      include: {
+        premios: true,
+        combos: { where: { ativo: true }, orderBy: { quantidade: 'asc' } },
+      },
+    });
+
+    if (!edicao) {
+      return { message: 'Nenhuma campanha Sena ativa no momento', data: null };
+    }
+
+    const valorUnitarioCartela = this.formatarValorMonetario(
+      edicao.valorCartela,
+    );
+
+    return {
+      message: 'Campanha Sena ativa encontrada',
+      data: {
+        id: edicao.id,
+        numero: edicao.numero,
+        titulo: `Capital Sena ${edicao.numero}`,
+        descricao: edicao.descricao,
+        imagemUrl: edicao.imagemUrl,
+        status: edicao.status,
+        dataSorteioMegaSena: edicao.dataSorteioMegaSena,
+        dataEncerramento: edicao.dataEncerramento,
+        valorCartela: valorUnitarioCartela,
+        combos: edicao.combos.map((combo) => ({
+          id: combo.id,
+          nome: combo.nome,
+          quantidade: combo.quantidade,
+          preco: this.formatarValorMonetario(combo.preco),
+          precoFormatado: this.formatarMoeda(Number(combo.preco)),
+        })),
+        premios: edicao.premios.map((premio) => ({
+          faixa: premio.faixa,
+          descricao: premio.descricao,
+          valor: premio.valor.toString(),
+          imagemUrl: premio.imagemUrl,
+          valorFormatado: this.formatarMoeda(Number(premio.valor)),
+        })),
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — CRIAR PEDIDO COM PIX ───────────────────────────────────
+
+  /**
+   * Cria o pedido Sena (venda PENDENTE) e gera a cobrança PIX no gateway,
+   * reaproveitando o VendasSenaService — mesma lógica usada pelo POS/loja.
+   * Os dados do cliente vêm do JWT (cliente já autenticado via POST /whatsapp/auth).
+   */
+  async criarPedidoSenaComPix(
+    dto: CriarPedidoSenaWhatsappDto,
+    clienteId: string,
+  ) {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+      },
+    });
+
+    if (!cliente) {
+      throw new UnauthorizedException('Cliente não encontrado');
+    }
+
+    if (!cliente.dataNascimento) {
+      throw new BadRequestException(
+        'Cliente sem data de nascimento cadastrada. Refaça a autenticação em POST /whatsapp/auth',
+      );
+    }
+
+    const vendaSenaDto: CreateVendaSenaDto = {
+      edicaoSenaId: dto.edicaoSenaId,
+      cartelas: dto.cartelas,
+      quantidade: dto.quantidade,
+      comboSenaId: dto.comboSenaId,
+      tipoPagamento: TipoPagamento.PIX,
+      cpf: cliente.cpf,
+      nome: cliente.nome,
+      telefone: cliente.telefone,
+      email: cliente.email ?? '',
+      dataNascimento: cliente.dataNascimento.toISOString().split('T')[0],
+    };
+
+    const resultado = await this.vendasSenaService.create(
+      vendaSenaDto,
+      undefined,
+      { origemParticipacao: OrigemParticipacao.DIGITAL, requireGateway: true },
+    );
+
+    const venda = resultado.data as {
+      id: string;
+      status: StatusVendaSena;
+      total: string;
+      quantidade: number;
+      edicaoSena: { id: string; numero: string } | null;
+      cartelas?: { numerosEscolhidos: number[]; modoSelecao: string }[];
+      pagamento?: {
+        pixCopiaECola?: string;
+        qrCodeBase64?: string;
+        urlPagamento?: string;
+      };
+    };
+
+    this.logger.log(
+      `Pedido Sena WhatsApp criado: vendaSenaId=${venda.id} clienteId=${clienteId} total=R$${venda.total}`,
+    );
+
+    return {
+      message: 'Pedido Sena criado com sucesso. Aguardando pagamento PIX.',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        total: venda.total,
+        totalFormatado: this.formatarMoeda(Number(venda.total)),
+        quantidadeCartelas: venda.quantidade,
+        campanha: venda.edicaoSena
+          ? { id: venda.edicaoSena.id, numero: venda.edicaoSena.numero }
+          : null,
+        cartelas: (venda.cartelas ?? []).map((c) => ({
+          numerosEscolhidos: c.numerosEscolhidos,
+          modoSelecao: c.modoSelecao,
+        })),
+        pagamento: {
+          tipo: 'PIX',
+          pixCopiaECola: venda.pagamento?.pixCopiaECola,
+          qrCodeUrl: venda.pagamento?.qrCodeBase64,
+          expiracaoMinutos: 60,
+          instrucoes: venda.pagamento?.pixCopiaECola
+            ? 'Copie o código PIX e pague no seu banco. O pedido é confirmado automaticamente após o pagamento.'
+            : 'PIX temporariamente indisponível. Entre em contato com o suporte.',
+        },
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — STATUS DO PAGAMENTO ────────────────────────────────────
+
+  async consultarStatusPagamentoSena(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.vendaSena.findFirst({
+      where: { id: pedidoId, clienteId },
+      select: {
+        id: true,
+        status: true,
+        gatewayId: true,
+        gatewayPayload: true,
+        tipoPagamento: true,
+        total: true,
+        createdAt: true,
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    const statusLabel: Record<StatusVendaSena, string> = {
+      [StatusVendaSena.PENDENTE]: 'Aguardando pagamento',
+      [StatusVendaSena.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVendaSena.CANCELADO]: 'Pedido cancelado',
+      [StatusVendaSena.RECUSADO]: 'Pagamento recusado',
+    };
+
+    let statusGateway: string | undefined;
+
+    if (venda.status === StatusVendaSena.PENDENTE && venda.gatewayId) {
+      try {
+        const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
+          venda.tipoPagamento,
+          venda.gatewayPayload,
+        );
+        const resultadoGateway = await gateway.consultarCobranca(
+          venda.gatewayId,
+        );
+        statusGateway = resultadoGateway.status;
+      } catch (error) {
+        this.logger.warn(
+          `Erro ao consultar gateway para venda Sena ${pedidoId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    return {
+      message: 'Status do pagamento Sena consultado',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        statusLabel: statusLabel[venda.status],
+        statusGateway,
+        total: venda.total.toString(),
+        criadoEm: venda.createdAt,
+        pago: venda.status === StatusVendaSena.APROVADO,
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — CARTELAS COMPRADAS ─────────────────────────────────────
+
+  async consultarCartelasSena(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.vendaSena.findFirst({
+      where: { id: pedidoId, clienteId },
+      include: {
+        edicaoSena: {
+          select: { id: true, numero: true, dataSorteioMegaSena: true },
+        },
+        cartelas: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    if (venda.status !== StatusVendaSena.APROVADO) {
+      return {
+        message: 'Pedido ainda não confirmado',
+        data: {
+          pedidoId: venda.id,
+          status: venda.status,
+          statusLabel:
+            venda.status === StatusVendaSena.PENDENTE
+              ? 'Aguardando pagamento'
+              : 'Pedido cancelado/recusado',
+          cartelas: [],
+        },
+      };
+    }
+
+    return {
+      message: 'Cartelas encontradas com sucesso',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        campanha: {
+          id: venda.edicaoSena.id,
+          numero: venda.edicaoSena.numero,
+          dataSorteioMegaSena: venda.edicaoSena.dataSorteioMegaSena,
+        },
+        totalCartelas: venda.cartelas.length,
+        cartelas: venda.cartelas.map((c) => ({
+          numerosEscolhidos: c.numerosEscolhidos,
+          setimoNumero: c.setimoNumero,
+          modoSelecao: c.modoSelecao,
+        })),
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — CONSULTAR PEDIDOS ──────────────────────────────────────
+
+  async consultarPedidosSena(
+    clienteId: string,
+    filtros: ConsultarPedidosWhatsappDto,
+  ) {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: { id: true, telefone: true },
+    });
+
+    if (!cliente) {
+      throw new UnauthorizedException('Cliente não encontrado');
+    }
+
+    if (filtros.telefone) {
+      const telefoneLimpo = filtros.telefone.replace(/\D/g, '');
+      const clienteTelefone = cliente.telefone?.replace(/\D/g, '');
+      if (telefoneLimpo !== clienteTelefone) {
+        throw new BadRequestException(
+          'O telefone informado não corresponde ao cadastro do cliente autenticado',
+        );
+      }
+    }
+
+    const page = filtros.page ?? 1;
+    const limit = Math.min(filtros.limit ?? 10, 50);
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.VendaSenaWhereInput = {
+      clienteId,
+      ...(filtros.pedidoId ? { id: filtros.pedidoId } : {}),
+    };
+
+    const [vendas, total] = await Promise.all([
+      this.prisma.vendaSena.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          status: true,
+          tipoPagamento: true,
+          quantidade: true,
+          total: true,
+          gatewayId: true,
+          createdAt: true,
+          edicaoSena: {
+            select: { id: true, numero: true, dataSorteioMegaSena: true },
+          },
+          cartelas: { select: { id: true } },
+        },
+      }),
+      this.prisma.vendaSena.count({ where }),
+    ]);
+
+    const statusLabel: Record<StatusVendaSena, string> = {
+      [StatusVendaSena.PENDENTE]: 'Aguardando pagamento',
+      [StatusVendaSena.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVendaSena.CANCELADO]: 'Cancelado',
+      [StatusVendaSena.RECUSADO]: 'Recusado',
+    };
+
+    return {
+      message: total > 0 ? 'Pedidos encontrados' : 'Nenhum pedido encontrado',
+      data: {
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+        pedidos: vendas.map((v) => ({
+          pedidoId: v.id,
+          status: v.status,
+          statusLabel: statusLabel[v.status],
+          campanha: {
+            id: v.edicaoSena.id,
+            numero: v.edicaoSena.numero,
+            dataSorteioMegaSena: v.edicaoSena.dataSorteioMegaSena,
+          },
+          quantidadeCartelas: v.quantidade,
+          total: v.total.toString(),
+          totalFormatado: this.formatarMoeda(Number(v.total)),
+          criadoEm: v.createdAt,
+          temCartelas: v.cartelas.length > 0,
+        })),
+      },
+    };
+  }
+
+  // ─── CAPITAL SENA — DETALHE DE PEDIDO ──────────────────────────────────────
+
+  async detalharPedidoSena(pedidoId: string, clienteId: string) {
+    const venda = await this.prisma.vendaSena.findFirst({
+      where: { id: pedidoId, clienteId },
+      include: {
+        edicaoSena: {
+          select: {
+            id: true,
+            numero: true,
+            dataSorteioMegaSena: true,
+            dataEncerramento: true,
+          },
+        },
+        cartelas: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(
+        'Pedido não encontrado ou não pertence a este cliente',
+      );
+    }
+
+    const statusLabel: Record<StatusVendaSena, string> = {
+      [StatusVendaSena.PENDENTE]: 'Aguardando pagamento',
+      [StatusVendaSena.APROVADO]: 'Pagamento confirmado ✅',
+      [StatusVendaSena.CANCELADO]: 'Cancelado',
+      [StatusVendaSena.RECUSADO]: 'Recusado',
+    };
+
+    return {
+      message: 'Pedido encontrado',
+      data: {
+        pedidoId: venda.id,
+        status: venda.status,
+        statusLabel: statusLabel[venda.status],
+        campanha: {
+          id: venda.edicaoSena.id,
+          numero: venda.edicaoSena.numero,
+          dataSorteioMegaSena: venda.edicaoSena.dataSorteioMegaSena,
+          dataEncerramento: venda.edicaoSena.dataEncerramento,
+        },
+        quantidadeCartelas: venda.quantidade,
+        total: venda.total.toString(),
+        totalFormatado: this.formatarMoeda(Number(venda.total)),
+        criadoEm: venda.createdAt,
+        totalCartelas: venda.cartelas.length,
+        cartelas: venda.cartelas.map((c) => ({
+          numerosEscolhidos: c.numerosEscolhidos,
+          setimoNumero: c.setimoNumero,
+          modoSelecao: c.modoSelecao,
+        })),
+      },
+    };
+  }
+
+  // ─── Helpers privados ─────────────────────────────────────────────────────
+
+  private mapearOpcoesCompraDaCampanha(
+    combos: Array<{
+      origemParticipacao: OrigemParticipacao;
+      tipoCartela: TipoCartela;
+      preco: Prisma.Decimal;
+    }>,
+    valorCartela: Prisma.Decimal,
+  ): OpcaoCompraWhatsapp[] {
+    const valorUnitarioCartela = this.formatarValorMonetario(valorCartela);
+    const opcoes: OpcaoCompraWhatsapp[] = [
+      {
+        tipoCompra: 'UNITARIO',
+        isCombo: false,
+        quantidadeCartelas: 1,
+        valorUnitarioCartela,
+        valorUnitario: valorUnitarioCartela,
+        valorCombo: null,
+        preco: valorUnitarioCartela,
+        precoFormatado: this.formatarMoeda(Number(valorUnitarioCartela)),
+      },
+    ];
+
+    const combosDigitais = combos
+      .filter(
+        (combo) =>
+          combo.origemParticipacao === OrigemParticipacao.DIGITAL &&
+          combo.tipoCartela !== TipoCartela.UMA_CHANCE,
+      )
+      .map((combo) => {
+        const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
+        const valorCombo = this.formatarValorMonetario(combo.preco);
+
+        return {
+          tipoCompra: 'COMBO' as const,
+          isCombo: true,
+          quantidadeCartelas,
+          valorUnitarioCartela,
+          valorUnitario: valorUnitarioCartela,
+          valorCombo,
+          preco: valorCombo,
+          precoFormatado: this.formatarMoeda(Number(valorCombo)),
+        };
+      });
+
+    return [...opcoes, ...combosDigitais];
+  }
+
+  private isCartelaUnitaria(tipoCartela: TipoCartela): boolean {
+    return tipoCartela === TipoCartela.UMA_CHANCE;
+  }
+
+  private obterQuantidadeCartelasDaCompra(
+    quantidade: number,
+    tipoCartela?: TipoCartela | null,
+    quantidadeBilhetes?: number,
+  ): number {
+    if (quantidadeBilhetes !== undefined && quantidadeBilhetes > 0) {
+      return quantidadeBilhetes;
+    }
+
+    return (
+      quantidade * (tipoCartela ? obterQuantidadeCartelas(tipoCartela) : 1)
+    );
+  }
+
+  private formatarValorMonetario(valor: Prisma.Decimal | number): string {
+    return Number(valor).toFixed(2);
+  }
+
+  private formatarMoeda(valor: Prisma.Decimal | number): string {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    }).format(Number(valor));
+  }
+
+  private resolverTipoCartela(
+    dto: Pick<CriarPedidoWhatsappDto, 'tipoCartela' | 'quantidadeCartelas'>,
+  ): TipoCartela {
+    const tipoCartelaPelaQuantidade =
+      dto.quantidadeCartelas !== undefined
+        ? obterTipoCartelaPorQuantidadeCartelas(dto.quantidadeCartelas)
+        : null;
+
+    if (dto.quantidadeCartelas !== undefined && !tipoCartelaPelaQuantidade) {
+      throw new BadRequestException(
+        `quantidadeCartelas inválida: ${dto.quantidadeCartelas}. Informe um valor entre 1 e 12`,
+      );
+    }
+
+    if (
+      dto.tipoCartela &&
+      tipoCartelaPelaQuantidade &&
+      dto.tipoCartela !== tipoCartelaPelaQuantidade
+    ) {
+      throw new BadRequestException(
+        `Conflito entre o campo legado de cartelas e quantidadeCartelas (${dto.quantidadeCartelas})`,
+      );
+    }
+
+    return (
+      dto.tipoCartela ?? tipoCartelaPelaQuantidade ?? TipoCartela.UMA_CHANCE
+    );
+  }
+
+  private mascararCpf(cpf: string): string {
+    return `${cpf.substring(0, 3)}.***.***-${cpf.substring(9, 11)}`;
+  }
+
+  private getAccessTokenOptions(): JwtSignOptions {
+    return {
+      secret: this.config.get<string>('JWT_ACCESS_SECRET'),
+      expiresIn: this.config.get<string>(
+        'JWT_ACCESS_EXPIRES',
+        '15m',
+      ) as JwtSignOptions['expiresIn'],
+    };
+  }
+
+  private getRefreshTokenOptions(): JwtSignOptions {
+    return {
+      secret: this.config.get<string>('JWT_REFRESH_SECRET'),
+      expiresIn: this.config.get<string>(
+        'JWT_REFRESH_EXPIRES',
+        '7d',
+      ) as JwtSignOptions['expiresIn'],
+    };
+  }
+
+  // ─── Helpers de reserva (mesmo esquema do POS) ─────────────────────────────
+
+  private async listarNumerosReservados(edicaoId: string): Promise<string[]> {
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      return [];
+    }
+
+    const keys = await this.redisService.client.keys(`reserva:${edicaoId}:*`);
+    return keys
+      .map((key) => key.split(':').pop())
+      .filter((numero): numero is string => Boolean(numero))
+      .map((numero) => BigInt(numero).toString());
+  }
+
+  private normalizarNumerosReserva(cartelas: string[]): string[] {
+    return Array.from(
+      new Set(
+        cartelas.map((numero) => {
+          const digits = numero.replace(/\D/g, '');
+          if (!digits) {
+            throw new BadRequestException('Cartela inválida para reserva');
+          }
+          return BigInt(digits).toString();
+        }),
+      ),
+    );
+  }
+
+  private async reservarNumerosNoRedis(
+    edicaoId: string,
+    numeros: string[],
+    clienteId: string,
+    ttlSegundos: number,
+  ): Promise<void> {
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      throw new ServiceUnavailableException(
+        'Reservas WhatsApp exigem Redis configurado',
+      );
+    }
+
+    const redis = this.redisService.client;
+    const valorReserva = JSON.stringify({
+      origem: 'WHATSAPP',
+      clienteId,
+      criadoEm: new Date().toISOString(),
+    });
+    const keysCriadas: string[] = [];
+
+    for (const numero of numeros) {
+      const key = this.montarChaveReserva(edicaoId, numero);
+      const resultado = await redis.set(
+        key,
+        valorReserva,
+        'EX',
+        ttlSegundos,
+        'NX',
+      );
+
+      if (resultado === 'OK') {
+        keysCriadas.push(key);
+        continue;
+      }
+
+      const reservaAtual = await redis.get(key);
+      if (this.reservaPertenceAoCliente(reservaAtual, clienteId)) {
+        await redis.setex(key, ttlSegundos, valorReserva);
+        continue;
+      }
+
+      if (keysCriadas.length > 0) {
+        await redis.del(...keysCriadas);
+      }
+      throw new ConflictException(
+        `Cartela ${this.formatarNumeroBilhete(numero)} já está reservada em outra pré-compra`,
+      );
+    }
+  }
+
+  private async garantirReservasSelecionadas(
+    dto: CriarPedidoWhatsappDto,
+    clienteId: string,
+  ): Promise<void> {
+    const numerosSelecionados = (dto.combosSelecionados ?? []).map(
+      (c) => c.numeroBase,
+    );
+
+    if (!dto.edicaoId || numerosSelecionados.length === 0) {
+      return;
+    }
+
+    const numeros = this.normalizarNumerosReserva(numerosSelecionados);
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      throw new ServiceUnavailableException(
+        'Reservas WhatsApp exigem Redis configurado',
+      );
+    }
+
+    for (const numero of numeros) {
+      const key = this.montarChaveReserva(dto.edicaoId, numero);
+      const reservaAtual = await this.redisService.client.get(key);
+      if (!this.reservaPertenceAoCliente(reservaAtual, clienteId)) {
+        throw new ConflictException(
+          `Cartela ${this.formatarNumeroBilhete(numero)} não está reservada para este cliente`,
+        );
+      }
+    }
+  }
+
+  private async estenderReservasSelecionadas(
+    dto: CriarPedidoWhatsappDto,
+    clienteId: string,
+  ): Promise<void> {
+    const numerosSelecionados = (dto.combosSelecionados ?? []).map(
+      (c) => c.numeroBase,
+    );
+
+    if (!dto.edicaoId || numerosSelecionados.length === 0) {
+      return;
+    }
+
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      return;
+    }
+
+    const redis = this.redisService.client;
+    const valorReserva = JSON.stringify({
+      origem: 'WHATSAPP',
+      clienteId,
+      criadoEm: new Date().toISOString(),
+    });
+
+    for (const numeroBruto of numerosSelecionados) {
+      const numero = this.normalizarNumerosReserva([numeroBruto])[0];
+      const key = this.montarChaveReserva(dto.edicaoId, numero);
+      const reservaAtual = await redis.get(key);
+      if (this.reservaPertenceAoCliente(reservaAtual, clienteId)) {
+        await redis.setex(key, WHATSAPP_PRE_COMPRA_TTL_SEGUNDOS, valorReserva);
+      }
+    }
+  }
+
+  private montarChaveReserva(edicaoId: string, numero: string): string {
+    return `reserva:${edicaoId}:${numero}`;
+  }
+
+  private reservaPertenceAoCliente(
+    reserva: string | null,
+    clienteId: string,
+  ): boolean {
+    if (!reserva) {
+      return false;
+    }
+
+    try {
+      const parsed = JSON.parse(reserva) as { clienteId?: unknown };
+      return parsed.clienteId === clienteId;
+    } catch {
+      return false;
+    }
+  }
+
+  private formatarNumeroBilhete(numero: string): string {
+    return numero.padStart(7, '0');
+  }
+}

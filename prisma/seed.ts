@@ -1,5 +1,15 @@
-import { PrismaClient, Perfil, StatusUsuario, StatusEdicao } from '@prisma/client';
+import {
+  PrismaClient,
+  Perfil,
+  StatusUsuario,
+  StatusEdicao,
+  TipoChavePix,
+  DestinoEdicao,
+  OrigemParticipacao,
+  TipoCartela,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { gerarSequenciaLoterica } from '../src/modules/edicoes/edicoes-sequencia.util';
 
 const prisma = new PrismaClient();
 
@@ -38,11 +48,13 @@ async function main(): Promise<void> {
     create: {
       usuarioId: distUsuario.id,
       nome: 'Distribuidora Norte',
-      cpf: '11122233344',
+      cpf: '12345678909',
       telefone: '(11) 99000-0001',
       email: 'distribuidor@capitalpremios.com',
       cidade: 'São Paulo',
       estado: 'SP',
+      tipoChavePix: TipoChavePix.EMAIL,
+      chavePix: 'distribuidor@capitalpremios.com',
       link: 'http://localhost:3001?dist=norte',
       status: StatusUsuario.ATIVO,
     },
@@ -55,6 +67,7 @@ async function main(): Promise<void> {
     update: {},
     create: {
       email: 'vendedor1@capitalpremios.com',
+      cpf: '11122233344',
       senhaHash: await bcrypt.hash('Vend@123', 10),
       perfil: Perfil.VENDEDOR,
       status: StatusUsuario.ATIVO,
@@ -68,12 +81,15 @@ async function main(): Promise<void> {
       usuarioId: vendedor1Usuario.id,
       distribuidorId: distribuidor.id,
       nome: 'João Vendedor',
-      codigo: 'VEND001',
+      cpf: '11122233344',
+      nomeRecebedor: 'João Vendedor',
       comissaoPercent: 5,
       telefone: '(11) 98000-0001',
       email: 'vendedor1@capitalpremios.com',
       cidade: 'São Paulo',
       estado: 'SP',
+      tipoChavePix: TipoChavePix.CPF,
+      chavePix: '11122233344',
       status: StatusUsuario.ATIVO,
     },
   });
@@ -84,6 +100,7 @@ async function main(): Promise<void> {
     update: {},
     create: {
       email: 'vendedor2@capitalpremios.com',
+      cpf: '22233344455',
       senhaHash: await bcrypt.hash('Vend@123', 10),
       perfil: Perfil.VENDEDOR,
       status: StatusUsuario.ATIVO,
@@ -97,12 +114,15 @@ async function main(): Promise<void> {
       usuarioId: vendedor2Usuario.id,
       distribuidorId: distribuidor.id,
       nome: 'Maria Vendedora',
-      codigo: 'VEND002',
+      cpf: '22233344455',
+      nomeRecebedor: 'Maria Vendedora',
       comissaoPercent: 5,
       telefone: '(11) 98000-0002',
       email: 'vendedor2@capitalpremios.com',
       cidade: 'Campinas',
       estado: 'SP',
+      tipoChavePix: TipoChavePix.CPF,
+      chavePix: '22233344455',
       status: StatusUsuario.ATIVO,
     },
   });
@@ -110,9 +130,9 @@ async function main(): Promise<void> {
 
   // 4. Clientes
   const clientes = [
-    { cpf: '11111111111', nome: 'Carlos Cliente', telefone: '(11) 97000-0001', cidade: 'São Paulo', estado: 'SP' },
-    { cpf: '22222222222', nome: 'Ana Cliente', telefone: '(21) 97000-0002', cidade: 'Rio de Janeiro', estado: 'RJ' },
-    { cpf: '33333333333', nome: 'Pedro Cliente', telefone: '(31) 97000-0003', cidade: 'Belo Horizonte', estado: 'MG' },
+    { cpf: '11111111111', nome: 'Carlos Cliente', telefone: '(11) 97000-0001', cidade: 'São Paulo', estado: 'SP', vendedorId: vendedor1.id },
+    { cpf: '22222222222', nome: 'Ana Cliente', telefone: '(21) 97000-0002', cidade: 'Rio de Janeiro', estado: 'RJ', vendedorId: null },
+    { cpf: '33333333333', nome: 'Pedro Cliente', telefone: '(31) 97000-0003', cidade: 'Belo Horizonte', estado: 'MG', vendedorId: null },
   ];
 
   for (const clienteData of clientes) {
@@ -124,55 +144,68 @@ async function main(): Promise<void> {
   }
   console.log('✅ 3 clientes criados');
 
-  // 5. Edição ativa de exemplo
-  const edicao = await prisma.edicao.upsert({
-    where: { numero: 1 },
-    update: {},
-    create: {
-      numero: 1,
-      dataSorteio: new Date('2025-03-01T20:00:00.000Z'),
-      dataEncerramento: new Date('2025-02-28T23:59:59.000Z'),
-      valorCartela: 10.00,
-      rangeInicio: BigInt(1),
-      rangeFinal: BigInt(100000),
-      qtdPremios: 3,
-      especie: 'Dinheiro',
-      status: StatusEdicao.ATIVA,
-      premios: {
-        create: [
-          { ordem: 1, descricao: '1º Prêmio', valor: 5000.00 },
-          { ordem: 2, descricao: '2º Prêmio', valor: 2000.00 },
-          { ordem: 3, descricao: '3º Prêmio', valor: 1000.00 },
-        ],
-      },
-    },
+  // 5. Edição ativa
+  const edicaoSeedExistente = await prisma.edicao.findFirst({
+    where: { numero: '1' },
+    select: { id: true },
   });
+
+  if (!edicaoSeedExistente) {
+    await prisma.edicao.create({
+      data: {
+        numero: '1',
+        dataSorteio: new Date('2025-03-01T20:00:00.000Z'),
+        dataEncerramento: new Date('2025-02-28T23:59:59.000Z'),
+        valorCartela: 10.00,
+        qtdNumerosCartela: 15,
+        rangeInicio: BigInt(1),
+        rangeFinal: BigInt(100000),
+        qtdPremios: 3,
+        destino: DestinoEdicao.AMBOS,
+        raspadinha: false,
+        frase: 'Concorra e boa sorte',
+        status: StatusEdicao.ATIVA,
+        detalhes: {
+          create: [
+            {
+              origemParticipacao: OrigemParticipacao.DIGITAL,
+              tipoCartela: TipoCartela.UMA_CHANCE,
+              indiceRange: 1,
+              rangeInicio: BigInt(1),
+              rangeFinal: BigInt(50000),
+            },
+            {
+              origemParticipacao: OrigemParticipacao.FISICO,
+              tipoCartela: TipoCartela.UMA_CHANCE,
+              indiceRange: 1,
+              rangeInicio: BigInt(50001),
+              rangeFinal: BigInt(100000),
+            },
+          ],
+        },
+        premios: {
+          create: [
+            { ordem: 1, descricao: '1º Prêmio', valor: 5000.00 },
+            { ordem: 2, descricao: '2º Prêmio', valor: 2000.00 },
+            { ordem: 3, descricao: '3º Prêmio', valor: 1000.00 },
+          ],
+        },
+      },
+    });
+  }
   console.log('✅ Edição #1 criada (ATIVA)');
 
-  // 6. Ranges (1.000 registros com sequenciaBolas aleatória)
-  console.log('⏳ Criando 1.000 ranges...');
-  const TOTAL_RANGES = 1000;
-  const BATCH_SIZE = 100;
-
-  // Check existing ranges to avoid duplicates
-  const existingCount = await prisma.range.count();
-  if (existingCount < TOTAL_RANGES) {
-    const lastExisting = await prisma.range.findFirst({ orderBy: { numero: 'desc' } });
-    const startNum = lastExisting ? Number(lastExisting.numero) + 1 : 1;
-
-    for (let batch = 0; batch < TOTAL_RANGES / BATCH_SIZE; batch++) {
-      const ranges = [];
-      for (let i = 0; i < BATCH_SIZE; i++) {
-        const numero = startNum + batch * BATCH_SIZE + i;
-        const sequenciaBolas = gerarSequenciaBolas();
-        ranges.push({ numero: BigInt(numero), sequenciaBolas, disponivel: true });
-      }
-      await prisma.range.createMany({ data: ranges, skipDuplicates: true });
-    }
-    console.log(`✅ ${TOTAL_RANGES} ranges criados`);
+  // 6. Matriz de Ranges
+  // A matriz global de ranges agora é carregada via upload de CSV.
+  // Use o endpoint POST /admin/ranges/matriz/upload com um arquivo CSV
+  // no formato: numero;bola1-bola2-bola3-...-bola15 (ex: 1000000;05-07-09-21-24-31-32-35-36-39-41-42-46-47-50)
+  const matrizCount = await prisma.matrizRange.count();
+  if (matrizCount === 0) {
+    console.log('ℹ️  MatrizRange vazia. Para popular, faça upload do CSV via POST /admin/ranges/matriz/upload');
   } else {
-    console.log('ℹ️  Ranges já existem, pulando...');
+    console.log(`ℹ️  MatrizRange já possui ${matrizCount} registros.`);
   }
+
 
   console.log('\n🎉 Seed concluído com sucesso!');
   console.log('\n📋 Credenciais de acesso:');
@@ -180,19 +213,6 @@ async function main(): Promise<void> {
   console.log('  Distribuidor: distribuidor@capitalpremios.com / Dist@123');
   console.log('  Vendedor 1:   vendedor1@capitalpremios.com / Vend@123');
   console.log('  Vendedor 2:   vendedor2@capitalpremios.com / Vend@123');
-}
-
-function gerarSequenciaBolas(): number[] {
-  // Gera sequência de 2 bolas aleatórias (0-9)
-  const bolas: number[] = [];
-  let num = Math.floor(Math.random() * 10000);
-  while (num > 0) {
-    bolas.unshift(num % 10);
-    num = Math.floor(num / 10);
-  }
-  // Ensure at least 2 bolas
-  while (bolas.length < 2) bolas.unshift(0);
-  return bolas;
 }
 
 main()

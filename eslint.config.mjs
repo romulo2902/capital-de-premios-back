@@ -10,7 +10,6 @@ export default tseslint.config(
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
-  eslintPluginPrettierRecommended,
   {
     languageOptions: {
       globals: {
@@ -24,12 +23,27 @@ export default tseslint.config(
       },
     },
   },
+  eslintPluginPrettierRecommended,
   {
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
       "prettier/prettier": ["error", { endOfLine: "auto" }],
+    },
+  },
+  {
+    files: ['*.cjs'],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+      sourceType: 'commonjs',
+      parserOptions: {
+        project: false,
+        projectService: false,
+      },
     },
   },
 );
