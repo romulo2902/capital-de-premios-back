@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: capital-premios-api
+    container_name: ${NODE_ENV:-capital-premios-api}
     restart: unless-stopped
     env_file:
       - .env
