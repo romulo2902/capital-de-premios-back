@@ -4,18 +4,27 @@ ADD COLUMN IF NOT EXISTS "rangeFinal" BIGINT;
 
 UPDATE "EdicaoCombo" c
 SET
-  "rangeInicio" = COALESCE(r."rangeInicio", e."rangeInicio"),
-  "rangeFinal" = COALESCE(r."rangeFinal", e."rangeFinal")
+  "rangeInicio" = COALESCE(
+    (
+      SELECT MIN(d."rangeInicio")
+      FROM "EdicaoDetalhe" d
+      WHERE d."edicaoId" = c."edicaoId"
+        AND d."origemParticipacao" = c."origemParticipacao"
+        AND d."tipoCartela" = c."tipoCartela"
+    ),
+    e."rangeInicio"
+  ),
+  "rangeFinal" = COALESCE(
+    (
+      SELECT MAX(d."rangeFinal")
+      FROM "EdicaoDetalhe" d
+      WHERE d."edicaoId" = c."edicaoId"
+        AND d."origemParticipacao" = c."origemParticipacao"
+        AND d."tipoCartela" = c."tipoCartela"
+    ),
+    e."rangeFinal"
+  )
 FROM "Edicao" e
-LEFT JOIN LATERAL (
-  SELECT
-    MIN(d."rangeInicio") AS "rangeInicio",
-    MAX(d."rangeFinal") AS "rangeFinal"
-  FROM "EdicaoDetalhe" d
-  WHERE d."edicaoId" = c."edicaoId"
-    AND d."origemParticipacao" = c."origemParticipacao"
-    AND d."tipoCartela" = c."tipoCartela"
-) r ON TRUE
 WHERE e."id" = c."edicaoId"
   AND (c."rangeInicio" IS NULL OR c."rangeFinal" IS NULL);
 
