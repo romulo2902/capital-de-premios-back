@@ -36,10 +36,11 @@ export class VendasSenaController {
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({
     summary:
-      'Criar venda Sena — aceita cartelas explícitas (MANUAL/SURPRESINHA) ou compra rápida (quantidade ou comboSenaId) (ADMIN=aprova direto, DISTRIBUIDOR/VENDEDOR=gateway)',
+      'Criar venda Sena — recebe `numeros` do frontend com 6 números + bola extra (ADMIN=aprova direto, DISTRIBUIDOR/VENDEDOR=gateway)',
   })
   create(@Body() dto: CreateVendaSenaDto, @CurrentUser() user: RequestUser) {
-    if (user.perfil === 'VENDEDOR' && user.vendedorId) dto.vendedorId = user.vendedorId;
+    if (user.perfil === 'VENDEDOR' && user.vendedorId)
+      dto.vendedorId = user.vendedorId;
     else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId)
       dto.distribuidorId = user.distribuidorId;
     return this.vendasSenaService.create(dto, user);
@@ -54,7 +55,11 @@ export class VendasSenaController {
   @ApiQuery({ name: 'clienteId', required: false })
   @ApiQuery({ name: 'vendedorId', required: false })
   @ApiQuery({ name: 'distribuidorId', required: false })
-  @ApiQuery({ name: 'status', required: false, enum: ['PENDENTE', 'APROVADO', 'RECUSADO', 'CANCELADO'] })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PENDENTE', 'APROVADO', 'RECUSADO', 'CANCELADO'],
+  })
   @ApiQuery({ name: 'cpf', required: false })
   findAll(@Query() filtros: FiltroVendasSenaDto) {
     return this.vendasSenaService.findAll(filtros);
@@ -65,8 +70,15 @@ export class VendasSenaController {
   @ApiOperation({ summary: 'Listar vendas Sena de um cliente por CPF' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  findByCliente(@Param('cpf') cpf: string, @Query() pagination: PaginationQueryDto) {
-    return this.vendasSenaService.findByCliente(cpf, pagination.page, pagination.limit);
+  findByCliente(
+    @Param('cpf') cpf: string,
+    @Query() pagination: PaginationQueryDto,
+  ) {
+    return this.vendasSenaService.findByCliente(
+      cpf,
+      pagination.page,
+      pagination.limit,
+    );
   }
 
   @Get(':id')
@@ -79,7 +91,10 @@ export class VendasSenaController {
   @Patch(':id/cancelar')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Cancelar venda Sena (ADMIN)' })
-  cancelar(@Param('id', ParseUUIDPipe) id: string, @Body('motivo') motivo?: string) {
+  cancelar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('motivo') motivo?: string,
+  ) {
     return this.vendasSenaService.cancelar(id, motivo);
   }
 }
