@@ -35,7 +35,9 @@ type MeusDadosClienteResponse = {
   email: string | null;
   emailMascarado: string | null;
   telefone: string;
+  telefoneMascarado: string;
   dataNascimento: string | null;
+  dataNascimentoMascarada: string | null;
 };
 
 @Injectable()
@@ -135,12 +137,26 @@ export class ClientesService {
     return `${visiblePart}***@${domain}`;
   }
 
-  private formatarDataNascimento(dataNascimento: Date | null): string | null {
+  private mascararTelefone(telefone: string): string {
+    const telefoneLimpo = telefone.replace(/\D/g, '');
+
+    if (telefoneLimpo.length < 6) {
+      return telefone;
+    }
+
+    const ddd = telefoneLimpo.slice(0, 2);
+    const final = telefoneLimpo.slice(-4);
+    const prefixoMascarado = telefoneLimpo.length === 11 ? '*****' : '****';
+
+    return `(${ddd}) ${prefixoMascarado}-${final}`;
+  }
+
+  private mascararDataNascimento(dataNascimento: Date | null): string | null {
     if (!dataNascimento) {
       return null;
     }
 
-    return dataNascimento.toISOString().slice(0, 10);
+    return `${dataNascimento.toISOString().slice(0, 4)}-**-**`;
   }
 
   private toMeusDadosCliente(
@@ -148,7 +164,10 @@ export class ClientesService {
   ): MeusDadosClienteResponse {
     const cpfMascarado = this.mascararCpf(cliente.cpf);
     const emailMascarado = this.mascararEmail(cliente.email);
-    const dataNascimento = this.formatarDataNascimento(cliente.dataNascimento);
+    const telefoneMascarado = this.mascararTelefone(cliente.telefone);
+    const dataNascimentoMascarada = this.mascararDataNascimento(
+      cliente.dataNascimento,
+    );
 
     return {
       id: cliente.id,
@@ -157,8 +176,10 @@ export class ClientesService {
       cpfMascarado,
       email: emailMascarado,
       emailMascarado,
-      telefone: cliente.telefone,
-      dataNascimento,
+      telefone: telefoneMascarado,
+      telefoneMascarado,
+      dataNascimento: dataNascimentoMascarada,
+      dataNascimentoMascarada,
     };
   }
 
