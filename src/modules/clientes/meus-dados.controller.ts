@@ -1,18 +1,21 @@
+import { Body, Controller, Get, Patch, Query, UseGuards } from '@nestjs/common';
 import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Query,
-} from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ClientesService } from './clientes.service';
 import {
   AtualizarMeusDadosDto,
   BuscarMeusDadosDto,
 } from './dto/meus-dados.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @ApiTags('Meus Dados')
 @Controller('meus-dados')
@@ -58,18 +61,27 @@ export class MeusDadosController {
     return this.clientesService.buscarMeusDados(dto.cpf);
   }
 
-  @Patch(':id')
+  @Patch()
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CLIENTE')
   @ApiOperation({
-    summary: 'Atualizar dados do cliente retornado em meus-dados',
+    summary: 'Atualizar dados do cliente autenticado',
+    description:
+      'Atualiza os dados do cliente identificado pelo token retornado em POST /auth/loja.',
   })
   @ApiResponse({
     status: 200,
     description: 'Dados do cliente atualizados e retornados mascarados.',
   })
+  @ApiResponse({
+    status: 401,
+    description: 'Token inválido ou ausente.',
+  })
   atualizar(
-    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
     @Body() dto: AtualizarMeusDadosDto,
   ) {
-    return this.clientesService.atualizarMeusDados(id, dto);
+    return this.clientesService.atualizarMeusDados(user.id, dto);
   }
 }
