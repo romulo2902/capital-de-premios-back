@@ -704,6 +704,7 @@ export class RelatoriosService {
           '/relatorios/clientes/pdf',
           '/relatorios/vendas/cdp',
           '/relatorios/vendas/sena',
+          '/relatorios/vendas/sena/ganhadores',
         ],
       },
     };
