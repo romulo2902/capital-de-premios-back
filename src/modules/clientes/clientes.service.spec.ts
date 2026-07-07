@@ -94,8 +94,7 @@ describe('ClientesService', () => {
           email: 'tia***@hotmail.com',
           emailMascarado: 'tia***@hotmail.com',
           telefone: '(64) 98461-4339',
-          dataNascimento: '1990-**-**',
-          dataNascimentoMascarada: '1990-**-**',
+          dataNascimento: '1990-05-20',
         },
       },
     });
@@ -143,8 +142,7 @@ describe('ClientesService', () => {
       email: 'tia***@hotmail.com',
       emailMascarado: 'tia***@hotmail.com',
       telefone: '(64) 98461-4339',
-      dataNascimento: '1990-**-**',
-      dataNascimentoMascarada: '1990-**-**',
+      dataNascimento: '1990-05-20',
     });
   });
 
