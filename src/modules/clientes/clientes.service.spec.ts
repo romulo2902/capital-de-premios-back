@@ -58,25 +58,114 @@ describe('ClientesService', () => {
     });
   });
 
+  it('buscarMeusDados should retornar dados sensiveis mascarados por CPF', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+      id: 'cliente-1',
+      nome: 'Tiago Lima',
+      cpf: '03112345675',
+      email: 'tiago@hotmail.com',
+      telefone: '(64) 98461-4339',
+      dataNascimento: new Date('1990-05-20T00:00:00.000Z'),
+    });
+
+    const result = await service.buscarMeusDados('031.123.456-75');
+
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
+      where: {
+        OR: [{ cpf: '03112345675' }, { cpf: '031.123.456-75' }],
+      },
+      select: {
+        id: true,
+        nome: true,
+        cpf: true,
+        email: true,
+        telefone: true,
+        dataNascimento: true,
+      },
+    });
+    expect(result).toEqual({
+      message: 'Dados do cliente encontrados',
+      data: {
+        cliente: {
+          id: 'cliente-1',
+          nome: 'Tiago Lima',
+          cpf: '031.***.***-75',
+          cpfMascarado: '031.***.***-75',
+          email: 'tia***@hotmail.com',
+          emailMascarado: 'tia***@hotmail.com',
+          telefone: '(64) 98461-4339',
+          dataNascimento: '1990-**-**',
+          dataNascimentoMascarada: '1990-**-**',
+        },
+      },
+    });
+  });
+
+  it('atualizarMeusDados should atualizar pelo id e retornar mascarado', async () => {
+    mockPrisma.cliente.update.mockResolvedValueOnce({
+      id: 'cliente-1',
+      nome: 'Tiago Lima',
+      cpf: '03112345675',
+      email: 'tiago.novo@hotmail.com',
+      telefone: '(64) 98461-4339',
+      dataNascimento: new Date('1990-05-20T00:00:00.000Z'),
+    });
+
+    const result = await service.atualizarMeusDados('cliente-1', {
+      nome: ' Tiago Lima ',
+      email: 'TIAGO.NOVO@HOTMAIL.COM',
+      telefone: ' (64) 98461-4339 ',
+      dataNascimento: '1990-05-20',
+    });
+
+    expect(mockPrisma.cliente.update).toHaveBeenCalledWith({
+      where: { id: 'cliente-1' },
+      data: {
+        nome: 'Tiago Lima',
+        email: 'tiago.novo@hotmail.com',
+        telefone: '(64) 98461-4339',
+        dataNascimento: new Date('1990-05-20T00:00:00.000Z'),
+      },
+      select: {
+        id: true,
+        nome: true,
+        cpf: true,
+        email: true,
+        telefone: true,
+        dataNascimento: true,
+      },
+    });
+    expect(result.data.cliente).toEqual({
+      id: 'cliente-1',
+      nome: 'Tiago Lima',
+      cpf: '031.***.***-75',
+      cpfMascarado: '031.***.***-75',
+      email: 'tia***@hotmail.com',
+      emailMascarado: 'tia***@hotmail.com',
+      telefone: '(64) 98461-4339',
+      dataNascimento: '1990-**-**',
+      dataNascimentoMascarada: '1990-**-**',
+    });
+  });
+
+  it('atualizarMeusDados should exigir ao menos um campo', async () => {
+    await expect(service.atualizarMeusDados('cliente-1', {})).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
   it('findAll should limitar clientes ao vendedor autenticado', async () => {
     mockPrisma.cliente.findMany.mockResolvedValue([]);
     mockPrisma.cliente.count.mockResolvedValue(0);
 
-    await service.findAll(
-      1,
-      20,
-      undefined,
-      undefined,
-      undefined,
-      {
-        id: 'usuario-vendedor',
-        email: 'vend@test.com',
-        cpf: '12345678900',
-        perfil: 'VENDEDOR',
-        status: 'ATIVO',
-        vendedorId: 'vendedor-1',
-      },
-    );
+    await service.findAll(1, 20, undefined, undefined, undefined, {
+      id: 'usuario-vendedor',
+      email: 'vend@test.com',
+      cpf: '12345678900',
+      perfil: 'VENDEDOR',
+      status: 'ATIVO',
+      vendedorId: 'vendedor-1',
+    });
 
     expect(mockPrisma.cliente.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
