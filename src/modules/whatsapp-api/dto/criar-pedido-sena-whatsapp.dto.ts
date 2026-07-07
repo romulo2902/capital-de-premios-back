@@ -10,6 +10,7 @@ import { CreateVendaSenaDto } from '../../capital-sena/vendas-sena/dto/create-ve
  * (o canal WhatsApp não tem vendedor/distribuidor vinculado e aceita apenas PIX).
  */
 export class CriarPedidoSenaWhatsappDto extends OmitType(CreateVendaSenaDto, [
+  'clienteId',
   'cpf',
   'nome',
   'telefone',

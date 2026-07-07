@@ -33,6 +33,25 @@ type ServicePrivado = VendasSenaService & {
     vendedorId?: string,
     distribuidorId?: string,
   ): Promise<unknown>;
+  buscarClientePorIdParaCompra(
+    clienteId: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ): Promise<unknown>;
+  validarDadosClienteParaPagamento(cliente: {
+    id: string;
+    cpf: string;
+    nome: string;
+    telefone: string;
+    email: string | null;
+    dataNascimento: Date | null;
+  }): {
+    id: string;
+    cpf: string;
+    nome: string;
+    telefone: string;
+    email: string;
+  };
 };
 
 describe('VendasSenaService', () => {
@@ -326,6 +345,87 @@ describe('VendasSenaService', () => {
       expect(mockPrisma.cliente.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.cliente.create).not.toHaveBeenCalled();
       expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('clienteId na compra', () => {
+    it('busca cliente por id para compra Sena e atualiza origem quando vendedor informado', async () => {
+      const cliente = {
+        id: 'cliente-1',
+        cpf: '06790319107',
+        nome: 'Jair Rodrigues',
+        telefone: '(92) 99999-9999',
+        email: 'jair@email.com',
+        dataNascimento: new Date('1991-05-01T00:00:00.000Z'),
+      };
+      mockPrisma.vendedor.findUnique.mockResolvedValueOnce({
+        id: 'vendedor-1',
+        distribuidorId: 'distribuidor-1',
+      });
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(cliente);
+      mockPrisma.cliente.update.mockResolvedValueOnce({
+        ...cliente,
+        vendedorId: 'vendedor-1',
+        distribuidorId: 'distribuidor-1',
+      });
+
+      const result = await service.buscarClientePorIdParaCompra(
+        'cliente-1',
+        'vendedor-1',
+      );
+
+      expect(mockPrisma.cliente.findUnique).toHaveBeenCalledWith({
+        where: { id: 'cliente-1' },
+        select: {
+          id: true,
+          cpf: true,
+          nome: true,
+          telefone: true,
+          email: true,
+          dataNascimento: true,
+        },
+      });
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith({
+        where: { id: 'cliente-1' },
+        data: {
+          vendedorId: 'vendedor-1',
+          distribuidorId: 'distribuidor-1',
+        },
+        select: {
+          id: true,
+          cpf: true,
+          nome: true,
+          telefone: true,
+          email: true,
+          dataNascimento: true,
+        },
+      });
+      expect(result).toMatchObject({ id: 'cliente-1' });
+    });
+
+    it('exige e-mail e data de nascimento salvos para pagar por clienteId', () => {
+      const clienteBase = {
+        id: 'cliente-1',
+        cpf: '06790319107',
+        nome: 'Jair Rodrigues',
+        telefone: '(92) 99999-9999',
+      };
+
+      expect(() =>
+        service.validarDadosClienteParaPagamento({
+          ...clienteBase,
+          email: null,
+          dataNascimento: new Date('1991-05-01T00:00:00.000Z'),
+        }),
+      ).toThrow('Cliente sem e-mail cadastrado');
+
+      expect(() =>
+        service.validarDadosClienteParaPagamento({
+          ...clienteBase,
+          email: 'jair@email.com',
+          dataNascimento: null,
+        }),
+      ).toThrow('Cliente sem data de nascimento cadastrada');
     });
   });
 });

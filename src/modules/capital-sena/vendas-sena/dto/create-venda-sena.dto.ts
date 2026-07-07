@@ -13,6 +13,7 @@ import {
   Max,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -114,39 +115,65 @@ export class CreateVendaSenaDto {
   tipoPagamento: TipoPagamento;
 
   // Dados do cliente
-  @ApiProperty({ example: '12345678900' })
+  @ApiPropertyOptional({
+    example: '76253924-363d-4220-a09c-2218712aa483',
+    description:
+      'ID do cliente já cadastrado. Quando informado, a API usa os dados completos do cadastro e os campos cpf/nome/telefone/email/dataNascimento não precisam ser enviados.',
+  })
+  @IsOptional()
+  @IsUUID('4', { message: 'clienteId deve ser um UUID válido' })
+  clienteId?: string;
+
+  @ApiPropertyOptional({
+    example: '12345678900',
+    description:
+      'CPF do cliente. Obrigatório apenas quando clienteId não for informado.',
+  })
+  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
   @IsCpfValido({ message: 'CPF inválido' })
-  cpf: string;
+  cpf?: string;
 
-  @ApiProperty({ example: 'Maria Silva' })
+  @ApiPropertyOptional({
+    example: 'Maria Silva',
+    description:
+      'Nome do cliente. Obrigatório apenas quando clienteId não for informado.',
+  })
+  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
   @IsString({ message: 'nome deve ser um texto' })
   @MinLength(2, { message: 'nome deve ter no mínimo 2 caracteres' })
-  nome: string;
+  nome?: string;
 
-  @ApiProperty({ example: '(11) 99999-9999' })
+  @ApiPropertyOptional({
+    example: '(11) 99999-9999',
+    description:
+      'Telefone do cliente. Obrigatório apenas quando clienteId não for informado.',
+  })
+  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
   @IsString({ message: 'telefone deve ser um texto' })
-  telefone: string;
+  telefone?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'maria@email.com',
     description:
-      'E-mail do cliente. Obrigatório para envio do comprovante de compra.',
+      'E-mail do cliente. Obrigatório para envio do comprovante quando clienteId não for informado.',
   })
+  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
   @IsEmail({}, { message: 'e-mail inválido' })
-  email!: string;
+  email?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '1985-04-11',
     description:
-      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade.',
+      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade quando clienteId não for informado.',
   })
   @Transform(emptyStringToUndefined)
+  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
   @IsString({ message: 'dataNascimento deve ser um texto' })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'dataNascimento deve estar no formato YYYY-MM-DD',
   })
-  dataNascimento: string;
+  dataNascimento?: string;
 
   // Origem da venda
   @ApiPropertyOptional({ example: 'uuid-do-vendedor' })

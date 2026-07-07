@@ -68,6 +68,23 @@ interface CartelaSenaNormalizada {
   modoSelecao: ModoSelecaoSena;
 }
 
+interface ClienteSenaCompra {
+  id: string;
+  cpf: string;
+  nome: string;
+  telefone: string;
+  email: string | null;
+  dataNascimento: Date | null;
+}
+
+interface DadosClientePagamentoSena {
+  id: string;
+  cpf: string;
+  nome: string;
+  telefone: string;
+  email: string;
+}
+
 @Injectable()
 export class VendasSenaService {
   private readonly logger = new Logger(VendasSenaService.name);
@@ -133,17 +150,16 @@ export class VendasSenaService {
       );
     }
 
-    // 4. Buscar ou criar cliente
-    const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cliente = await this.buscarOuCriarCliente(
-      cpfLimpo,
-      dto.nome,
-      dto.telefone,
-      dto.dataNascimento,
-      dto.email,
-      dto.vendedorId,
-      dto.distribuidorId,
-    );
+    // 4. Buscar cliente por ID ou criar/resolver pelo CPF legado
+    const cliente = dto.clienteId
+      ? await this.buscarClientePorIdParaCompra(
+          dto.clienteId,
+          dto.vendedorId,
+          dto.distribuidorId,
+        )
+      : await this.buscarOuCriarClientePorDto(dto);
+    const dadosClientePagamento =
+      this.validarDadosClienteParaPagamento(cliente);
 
     // 5. Validar vendedor / distribuidor
     if (dto.vendedorId) {
@@ -267,10 +283,10 @@ export class VendasSenaService {
             ? Math.round(Number(valorCombo) * 100)
             : Math.round(valorUnitario * 100),
           descricao: `Capital Sena — Edição ${edicao.numero} — ${cartelas.length} cartela(s)`,
-          cpfPagador: cpfLimpo,
-          nomePagador: dto.nome,
-          emailPagador: dto.email,
-          telefonePagador: dto.telefone,
+          cpfPagador: dadosClientePagamento.cpf,
+          nomePagador: dadosClientePagamento.nome,
+          emailPagador: dadosClientePagamento.email,
+          telefonePagador: dadosClientePagamento.telefone,
           expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
         });
 
@@ -728,6 +744,103 @@ export class VendasSenaService {
     }
   }
 
+  private async buscarOuCriarClientePorDto(
+    dto: CreateVendaSenaDto,
+  ): Promise<ClienteSenaCompra> {
+    if (
+      !dto.cpf ||
+      !dto.nome ||
+      !dto.telefone ||
+      !dto.email ||
+      !dto.dataNascimento
+    ) {
+      throw new BadRequestException(
+        'Informe clienteId ou os dados completos do cliente para concluir a compra',
+      );
+    }
+
+    return this.buscarOuCriarCliente(
+      dto.cpf.replace(/\D/g, ''),
+      dto.nome,
+      dto.telefone,
+      dto.dataNascimento,
+      dto.email,
+      dto.vendedorId,
+      dto.distribuidorId,
+    );
+  }
+
+  private async buscarClientePorIdParaCompra(
+    clienteId: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ): Promise<ClienteSenaCompra> {
+    const relacionamentoMaisRecente =
+      await this.resolverRelacionamentoMaisRecenteDoCliente(
+        vendedorId,
+        distribuidorId,
+      );
+
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+      },
+    });
+
+    if (!cliente) {
+      throw new NotFoundException('Cliente não encontrado');
+    }
+
+    if (Object.keys(relacionamentoMaisRecente).length === 0) {
+      return cliente;
+    }
+
+    return this.prisma.cliente.update({
+      where: { id: clienteId },
+      data: relacionamentoMaisRecente,
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+      },
+    });
+  }
+
+  private validarDadosClienteParaPagamento(
+    cliente: ClienteSenaCompra,
+  ): DadosClientePagamentoSena {
+    if (!cliente.email) {
+      throw new BadRequestException(
+        'Cliente sem e-mail cadastrado. Atualize meus-dados antes de concluir a compra',
+      );
+    }
+
+    if (!cliente.dataNascimento) {
+      throw new BadRequestException(
+        'Cliente sem data de nascimento cadastrada. Atualize meus-dados antes de concluir a compra',
+      );
+    }
+
+    validarMaioridade(cliente.dataNascimento);
+
+    return {
+      id: cliente.id,
+      cpf: cliente.cpf.replace(/\D/g, ''),
+      nome: cliente.nome,
+      telefone: cliente.telefone,
+      email: cliente.email,
+    };
+  }
+
   private async buscarOuCriarCliente(
     cpf: string,
     nome: string,
@@ -736,7 +849,7 @@ export class VendasSenaService {
     email?: string,
     vendedorId?: string,
     distribuidorId?: string,
-  ) {
+  ): Promise<ClienteSenaCompra> {
     if (!dataNascimentoInput) {
       throw new BadRequestException(
         'dataNascimento é obrigatória para concluir a compra',
