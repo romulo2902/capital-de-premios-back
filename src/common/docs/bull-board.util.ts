@@ -11,6 +11,7 @@ const BULL_BOARD_PATH = '/api/admin/filas';
 const BULL_BOARD_FALLBACK_PATH = '/admin/filas';
 const AUTO_ENCERRAMENTO_QUEUE_NAME = 'edicoes-auto-encerramento';
 const VENDAS_POS_RECONCILIACAO_QUEUE_NAME = 'vendas-pos-reconciliacao';
+const EDICOES_SENA_CICLO_VIDA_QUEUE_NAME = 'edicoes-sena-ciclo-vida';
 
 export function setupBullBoard(
   app: Express,
@@ -42,6 +43,9 @@ export function setupBullBoard(
       connection: { url: redisUrl },
     }),
     new Queue(VENDAS_POS_RECONCILIACAO_QUEUE_NAME, {
+      connection: { url: redisUrl },
+    }),
+    new Queue(EDICOES_SENA_CICLO_VIDA_QUEUE_NAME, {
       connection: { url: redisUrl },
     }),
   ];

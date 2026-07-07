@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EdicoesSenaService } from './edicoes-sena.service';
-import { EdicoesSenaCronService } from './edicoes-sena.cron';
+import { EdicoesSenaCicloVidaService } from './edicoes-sena-ciclo-vida.service';
 import {
   EdicoesSenaController,
   EdicoesSenaPublicoController,
@@ -10,7 +10,7 @@ import { S3UploadModule } from '../../../common/s3/s3-upload.module';
 @Module({
   imports: [S3UploadModule],
   controllers: [EdicoesSenaController, EdicoesSenaPublicoController],
-  providers: [EdicoesSenaService, EdicoesSenaCronService],
+  providers: [EdicoesSenaService, EdicoesSenaCicloVidaService],
   exports: [EdicoesSenaService],
 })
 export class EdicoesSenaModule {}
