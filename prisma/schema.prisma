@@ -589,6 +589,7 @@ model ResultadoSena {
   id                 String    @id @default(uuid())
   edicaoSenaId       String    @unique
   numerosSorteados   Int[]
+  setimaBola         Int?
   imagemResultadoUrl String?
   apurado            Boolean   @default(false)
   apuradoEm          DateTime?

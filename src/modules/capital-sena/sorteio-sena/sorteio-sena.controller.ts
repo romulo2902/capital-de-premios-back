@@ -33,6 +33,7 @@ export class SorteioSenaController {
     summary: 'Inserir resultado da Mega-Sena (ADMIN)',
     description:
       'Envie via JSON. O campo `numerosSorteados` deve ser um array de 6 números. ' +
+      'O campo opcional `setimaBola` guarda a sétima bola sorteada, usada para apurar o prêmio SENA_BONUS. ' +
       'A imagem opcional do resultado oficial deve ser enviada em base64 no campo `imagemBase64`.',
   })
   @ApiBody({ type: InserirResultadoSenaDto })
