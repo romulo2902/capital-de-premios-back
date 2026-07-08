@@ -71,7 +71,11 @@ export class InserirResultadoSenaDto {
   @Max(60, { message: 'setimaBola deve ser entre 1 e 60' })
   setimaBola?: number;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/resultado.png' })
+  @ApiPropertyOptional({
+    example: 'https://cdn.example.com/resultado.png',
+    description:
+      'URL já hospedada da imagem do resultado oficial (alternativa ao envio via imagemBase64).',
+  })
   @IsOptional()
   @IsString({ message: 'imagemResultadoUrl deve ser um texto' })
   imagemResultadoUrl?: string;

@@ -61,7 +61,7 @@ export class SorteioSenaController {
 
   @Get(':edicaoSenaId')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
-  @ApiOperation({ summary: 'Consultar resultado e status do sorteio (ADMIN)' })
+  @ApiOperation({ summary: 'Consultar resultado e status do sorteio (ADMIN + DISTRIBUIDOR + VENDEDOR)' })
   consultarResultado(@Param('edicaoSenaId', ParseUUIDPipe) edicaoSenaId: string) {
     return this.sorteioSenaService.consultarResultado(edicaoSenaId);
   }
