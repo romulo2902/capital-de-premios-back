@@ -83,8 +83,12 @@ export class ApuracaoSenaService {
       let status: StatusCartelaSena;
 
       if (acertos === 6) {
+        const bolaBonus = edicao.resultado.setimaBola;
         setimoAcertou =
-          cartela.setimoNumero !== null && sorteados.has(cartela.setimoNumero);
+          cartela.setimoNumero !== null &&
+          (bolaBonus !== null
+            ? cartela.setimoNumero === bolaBonus
+            : sorteados.has(cartela.setimoNumero));
         status = setimoAcertou
           ? StatusCartelaSena.SENA_BONUS
           : StatusCartelaSena.SENA;

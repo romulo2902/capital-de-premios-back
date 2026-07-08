@@ -60,6 +60,17 @@ export class InserirResultadoSenaDto {
   @ArrayMaxSize(6, { message: 'numerosSorteados deve conter exatamente 6 números' })
   numerosSorteados: number[];
 
+  @ApiPropertyOptional({
+    example: 38,
+    description:
+      'Sétima bola sorteada (1–60), usada para apurar o prêmio SENA_BONUS. Deve ser diferente dos 6 números principais.',
+  })
+  @IsOptional()
+  @IsInt({ message: 'setimaBola deve ser um número inteiro' })
+  @Min(1, { message: 'setimaBola deve ser entre 1 e 60' })
+  @Max(60, { message: 'setimaBola deve ser entre 1 e 60' })
+  setimaBola?: number;
+
   @ApiPropertyOptional({ example: 'https://cdn.example.com/resultado.png' })
   @IsOptional()
   @IsString({ message: 'imagemResultadoUrl deve ser um texto' })

@@ -40,6 +40,7 @@ export class SorteioSenaService {
     }
 
     this.validarNumerosSorteados(dto.numerosSorteados);
+    this.validarSetimaBola(dto.numerosSorteados, dto.setimaBola);
 
     let imagemResultadoUrl = dto.imagemResultadoUrl?.trim() || null;
     if (dto.imagemBase64?.trim()) {
@@ -67,10 +68,12 @@ export class SorteioSenaService {
       create: {
         edicaoSenaId,
         numerosSorteados: dto.numerosSorteados,
+        setimaBola: dto.setimaBola ?? null,
         imagemResultadoUrl,
       },
       update: {
         numerosSorteados: dto.numerosSorteados,
+        setimaBola: dto.setimaBola ?? null,
         // Só sobrescreve a imagem se uma nova foi enviada
         ...(imagemResultadoUrl !== null ? { imagemResultadoUrl } : {}),
         // Resetar apuração caso resultado seja corrigido
@@ -139,6 +142,7 @@ export class SorteioSenaService {
         resultado: edicao.resultado
           ? {
               numerosSorteados: edicao.resultado.numerosSorteados,
+              setimaBola: edicao.resultado.setimaBola,
               imagemResultadoUrl: edicao.resultado.imagemResultadoUrl,
               apurado: edicao.resultado.apurado,
               apuradoEm: edicao.resultado.apuradoEm,
@@ -165,6 +169,16 @@ export class SorteioSenaService {
     }
     if (numeros.some((n) => n < 1 || n > 60)) {
       throw new BadRequestException('Os números do resultado devem estar entre 1 e 60');
+    }
+  }
+
+  private validarSetimaBola(numerosSorteados: number[], setimaBola?: number): void {
+    if (setimaBola === undefined || setimaBola === null) return;
+
+    if (numerosSorteados.includes(setimaBola)) {
+      throw new ConflictException(
+        'A sétima bola não pode repetir um dos 6 números já sorteados',
+      );
     }
   }
 }
