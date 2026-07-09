@@ -57,6 +57,34 @@ interface CreateVendaSenaOptions {
   requireGateway?: boolean;
 }
 
+interface NumerosSenaRecebidos {
+  numeros: number[];
+  bola_extra: number;
+}
+
+interface CartelaSenaNormalizada {
+  numeros: number[];
+  bolaExtra: number;
+  modoSelecao: ModoSelecaoSena;
+}
+
+interface ClienteSenaCompra {
+  id: string;
+  cpf: string;
+  nome: string;
+  telefone: string;
+  email: string | null;
+  dataNascimento: Date | null;
+}
+
+interface DadosClientePagamentoSena {
+  id: string;
+  cpf: string;
+  nome: string;
+  telefone: string;
+  email: string;
+}
+
 @Injectable()
 export class VendasSenaService {
   private readonly logger = new Logger(VendasSenaService.name);
@@ -107,9 +135,10 @@ export class VendasSenaService {
       quantidadeCombo = combo.quantidade;
     }
 
-    // 3. Resolver cartelas: explícitas (MANUAL/SURPRESINHA) OU compra rápida
+    // 3. Resolver cartelas recebidas do frontend
     const cartelas = this.resolverCartelasDaVenda(
-      dto.cartelas,
+      dto.numeros,
+      dto.modoSelecao,
       dto.quantidade,
       quantidadeCombo,
     );
@@ -121,17 +150,16 @@ export class VendasSenaService {
       );
     }
 
-    // 4. Buscar ou criar cliente
-    const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cliente = await this.buscarOuCriarCliente(
-      cpfLimpo,
-      dto.nome,
-      dto.telefone,
-      dto.dataNascimento,
-      dto.email,
-      dto.vendedorId,
-      dto.distribuidorId,
-    );
+    // 4. Buscar cliente por ID ou criar/resolver pelo CPF legado
+    const cliente = dto.clienteId
+      ? await this.buscarClientePorIdParaCompra(
+          dto.clienteId,
+          dto.vendedorId,
+          dto.distribuidorId,
+        )
+      : await this.buscarOuCriarClientePorDto(dto);
+    const dadosClientePagamento =
+      this.validarDadosClienteParaPagamento(cliente);
 
     // 5. Validar vendedor / distribuidor
     if (dto.vendedorId) {
@@ -171,7 +199,7 @@ export class VendasSenaService {
       ? Number(valorCombo)
       : valorUnitario * cartelas.length;
 
-    // 8. Criar venda (MANUAL = imediatamente aprovado com geração do 7º)
+    // 8. Criar venda (MANUAL = imediatamente aprovado)
     if (tipoPagamento === TipoPagamento.MANUAL) {
       const resultado = await this.prisma.$transaction(async (tx) => {
         const venda = await tx.vendaSena.create({
@@ -188,7 +216,7 @@ export class VendasSenaService {
             origemParticipacao,
           },
         });
-        const cartelasGeradas = await this.criarCartelasComSetimoNumero(
+        const cartelasGeradas = await this.criarCartelasRecebidas(
           tx,
           venda.id,
           edicao.id,
@@ -227,7 +255,10 @@ export class VendasSenaService {
         tipoPagamento,
         origemParticipacao,
         // Guardar cartelas no payload para criar após confirmação
-        gatewayPayload: { cartelas } as unknown as Prisma.InputJsonValue,
+        gatewayPayload: {
+          modoSelecao: dto.modoSelecao,
+          numeros: this.toNumerosGatewayPayload(cartelas),
+        } as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -243,40 +274,43 @@ export class VendasSenaService {
 
     if (!options?.skipGateway) {
       try {
-      const gateway = this.paymentGatewayFactory.getGateway(tipoPagamento);
-      const cobranca = await gateway.criarCobranca({
-        vendaId: venda.id,
-        valorCentavos: Math.round(total * 100),
-        quantidadeItens: dto.comboSenaId ? 1 : cartelas.length,
-        valorUnitarioCentavos: dto.comboSenaId
-          ? Math.round(Number(valorCombo) * 100)
-          : Math.round(valorUnitario * 100),
-        descricao: `Capital Sena — Edição ${edicao.numero} — ${cartelas.length} cartela(s)`,
-        cpfPagador: cpfLimpo,
-        nomePagador: dto.nome,
-        emailPagador: dto.email,
-        telefonePagador: dto.telefone,
-        expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
-      });
+        const gateway = this.paymentGatewayFactory.getGateway(tipoPagamento);
+        const cobranca = await gateway.criarCobranca({
+          vendaId: venda.id,
+          valorCentavos: Math.round(total * 100),
+          quantidadeItens: dto.comboSenaId ? 1 : cartelas.length,
+          valorUnitarioCentavos: dto.comboSenaId
+            ? Math.round(Number(valorCombo) * 100)
+            : Math.round(valorUnitario * 100),
+          descricao: `Capital Sena — Edição ${edicao.numero} — ${cartelas.length} cartela(s)`,
+          cpfPagador: dadosClientePagamento.cpf,
+          nomePagador: dadosClientePagamento.nome,
+          emailPagador: dadosClientePagamento.email,
+          telefonePagador: dadosClientePagamento.telefone,
+          expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
+        });
 
-      await this.prisma.vendaSena.update({
-        where: { id: venda.id },
-        data: {
-          gatewayId: cobranca.gatewayId,
-          gatewayPayload: {
-            ...((cobranca.payload as Record<string, unknown>) ?? {}),
-            cartelas,
-          } as Prisma.InputJsonValue,
-        },
-      });
+        await this.prisma.vendaSena.update({
+          where: { id: venda.id },
+          data: {
+            gatewayId: cobranca.gatewayId,
+            gatewayPayload: {
+              ...((cobranca.payload as Record<string, unknown>) ?? {}),
+              modoSelecao: dto.modoSelecao,
+              numeros: this.toNumerosGatewayPayload(cartelas),
+            } as unknown as Prisma.InputJsonValue,
+          },
+        });
 
-      dadosPagamento = {
-        pixCopiaECola: cobranca.pixCopiaECola,
-        qrCodeBase64: cobranca.qrCodeBase64,
-        urlPagamento: cobranca.urlPagamento,
-      };
+        dadosPagamento = {
+          pixCopiaECola: cobranca.pixCopiaECola,
+          qrCodeBase64: cobranca.qrCodeBase64,
+          urlPagamento: cobranca.urlPagamento,
+        };
 
-      this.logger.log(`Cobrança Sena criada: gatewayId=${cobranca.gatewayId}`);
+        this.logger.log(
+          `Cobrança Sena criada: gatewayId=${cobranca.gatewayId}`,
+        );
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -290,9 +324,10 @@ export class VendasSenaService {
             data: {
               status: StatusVendaSena.RECUSADO,
               gatewayPayload: {
-                cartelas,
+                modoSelecao: dto.modoSelecao,
+                numeros: this.toNumerosGatewayPayload(cartelas),
                 erroPagamento: errorMessage,
-              } as Prisma.InputJsonValue,
+              } as unknown as Prisma.InputJsonValue,
             },
           });
           throw new BadGatewayException(
@@ -333,12 +368,13 @@ export class VendasSenaService {
       );
     }
 
-    // Recuperar cartelas do gatewayPayload
+    // Recuperar números do gatewayPayload
     const payload = (venda.gatewayPayload ?? {}) as Record<string, unknown>;
-    const cartelasRaw = (payload['cartelas'] ?? []) as {
-      numeros: number[];
-      modoSelecao: ModoSelecaoSena;
-    }[];
+    const numerosRaw = (payload['numeros'] ?? []) as NumerosSenaRecebidos[];
+    const modoSelecao = this.normalizarModoSelecao(
+      payload['modoSelecao'] as ModoSelecaoSena | undefined,
+    );
+    const cartelas = this.validarNumerosDaVenda(numerosRaw, modoSelecao);
 
     await this.prisma.$transaction(async (tx) => {
       // Atualizar status da venda
@@ -354,12 +390,12 @@ export class VendasSenaService {
         },
       });
 
-      // Criar cartelas com 7º número
-      await this.criarCartelasComSetimoNumero(
+      // Criar cartelas com a bola extra enviada pelo frontend
+      await this.criarCartelasRecebidas(
         tx,
         vendaSenaId,
         venda.edicaoSenaId,
-        cartelasRaw,
+        cartelas,
       );
 
       // Comissões
@@ -518,49 +554,55 @@ export class VendasSenaService {
 
   // ─── HELPERS ──────────────────────────────────────────
 
-  private static readonly MAX_TENTATIVAS_UNICA = 100;
   private static readonly NUMEROS_POR_CARTELA = 6;
   private static readonly NUMERO_MIN = 1;
   private static readonly NUMERO_MAX = 60;
 
   private resolverCartelasDaVenda(
-    cartelas: { numeros?: number[]; modoSelecao: ModoSelecaoSena }[] | undefined,
+    numerosRecebidos: NumerosSenaRecebidos[] | undefined,
+    modoSelecao: ModoSelecaoSena | undefined,
     quantidade: number | undefined,
     quantidadeCombo: number | null,
-  ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[] {
-    if (cartelas && cartelas.length > 0) {
-      return this.validarEGerarCartelas(cartelas);
+  ): CartelaSenaNormalizada[] {
+    if (!numerosRecebidos || numerosRecebidos.length === 0) {
+      throw new BadRequestException('Informe `numeros` para a compra Sena');
     }
 
-    const quantidadeRapida = quantidadeCombo ?? quantidade ?? 0;
-    if (quantidadeRapida <= 0) {
+    const cartelas = this.validarNumerosDaVenda(
+      numerosRecebidos,
+      this.normalizarModoSelecao(modoSelecao),
+    );
+    const quantidadeEsperada = quantidadeCombo ?? quantidade ?? null;
+
+    if (quantidadeEsperada !== null && cartelas.length !== quantidadeEsperada) {
       throw new BadRequestException(
-        'Informe `cartelas`, `quantidade` ou `comboSenaId` para a compra Sena',
+        `A compra Sena requer exatamente ${quantidadeEsperada} cartela(s) em numeros`,
       );
     }
 
-    return this.gerarCartelasCompraRapida(quantidadeRapida);
+    return cartelas;
   }
 
-  private validarEGerarCartelas(
-    itens: { numeros?: number[]; modoSelecao: ModoSelecaoSena }[],
-  ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[] {
+  private validarNumerosDaVenda(
+    itens: NumerosSenaRecebidos[],
+    modoSelecao: ModoSelecaoSena,
+  ): CartelaSenaNormalizada[] {
     return itens.map((item) => {
-      if (item.modoSelecao === ModoSelecaoSena.SURPRESINHA) {
-        return {
-          numeros: this.gerarNumerosSurpresinha(),
-          modoSelecao: item.modoSelecao,
-        };
-      }
-      if (!item.numeros || item.numeros.length !== VendasSenaService.NUMEROS_POR_CARTELA) {
+      if (
+        !Array.isArray(item.numeros) ||
+        item.numeros.length !== VendasSenaService.NUMEROS_POR_CARTELA
+      ) {
         throw new BadRequestException(
-          'Cartela manual requer exatamente 6 números',
+          'Cada item de numeros requer exatamente 6 números',
         );
       }
       this.validarNumerosCartela(item.numeros);
+      this.validarBolaExtra(item.bola_extra, item.numeros);
+
       return {
-        numeros: [...item.numeros].sort((a, b) => a - b),
-        modoSelecao: item.modoSelecao,
+        numeros: [...item.numeros],
+        bolaExtra: item.bola_extra,
+        modoSelecao,
       };
     });
   }
@@ -581,64 +623,52 @@ export class VendasSenaService {
     }
   }
 
-  private gerarNumerosSurpresinha(): number[] {
-    const numeros = new Set<number>();
-    while (numeros.size < VendasSenaService.NUMEROS_POR_CARTELA) {
-      numeros.add(
-        Math.floor(Math.random() * VendasSenaService.NUMERO_MAX) +
-          VendasSenaService.NUMERO_MIN,
+  private validarBolaExtra(bolaExtra: number, numeros: number[]): void {
+    if (
+      !Number.isInteger(bolaExtra) ||
+      bolaExtra < VendasSenaService.NUMERO_MIN ||
+      bolaExtra > VendasSenaService.NUMERO_MAX
+    ) {
+      throw new BadRequestException('bola_extra deve estar entre 1 e 60');
+    }
+
+    if (numeros.includes(bolaExtra)) {
+      throw new BadRequestException(
+        'bola_extra não pode repetir um dos 6 números da cartela',
       );
     }
-    return Array.from(numeros).sort((a, b) => a - b);
   }
 
-  /**
-   * Compra rápida: gera N cartelas surpresinha tentando maximizar a diferença
-   * entre elas. Como C(60,6) = 50.063.860, colisões são raras na prática; mesmo
-   * assim, fazemos retry por assinatura única e, no pior caso, aceitamos a
-   * duplicidade (regra: cartelas podem ser iguais, mas o sistema deve evitar).
-   */
-  private gerarCartelasCompraRapida(
-    quantidade: number,
-  ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[] {
-    const assinaturas = new Set<string>();
-    const cartelas: { numeros: number[]; modoSelecao: ModoSelecaoSena }[] = [];
-
-    for (let i = 0; i < quantidade; i++) {
-      let numeros = this.gerarNumerosSurpresinha();
-      let assinatura = numeros.join(',');
-      let tentativas = 1;
-      while (
-        assinaturas.has(assinatura) &&
-        tentativas < VendasSenaService.MAX_TENTATIVAS_UNICA
-      ) {
-        numeros = this.gerarNumerosSurpresinha();
-        assinatura = numeros.join(',');
-        tentativas++;
-      }
-      assinaturas.add(assinatura);
-      cartelas.push({ numeros, modoSelecao: ModoSelecaoSena.SURPRESINHA });
+  private normalizarModoSelecao(
+    modoSelecao: ModoSelecaoSena | undefined,
+  ): ModoSelecaoSena {
+    if (modoSelecao === undefined) {
+      return ModoSelecaoSena.MANUAL;
     }
 
-    return cartelas;
+    if (!Object.values(ModoSelecaoSena).includes(modoSelecao)) {
+      throw new BadRequestException(
+        'modoSelecao deve ser MANUAL ou SURPRESINHA',
+      );
+    }
+
+    return modoSelecao;
   }
 
-  private gerarSetimoNumero(numerosEscolhidos: number[]): number {
-    const set = new Set(numerosEscolhidos);
-    let setimo: number;
-    do {
-      setimo =
-        Math.floor(Math.random() * VendasSenaService.NUMERO_MAX) +
-        VendasSenaService.NUMERO_MIN;
-    } while (set.has(setimo));
-    return setimo;
+  private toNumerosGatewayPayload(
+    cartelas: CartelaSenaNormalizada[],
+  ): NumerosSenaRecebidos[] {
+    return cartelas.map((cartela) => ({
+      numeros: cartela.numeros,
+      bola_extra: cartela.bolaExtra,
+    }));
   }
 
-  private async criarCartelasComSetimoNumero(
+  private async criarCartelasRecebidas(
     tx: PrismaTransactionClient,
     vendaSenaId: string,
     edicaoSenaId: string,
-    cartelas: { numeros: number[]; modoSelecao: ModoSelecaoSena }[],
+    cartelas: CartelaSenaNormalizada[],
   ) {
     const criadas = await Promise.all(
       cartelas.map((c) =>
@@ -647,7 +677,7 @@ export class VendasSenaService {
             vendaSenaId,
             edicaoSenaId,
             numerosEscolhidos: c.numeros,
-            setimoNumero: this.gerarSetimoNumero(c.numeros),
+            setimoNumero: c.bolaExtra,
             modoSelecao: c.modoSelecao,
             status: StatusCartelaSena.CONFIRMADA,
           },
@@ -714,6 +744,103 @@ export class VendasSenaService {
     }
   }
 
+  private async buscarOuCriarClientePorDto(
+    dto: CreateVendaSenaDto,
+  ): Promise<ClienteSenaCompra> {
+    if (
+      !dto.cpf ||
+      !dto.nome ||
+      !dto.telefone ||
+      !dto.email ||
+      !dto.dataNascimento
+    ) {
+      throw new BadRequestException(
+        'Informe clienteId ou os dados completos do cliente para concluir a compra',
+      );
+    }
+
+    return this.buscarOuCriarCliente(
+      dto.cpf.replace(/\D/g, ''),
+      dto.nome,
+      dto.telefone,
+      dto.dataNascimento,
+      dto.email,
+      dto.vendedorId,
+      dto.distribuidorId,
+    );
+  }
+
+  private async buscarClientePorIdParaCompra(
+    clienteId: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ): Promise<ClienteSenaCompra> {
+    const relacionamentoMaisRecente =
+      await this.resolverRelacionamentoMaisRecenteDoCliente(
+        vendedorId,
+        distribuidorId,
+      );
+
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+      },
+    });
+
+    if (!cliente) {
+      throw new NotFoundException('Cliente não encontrado');
+    }
+
+    if (Object.keys(relacionamentoMaisRecente).length === 0) {
+      return cliente;
+    }
+
+    return this.prisma.cliente.update({
+      where: { id: clienteId },
+      data: relacionamentoMaisRecente,
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+      },
+    });
+  }
+
+  private validarDadosClienteParaPagamento(
+    cliente: ClienteSenaCompra,
+  ): DadosClientePagamentoSena {
+    if (!cliente.email) {
+      throw new BadRequestException(
+        'Cliente sem e-mail cadastrado. Atualize meus-dados antes de concluir a compra',
+      );
+    }
+
+    if (!cliente.dataNascimento) {
+      throw new BadRequestException(
+        'Cliente sem data de nascimento cadastrada. Atualize meus-dados antes de concluir a compra',
+      );
+    }
+
+    validarMaioridade(cliente.dataNascimento);
+
+    return {
+      id: cliente.id,
+      cpf: cliente.cpf.replace(/\D/g, ''),
+      nome: cliente.nome,
+      telefone: cliente.telefone,
+      email: cliente.email,
+    };
+  }
+
   private async buscarOuCriarCliente(
     cpf: string,
     nome: string,
@@ -722,7 +849,7 @@ export class VendasSenaService {
     email?: string,
     vendedorId?: string,
     distribuidorId?: string,
-  ) {
+  ): Promise<ClienteSenaCompra> {
     if (!dataNascimentoInput) {
       throw new BadRequestException(
         'dataNascimento é obrigatória para concluir a compra',

@@ -6,21 +6,24 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
 
 type ServicePrivado = VendasSenaService & {
-  gerarNumerosSurpresinha(): number[];
-  gerarSetimoNumero(numeros: number[]): number;
-  gerarCartelasCompraRapida(
-    quantidade: number,
-  ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[];
-  validarEGerarCartelas(
-    itens: { numeros?: number[]; modoSelecao: ModoSelecaoSena }[],
-  ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[];
+  validarNumerosDaVenda(
+    itens: {
+      numeros: number[];
+      bola_extra: number;
+    }[],
+    modoSelecao: ModoSelecaoSena,
+  ): { numeros: number[]; bolaExtra: number; modoSelecao: ModoSelecaoSena }[];
   resolverCartelasDaVenda(
-    cartelas:
-      | { numeros?: number[]; modoSelecao: ModoSelecaoSena }[]
+    numeros:
+      | {
+          numeros: number[];
+          bola_extra: number;
+        }[]
       | undefined,
+    modoSelecao: ModoSelecaoSena | undefined,
     quantidade: number | undefined,
     quantidadeCombo: number | null,
-  ): { numeros: number[]; modoSelecao: ModoSelecaoSena }[];
+  ): { numeros: number[]; bolaExtra: number; modoSelecao: ModoSelecaoSena }[];
   buscarOuCriarCliente(
     cpf: string,
     nome: string,
@@ -30,6 +33,25 @@ type ServicePrivado = VendasSenaService & {
     vendedorId?: string,
     distribuidorId?: string,
   ): Promise<unknown>;
+  buscarClientePorIdParaCompra(
+    clienteId: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ): Promise<unknown>;
+  validarDadosClienteParaPagamento(cliente: {
+    id: string;
+    cpf: string;
+    nome: string;
+    telefone: string;
+    email: string | null;
+    dataNascimento: Date | null;
+  }): {
+    id: string;
+    cpf: string;
+    nome: string;
+    telefone: string;
+    email: string;
+  };
 };
 
 describe('VendasSenaService', () => {
@@ -75,156 +97,190 @@ describe('VendasSenaService', () => {
     ) as ServicePrivado;
   });
 
-  // ─── gerarNumerosSurpresinha ─────────────────────────────
+  // ─── validarNumerosDaVenda ───────────────────────────────
 
-  describe('gerarNumerosSurpresinha', () => {
-    it('retorna exatamente 6 números únicos entre 1 e 60, ordenados', () => {
-      for (let i = 0; i < 100; i++) {
-        const numeros = service.gerarNumerosSurpresinha();
-        expect(numeros).toHaveLength(6);
-        expect(new Set(numeros).size).toBe(6);
-        expect(numeros.every((n) => n >= 1 && n <= 60)).toBe(true);
-        const ordenados = [...numeros].sort((a, b) => a - b);
-        expect(numeros).toEqual(ordenados);
-      }
-    });
-  });
-
-  // ─── gerarSetimoNumero ───────────────────────────────────
-
-  describe('gerarSetimoNumero', () => {
-    it('nunca repete com os 6 escolhidos (varredura 1000x)', () => {
-      const escolhidos = [3, 12, 24, 37, 45, 58];
-      const set = new Set(escolhidos);
-      for (let i = 0; i < 1000; i++) {
-        const setimo = service.gerarSetimoNumero(escolhidos);
-        expect(setimo).toBeGreaterThanOrEqual(1);
-        expect(setimo).toBeLessThanOrEqual(60);
-        expect(set.has(setimo)).toBe(false);
-      }
-    });
-  });
-
-  // ─── Compra rápida (diferenciação) ───────────────────────
-
-  describe('gerarCartelasCompraRapida', () => {
-    it('gera a quantidade pedida, todas com modoSelecao=SURPRESINHA', () => {
-      const cartelas = service.gerarCartelasCompraRapida(7);
-      expect(cartelas).toHaveLength(7);
-      cartelas.forEach((c) => {
-        expect(c.modoSelecao).toBe(ModoSelecaoSena.SURPRESINHA);
-        expect(c.numeros).toHaveLength(6);
-        expect(new Set(c.numeros).size).toBe(6);
-      });
-    });
-
-    it('produz cartelas únicas entre si quando N é pequeno (50)', () => {
-      const cartelas = service.gerarCartelasCompraRapida(50);
-      const assinaturas = cartelas.map((c) => c.numeros.join(','));
-      const unicas = new Set(assinaturas);
-      expect(unicas.size).toBe(cartelas.length);
-    });
-
-    it('cada cartela respeita 6 números únicos + 7º distinto (composto)', () => {
-      const cartelas = service.gerarCartelasCompraRapida(20);
-      cartelas.forEach((c) => {
-        const setimo = service.gerarSetimoNumero(c.numeros);
-        const todos = [...c.numeros, setimo];
-        expect(new Set(todos).size).toBe(7);
-        expect(todos.every((n) => n >= 1 && n <= 60)).toBe(true);
-      });
-    });
-  });
-
-  // ─── validarEGerarCartelas (modo MANUAL) ─────────────────
-
-  describe('validarEGerarCartelas', () => {
-    it('aceita MANUAL com 6 números válidos e ordena retornado', () => {
+  describe('validarNumerosDaVenda', () => {
+    it('aceita 6 números válidos com bola extra e preserva a ordem recebida', () => {
       const itens = [
-        { numeros: [58, 3, 24, 12, 45, 37], modoSelecao: ModoSelecaoSena.MANUAL },
+        {
+          numeros: [58, 3, 24, 12, 45, 37],
+          bola_extra: 7,
+        },
       ];
-      const resultado = service.validarEGerarCartelas(itens);
+      const resultado = service.validarNumerosDaVenda(
+        itens,
+        ModoSelecaoSena.MANUAL,
+      );
       expect(resultado).toHaveLength(1);
-      expect(resultado[0].numeros).toEqual([3, 12, 24, 37, 45, 58]);
+      expect(resultado[0].numeros).toEqual([58, 3, 24, 12, 45, 37]);
+      expect(resultado[0].bolaExtra).toBe(7);
       expect(resultado[0].modoSelecao).toBe(ModoSelecaoSena.MANUAL);
     });
 
-    it('rejeita MANUAL com números repetidos', () => {
+    it('preserva modoSelecao=SURPRESINHA mesmo com números enviados pelo frontend', () => {
+      const resultado = service.validarNumerosDaVenda(
+        [
+          {
+            numeros: [1, 2, 3, 4, 5, 6],
+            bola_extra: 7,
+          },
+        ],
+        ModoSelecaoSena.SURPRESINHA,
+      );
+
+      expect(resultado[0]).toMatchObject({
+        numeros: [1, 2, 3, 4, 5, 6],
+        bolaExtra: 7,
+        modoSelecao: ModoSelecaoSena.SURPRESINHA,
+      });
+    });
+
+    it('rejeita números repetidos', () => {
       expect(() =>
-        service.validarEGerarCartelas([
-          { numeros: [3, 3, 12, 24, 45, 58], modoSelecao: ModoSelecaoSena.MANUAL },
-        ]),
+        service.validarNumerosDaVenda(
+          [
+            {
+              numeros: [3, 3, 12, 24, 45, 58],
+              bola_extra: 7,
+            },
+          ],
+          ModoSelecaoSena.MANUAL,
+        ),
       ).toThrow(BadRequestException);
     });
 
-    it('rejeita MANUAL com número fora do intervalo 1-60', () => {
+    it('rejeita número fora do intervalo 1-60', () => {
       expect(() =>
-        service.validarEGerarCartelas([
-          { numeros: [0, 12, 24, 37, 45, 58], modoSelecao: ModoSelecaoSena.MANUAL },
-        ]),
+        service.validarNumerosDaVenda(
+          [
+            {
+              numeros: [0, 12, 24, 37, 45, 58],
+              bola_extra: 7,
+            },
+          ],
+          ModoSelecaoSena.MANUAL,
+        ),
       ).toThrow(BadRequestException);
       expect(() =>
-        service.validarEGerarCartelas([
-          { numeros: [3, 12, 24, 37, 45, 61], modoSelecao: ModoSelecaoSena.MANUAL },
-        ]),
+        service.validarNumerosDaVenda(
+          [
+            {
+              numeros: [3, 12, 24, 37, 45, 61],
+              bola_extra: 7,
+            },
+          ],
+          ModoSelecaoSena.MANUAL,
+        ),
       ).toThrow(BadRequestException);
     });
 
-    it('rejeita MANUAL com menos de 6 números', () => {
+    it('rejeita item com menos de 6 números', () => {
       expect(() =>
-        service.validarEGerarCartelas([
-          { numeros: [3, 12, 24, 37, 45], modoSelecao: ModoSelecaoSena.MANUAL },
-        ]),
+        service.validarNumerosDaVenda(
+          [
+            {
+              numeros: [3, 12, 24, 37, 45],
+              bola_extra: 7,
+            },
+          ],
+          ModoSelecaoSena.MANUAL,
+        ),
       ).toThrow(BadRequestException);
     });
 
-    it('SURPRESINHA ignora números fornecidos e gera novos', () => {
-      const resultado = service.validarEGerarCartelas([
-        { numeros: [1, 2, 3, 4, 5, 6], modoSelecao: ModoSelecaoSena.SURPRESINHA },
-      ]);
-      expect(resultado[0].numeros).toHaveLength(6);
-      expect(resultado[0].modoSelecao).toBe(ModoSelecaoSena.SURPRESINHA);
+    it('rejeita bola extra fora do intervalo ou repetida nos 6 números', () => {
+      expect(() =>
+        service.validarNumerosDaVenda(
+          [
+            {
+              numeros: [1, 2, 3, 4, 5, 6],
+              bola_extra: 61,
+            },
+          ],
+          ModoSelecaoSena.MANUAL,
+        ),
+      ).toThrow(BadRequestException);
+
+      expect(() =>
+        service.validarNumerosDaVenda(
+          [
+            {
+              numeros: [1, 2, 3, 4, 5, 6],
+              bola_extra: 6,
+            },
+          ],
+          ModoSelecaoSena.MANUAL,
+        ),
+      ).toThrow(BadRequestException);
     });
   });
 
   // ─── resolverCartelasDaVenda ────────────────────────────
 
   describe('resolverCartelasDaVenda', () => {
-    it('usa cartelas explícitas quando informadas', () => {
+    it('usa números explícitos quando informados', () => {
       const cartelas = service.resolverCartelasDaVenda(
-        [{ numeros: [3, 12, 24, 37, 45, 58], modoSelecao: ModoSelecaoSena.MANUAL }],
+        [
+          {
+            numeros: [3, 12, 24, 37, 45, 58],
+            bola_extra: 7,
+          },
+        ],
+        ModoSelecaoSena.MANUAL,
         undefined,
         null,
       );
       expect(cartelas).toHaveLength(1);
       expect(cartelas[0].numeros).toEqual([3, 12, 24, 37, 45, 58]);
+      expect(cartelas[0].bolaExtra).toBe(7);
     });
 
-    it('gera compra rápida pelo combo quando cartelas vazio', () => {
-      const cartelas = service.resolverCartelasDaVenda(undefined, undefined, 5);
-      expect(cartelas).toHaveLength(5);
-      cartelas.forEach((c) => {
-        expect(c.modoSelecao).toBe(ModoSelecaoSena.SURPRESINHA);
-      });
-    });
-
-    it('combo tem prioridade sobre quantidade na compra rápida', () => {
-      const cartelas = service.resolverCartelasDaVenda(undefined, 10, 3);
-      expect(cartelas).toHaveLength(3);
-    });
-
-    it('usa quantidade quando cartelas vazio e sem combo', () => {
-      const cartelas = service.resolverCartelasDaVenda(undefined, 4, null);
-      expect(cartelas).toHaveLength(4);
-    });
-
-    it('lança BadRequest quando não há cartelas, quantidade nem combo', () => {
+    it('exige o campo numeros', () => {
       expect(() =>
-        service.resolverCartelasDaVenda(undefined, undefined, null),
+        service.resolverCartelasDaVenda(
+          undefined,
+          ModoSelecaoSena.MANUAL,
+          undefined,
+          null,
+        ),
       ).toThrow(BadRequestException);
       expect(() =>
-        service.resolverCartelasDaVenda([], undefined, null),
+        service.resolverCartelasDaVenda(
+          [],
+          ModoSelecaoSena.MANUAL,
+          undefined,
+          null,
+        ),
       ).toThrow(BadRequestException);
+    });
+
+    it('valida quantidade esperada por combo ou quantidade', () => {
+      const itens = [
+        {
+          numeros: [3, 12, 24, 37, 45, 58],
+          bola_extra: 7,
+        },
+      ];
+
+      expect(() =>
+        service.resolverCartelasDaVenda(
+          itens,
+          ModoSelecaoSena.MANUAL,
+          undefined,
+          2,
+        ),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        service.resolverCartelasDaVenda(itens, ModoSelecaoSena.MANUAL, 2, null),
+      ).toThrow(BadRequestException);
+      expect(
+        service.resolverCartelasDaVenda(
+          itens,
+          ModoSelecaoSena.MANUAL,
+          undefined,
+          1,
+        ),
+      ).toHaveLength(1);
     });
   });
 
@@ -289,6 +345,87 @@ describe('VendasSenaService', () => {
       expect(mockPrisma.cliente.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.cliente.create).not.toHaveBeenCalled();
       expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('clienteId na compra', () => {
+    it('busca cliente por id para compra Sena e atualiza origem quando vendedor informado', async () => {
+      const cliente = {
+        id: 'cliente-1',
+        cpf: '06790319107',
+        nome: 'Jair Rodrigues',
+        telefone: '(92) 99999-9999',
+        email: 'jair@email.com',
+        dataNascimento: new Date('1991-05-01T00:00:00.000Z'),
+      };
+      mockPrisma.vendedor.findUnique.mockResolvedValueOnce({
+        id: 'vendedor-1',
+        distribuidorId: 'distribuidor-1',
+      });
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(cliente);
+      mockPrisma.cliente.update.mockResolvedValueOnce({
+        ...cliente,
+        vendedorId: 'vendedor-1',
+        distribuidorId: 'distribuidor-1',
+      });
+
+      const result = await service.buscarClientePorIdParaCompra(
+        'cliente-1',
+        'vendedor-1',
+      );
+
+      expect(mockPrisma.cliente.findUnique).toHaveBeenCalledWith({
+        where: { id: 'cliente-1' },
+        select: {
+          id: true,
+          cpf: true,
+          nome: true,
+          telefone: true,
+          email: true,
+          dataNascimento: true,
+        },
+      });
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith({
+        where: { id: 'cliente-1' },
+        data: {
+          vendedorId: 'vendedor-1',
+          distribuidorId: 'distribuidor-1',
+        },
+        select: {
+          id: true,
+          cpf: true,
+          nome: true,
+          telefone: true,
+          email: true,
+          dataNascimento: true,
+        },
+      });
+      expect(result).toMatchObject({ id: 'cliente-1' });
+    });
+
+    it('exige e-mail e data de nascimento salvos para pagar por clienteId', () => {
+      const clienteBase = {
+        id: 'cliente-1',
+        cpf: '06790319107',
+        nome: 'Jair Rodrigues',
+        telefone: '(92) 99999-9999',
+      };
+
+      expect(() =>
+        service.validarDadosClienteParaPagamento({
+          ...clienteBase,
+          email: null,
+          dataNascimento: new Date('1991-05-01T00:00:00.000Z'),
+        }),
+      ).toThrow('Cliente sem e-mail cadastrado');
+
+      expect(() =>
+        service.validarDadosClienteParaPagamento({
+          ...clienteBase,
+          email: 'jair@email.com',
+          dataNascimento: null,
+        }),
+      ).toThrow('Cliente sem data de nascimento cadastrada');
     });
   });
 });
