@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -42,6 +44,7 @@ export class PagamentosController {
   // ─── WEBHOOKS (sem autenticação) ──────────────────────
 
   @Post('pagamentos/webhook/pix')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Webhook PIX do PagBank — Notificação de pagamento (sem auth)',
   })
@@ -50,6 +53,7 @@ export class PagamentosController {
   }
 
   @Post('pagamentos/webhook/cartao')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Webhook Cartão de Crédito do PagBank — Notificação de pagamento (sem auth)',
@@ -59,6 +63,7 @@ export class PagamentosController {
   }
 
   @Post('pagamentos/webhook/mercadopago')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Webhook PIX do Mercado Pago (API Pagamentos) — Notificação de pagamento (sem auth)',
@@ -76,6 +81,7 @@ export class PagamentosController {
   }
 
   @Post('pagamentos/webhook/agilizepay')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Webhook PIX do AgilizePay — Notificação de pagamento (sem auth)',
   })
@@ -84,6 +90,7 @@ export class PagamentosController {
   }
 
   @Post('pagamentos/webhook/fspay')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Webhook PIX do FSPay — Notificação de pagamento PAID/EXPIRED (sem auth)',
