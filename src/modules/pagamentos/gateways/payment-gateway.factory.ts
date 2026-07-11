@@ -3,6 +3,8 @@ import { TipoPagamento } from '@prisma/client';
 import { PagBankPixGateway } from './pagbank-pix.gateway';
 import { PagBankCartaoGateway } from './pagbank-cartao.gateway';
 import { MercadoPagoPixGateway } from './mercadopago-pix.gateway';
+import { AgilizePayPixGateway } from './agilizepay-pix.gateway';
+import { FsPayPixGateway } from './fspay-pix.gateway';
 import { MockPixGateway } from './mock-pix.gateway';
 import { ConfigService } from '@nestjs/config';
 import type { PaymentGateway } from './payment-gateway.interface';
@@ -12,7 +14,7 @@ import type { PaymentGateway } from './payment-gateway.interface';
  * com base no TipoPagamento informado.
  *
  * O provedor de PIX é selecionado via env `PIX_GATEWAY_PROVIDER`
- * (PAGBANK | MERCADOPAGO, default PAGBANK).
+ * (FSPAY | AGILIZEPAY | PAGBANK | MERCADOPAGO, default FSPAY).
  */
 @Injectable()
 export class PaymentGatewayFactory {
@@ -20,6 +22,8 @@ export class PaymentGatewayFactory {
     private readonly config: ConfigService,
     private readonly pagBankPixGateway: PagBankPixGateway,
     private readonly mercadoPagoPixGateway: MercadoPagoPixGateway,
+    private readonly agilizePayPixGateway: AgilizePayPixGateway,
+    private readonly fsPayPixGateway: FsPayPixGateway,
     private readonly mockPixGateway: MockPixGateway,
     private readonly pagBankCartaoGateway: PagBankCartaoGateway,
   ) {}
@@ -60,29 +64,51 @@ export class PaymentGatewayFactory {
     tipo: TipoPagamento,
     gatewayPayload?: unknown,
   ): PaymentGateway {
-    if (tipo === TipoPagamento.PIX && this.foiCriadoNoMercadoPago(gatewayPayload)) {
-      return this.mercadoPagoPixGateway;
+    if (tipo === TipoPagamento.PIX) {
+      if (this.temChavePayload(gatewayPayload, 'mercadoPagoResponse')) {
+        return this.mercadoPagoPixGateway;
+      }
+
+      if (this.temChavePayload(gatewayPayload, 'pagbankResponse')) {
+        return this.pagBankPixGateway;
+      }
+
+      if (this.temChavePayload(gatewayPayload, 'agilizepayResponse')) {
+        return this.agilizePayPixGateway;
+      }
+
+      if (this.temChavePayload(gatewayPayload, 'fspayResponse')) {
+        return this.fsPayPixGateway;
+      }
     }
 
     return this.getGateway(tipo);
   }
 
-  private foiCriadoNoMercadoPago(gatewayPayload: unknown): boolean {
+  private temChavePayload(gatewayPayload: unknown, chave: string): boolean {
     return (
       typeof gatewayPayload === 'object' &&
       gatewayPayload !== null &&
-      'mercadoPagoResponse' in gatewayPayload
+      chave in gatewayPayload
     );
   }
 
   private resolverProvedorPix(): PaymentGateway {
     const provedor = this.config
-      .get<string>('PIX_GATEWAY_PROVIDER', 'PAGBANK')
+      .get<string>('PIX_GATEWAY_PROVIDER', 'FSPAY')
       .trim()
       .toUpperCase();
 
-    return provedor === 'MERCADOPAGO'
-      ? this.mercadoPagoPixGateway
-      : this.pagBankPixGateway;
+    switch (provedor) {
+      case 'PAGBANK':
+        return this.pagBankPixGateway;
+      case 'MERCADOPAGO':
+        return this.mercadoPagoPixGateway;
+      case 'AGILIZEPAY':
+        return this.agilizePayPixGateway;
+      case 'FSPAY':
+      default:
+        return this.fsPayPixGateway;
+    }
   }
 }

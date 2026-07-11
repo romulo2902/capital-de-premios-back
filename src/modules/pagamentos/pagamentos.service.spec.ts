@@ -4,6 +4,8 @@ import { PagamentosService } from './pagamentos.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { MercadoPagoPixGateway } from './gateways/mercadopago-pix.gateway';
+import { AgilizePayPixGateway } from './gateways/agilizepay-pix.gateway';
+import { FsPayPixGateway } from './gateways/fspay-pix.gateway';
 import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import { DistributedLockService } from '../../common/redis/distributed-lock.service';
@@ -25,6 +27,18 @@ describe('PagamentosService', () => {
   };
 
   const mockMercadoPagoPixGateway = {
+    criarCobranca: jest.fn(),
+    consultarCobranca: jest.fn(),
+    cancelarCobranca: jest.fn(),
+  };
+
+  const mockAgilizePayPixGateway = {
+    criarCobranca: jest.fn(),
+    consultarCobranca: jest.fn(),
+    cancelarCobranca: jest.fn(),
+  };
+
+  const mockFsPayPixGateway = {
     criarCobranca: jest.fn(),
     consultarCobranca: jest.fn(),
     cancelarCobranca: jest.fn(),
@@ -76,6 +90,8 @@ describe('PagamentosService', () => {
         },
         { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
         { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
+        { provide: AgilizePayPixGateway, useValue: mockAgilizePayPixGateway },
+        { provide: FsPayPixGateway, useValue: mockFsPayPixGateway },
         { provide: VendasService, useValue: mockVendasService },
         { provide: VendasSenaService, useValue: mockVendasSenaService },
         {
@@ -191,6 +207,8 @@ describe('PagamentosService', () => {
             useValue: mockPaymentGatewayFactory,
           },
           { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
+          { provide: AgilizePayPixGateway, useValue: mockAgilizePayPixGateway },
+        { provide: FsPayPixGateway, useValue: mockFsPayPixGateway },
           { provide: VendasService, useValue: mockVendasService },
           { provide: VendasSenaService, useValue: mockVendasSenaService },
           {
@@ -305,6 +323,8 @@ describe('PagamentosService', () => {
             useValue: mockPaymentGatewayFactory,
           },
           { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
+          { provide: AgilizePayPixGateway, useValue: mockAgilizePayPixGateway },
+        { provide: FsPayPixGateway, useValue: mockFsPayPixGateway },
           { provide: VendasService, useValue: mockVendasService },
           { provide: VendasSenaService, useValue: mockVendasSenaService },
           {
@@ -343,6 +363,8 @@ describe('PagamentosService', () => {
             useValue: mockPaymentGatewayFactory,
           },
           { provide: MercadoPagoPixGateway, useValue: mockMercadoPagoPixGateway },
+          { provide: AgilizePayPixGateway, useValue: mockAgilizePayPixGateway },
+        { provide: FsPayPixGateway, useValue: mockFsPayPixGateway },
           { provide: VendasService, useValue: mockVendasService },
           { provide: VendasSenaService, useValue: mockVendasSenaService },
           {
@@ -375,6 +397,155 @@ describe('PagamentosService', () => {
         gatewayId: '123456',
         status: 'IGNORADO_PENDENTE',
       });
+    });
+  });
+
+  describe('processarWebhookAgilizePay', () => {
+    it('should return message when idTransaction is missing', async () => {
+      const result = await service.processarWebhookAgilizePay({});
+      expect(result.message).toContain('sem dados');
+    });
+
+    it('should ignore payment that is not yet approved', async () => {
+      mockAgilizePayPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'PENDENTE',
+        payload: {},
+      });
+
+      const result = await service.processarWebhookAgilizePay({
+        idTransaction: 'txid-123',
+        statusTransaction: 'sucesso',
+      });
+
+      expect(result.data).toEqual({
+        gatewayId: 'txid-123',
+        status: 'IGNORADO_PENDENTE',
+      });
+      expect(mockVendasService.confirmarPagamento).not.toHaveBeenCalled();
+    });
+
+    it('should confirm payment when the gateway re-query reports approved, regardless of body status', async () => {
+      mockAgilizePayPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'APROVADO',
+        payload: { txid: 'txid-123' },
+      });
+      mockPrisma.venda.findFirst.mockResolvedValue({
+        id: 'venda-1',
+        status: 'PENDENTE',
+      });
+      mockVendasService.confirmarPagamento.mockResolvedValue({});
+
+      const result = await service.processarWebhookAgilizePay({
+        idTransaction: 'txid-123',
+        statusTransaction: 'sucesso',
+      });
+
+      expect(result.data).toEqual({ gatewayId: 'txid-123', status: 'CONFIRMADA' });
+      expect(mockAgilizePayPixGateway.consultarCobranca).toHaveBeenCalledWith(
+        'txid-123',
+      );
+      expect(mockVendasService.confirmarPagamento).toHaveBeenCalledWith(
+        'venda-1',
+        expect.any(Object),
+      );
+    });
+
+    it('should skip already processed vendas', async () => {
+      mockAgilizePayPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'APROVADO',
+        payload: {},
+      });
+      mockPrisma.venda.findFirst.mockResolvedValue({
+        id: 'venda-1',
+        status: 'APROVADO',
+      });
+
+      const result = await service.processarWebhookAgilizePay({
+        idTransaction: 'txid-123',
+      });
+
+      expect(result.data).toEqual({
+        gatewayId: 'txid-123',
+        status: 'JA_PROCESSADA',
+      });
+      expect(mockVendasService.confirmarPagamento).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processarWebhookFsPay', () => {
+    it('should return message when idempotency_id is missing', async () => {
+      const result = await service.processarWebhookFsPay({});
+      expect(result.message).toContain('sem dados');
+    });
+
+    it('should ignore an EXPIRED transaction (re-queried, never trusts body status)', async () => {
+      mockFsPayPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'EXPIRADO',
+        payload: {},
+      });
+
+      const result = await service.processarWebhookFsPay({
+        idempotency_id: 'venda-uuid-1',
+        status: 'EXPIRED',
+        type: 'PIX_EXPIRED',
+      });
+
+      expect(result.data).toEqual({
+        gatewayId: 'venda-uuid-1',
+        status: 'IGNORADO_EXPIRADO',
+      });
+      expect(mockVendasService.confirmarPagamento).not.toHaveBeenCalled();
+    });
+
+    it('should confirm payment when the gateway re-query reports approved, regardless of body status', async () => {
+      mockFsPayPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'APROVADO',
+        payload: { idempotency_id: 'venda-uuid-1' },
+      });
+      mockPrisma.venda.findFirst.mockResolvedValue({
+        id: 'venda-1',
+        status: 'PENDENTE',
+      });
+      mockVendasService.confirmarPagamento.mockResolvedValue({});
+
+      const result = await service.processarWebhookFsPay({
+        idempotency_id: 'venda-uuid-1',
+        status: 'PAID',
+        type: 'PIX',
+      });
+
+      expect(result.data).toEqual({
+        gatewayId: 'venda-uuid-1',
+        status: 'CONFIRMADA',
+      });
+      expect(mockFsPayPixGateway.consultarCobranca).toHaveBeenCalledWith(
+        'venda-uuid-1',
+      );
+      expect(mockVendasService.confirmarPagamento).toHaveBeenCalledWith(
+        'venda-1',
+        expect.any(Object),
+      );
+    });
+
+    it('should skip already processed vendas', async () => {
+      mockFsPayPixGateway.consultarCobranca.mockResolvedValue({
+        status: 'APROVADO',
+        payload: {},
+      });
+      mockPrisma.venda.findFirst.mockResolvedValue({
+        id: 'venda-1',
+        status: 'APROVADO',
+      });
+
+      const result = await service.processarWebhookFsPay({
+        idempotency_id: 'venda-uuid-1',
+      });
+
+      expect(result.data).toEqual({
+        gatewayId: 'venda-uuid-1',
+        status: 'JA_PROCESSADA',
+      });
+      expect(mockVendasService.confirmarPagamento).not.toHaveBeenCalled();
     });
   });
 

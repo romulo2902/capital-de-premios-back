@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -28,6 +30,8 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
  *   - POST /pagamentos/webhook/pix           → Callback PIX PagBank (sem auth)
  *   - POST /pagamentos/webhook/cartao        → Callback Cartão PagBank (sem auth)
  *   - POST /pagamentos/webhook/mercadopago   → Callback PIX Mercado Pago (sem auth)
+ *   - POST /pagamentos/webhook/agilizepay    → Callback PIX AgilizePay (sem auth)
+ *   - POST /pagamentos/webhook/fspay         → Callback PIX FSPay (sem auth)
  *   - GET  /admin/pagamentos                  → Listar pagamentos (ADMIN)
  *   - GET  /admin/pagamentos/:id              → Detalhes de pagamento (ADMIN)
  *   - GET  /admin/pagamentos/vendas/:id/status → Consultar status no gateway (ADMIN)
@@ -40,6 +44,7 @@ export class PagamentosController {
   // ─── WEBHOOKS (sem autenticação) ──────────────────────
 
   @Post('pagamentos/webhook/pix')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Webhook PIX do PagBank — Notificação de pagamento (sem auth)',
   })
@@ -48,6 +53,7 @@ export class PagamentosController {
   }
 
   @Post('pagamentos/webhook/cartao')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Webhook Cartão de Crédito do PagBank — Notificação de pagamento (sem auth)',
@@ -57,6 +63,7 @@ export class PagamentosController {
   }
 
   @Post('pagamentos/webhook/mercadopago')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Webhook PIX do Mercado Pago (API Pagamentos) — Notificação de pagamento (sem auth)',
@@ -71,6 +78,25 @@ export class PagamentosController {
       query,
       body,
     );
+  }
+
+  @Post('pagamentos/webhook/agilizepay')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Webhook PIX do AgilizePay — Notificação de pagamento (sem auth)',
+  })
+  webhookAgilizePay(@Body() body: Record<string, unknown>) {
+    return this.pagamentosService.processarWebhookAgilizePay(body);
+  }
+
+  @Post('pagamentos/webhook/fspay')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Webhook PIX do FSPay — Notificação de pagamento PAID/EXPIRED (sem auth)',
+  })
+  webhookFsPay(@Body() body: Record<string, unknown>) {
+    return this.pagamentosService.processarWebhookFsPay(body);
   }
 
   // ─── ADMIN ROUTES ─────────────────────────────────────
