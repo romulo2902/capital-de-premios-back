@@ -28,6 +28,8 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
  *   - POST /pagamentos/webhook/pix           → Callback PIX PagBank (sem auth)
  *   - POST /pagamentos/webhook/cartao        → Callback Cartão PagBank (sem auth)
  *   - POST /pagamentos/webhook/mercadopago   → Callback PIX Mercado Pago (sem auth)
+ *   - POST /pagamentos/webhook/agilizepay    → Callback PIX AgilizePay (sem auth)
+ *   - POST /pagamentos/webhook/fspay         → Callback PIX FSPay (sem auth)
  *   - GET  /admin/pagamentos                  → Listar pagamentos (ADMIN)
  *   - GET  /admin/pagamentos/:id              → Detalhes de pagamento (ADMIN)
  *   - GET  /admin/pagamentos/vendas/:id/status → Consultar status no gateway (ADMIN)
@@ -71,6 +73,23 @@ export class PagamentosController {
       query,
       body,
     );
+  }
+
+  @Post('pagamentos/webhook/agilizepay')
+  @ApiOperation({
+    summary: 'Webhook PIX do AgilizePay — Notificação de pagamento (sem auth)',
+  })
+  webhookAgilizePay(@Body() body: Record<string, unknown>) {
+    return this.pagamentosService.processarWebhookAgilizePay(body);
+  }
+
+  @Post('pagamentos/webhook/fspay')
+  @ApiOperation({
+    summary:
+      'Webhook PIX do FSPay — Notificação de pagamento PAID/EXPIRED (sem auth)',
+  })
+  webhookFsPay(@Body() body: Record<string, unknown>) {
+    return this.pagamentosService.processarWebhookFsPay(body);
   }
 
   // ─── ADMIN ROUTES ─────────────────────────────────────

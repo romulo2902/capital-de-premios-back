@@ -15,6 +15,8 @@ import { Prisma, StatusVenda, StatusVendaSena } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayFactory } from './gateways/payment-gateway.factory';
 import { MercadoPagoPixGateway } from './gateways/mercadopago-pix.gateway';
+import { AgilizePayPixGateway } from './gateways/agilizepay-pix.gateway';
+import { FsPayPixGateway } from './gateways/fspay-pix.gateway';
 import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import { DistributedLockService } from '../../common/redis/distributed-lock.service';
@@ -59,6 +61,8 @@ export class PagamentosService {
     private readonly config: ConfigService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
     private readonly mercadoPagoPixGateway: MercadoPagoPixGateway,
+    private readonly agilizePayPixGateway: AgilizePayPixGateway,
+    private readonly fsPayPixGateway: FsPayPixGateway,
     private readonly vendasService: VendasService,
     @Inject(forwardRef(() => VendasSenaService))
     private readonly vendasSenaService: VendasSenaService,
@@ -217,6 +221,276 @@ export class PagamentosService {
       return {
         message: 'Webhook processado',
         data: { gatewayId: paymentId, status: 'ERRO' },
+      };
+    } finally {
+      await this.distributedLock.release(lock);
+    }
+  }
+
+  // ─── WEBHOOK PIX (AgilizePay) ──────────────────────────
+  //
+  // O AgilizePay não assina o webhook (sem HMAC/secret, só o header
+  // `client_id`) — por isso, assim como no Mercado Pago, nunca confiamos no
+  // `statusTransaction` embutido no corpo: o status real é sempre buscado
+  // via GET /pix/{txid} antes de confirmar qualquer pagamento.
+
+  async processarWebhookAgilizePay(body: Record<string, unknown>) {
+    this.logger.log(`Webhook AgilizePay recebido: ${JSON.stringify(body)}`);
+
+    const txid = this.extrairTxidAgilizePay(body);
+    if (!txid) {
+      this.logger.warn(
+        'Webhook AgilizePay sem idTransaction/txid — ignorado',
+      );
+      return { message: 'Webhook recebido (sem dados de pagamento)' };
+    }
+
+    const lockKey = `lock:agilizepay:webhook:${txid}`;
+    const lock = await this.distributedLock.acquire(lockKey, 30_000);
+    if (!lock) {
+      this.logger.warn(
+        `Webhook AgilizePay ignorado temporariamente para transação ${txid} (já em processamento em outra instância)`,
+      );
+      return {
+        message: 'Webhook em processamento',
+        data: { gatewayId: txid, status: 'EM_PROCESSAMENTO' },
+      };
+    }
+
+    try {
+      const resultado = await this.agilizePayPixGateway.consultarCobranca(txid);
+
+      if (resultado.status !== 'APROVADO') {
+        this.logger.log(
+          `Transação AgilizePay ${txid} ainda não aprovada (status=${resultado.status})`,
+        );
+        return {
+          message: 'Webhook processado',
+          data: { gatewayId: txid, status: `IGNORADO_${resultado.status}` },
+        };
+      }
+
+      const venda = await this.prisma.venda.findFirst({
+        where: { gatewayId: txid },
+        select: { id: true, status: true },
+      });
+
+      if (venda) {
+        if (venda.status !== StatusVenda.PENDENTE) {
+          this.logger.log(
+            `Venda ${venda.id} já processada (status: ${venda.status})`,
+          );
+          return {
+            message: 'Webhook processado',
+            data: { gatewayId: txid, status: 'JA_PROCESSADA' },
+          };
+        }
+
+        await this.vendasService.confirmarPagamento(venda.id, {
+          agilizepayWebhook: body,
+          agilizepayPayment: resultado.payload,
+          confirmadoEm: new Date().toISOString(),
+        });
+        await this.notificarConfirmacaoPagamentoN8n(venda.id, txid);
+        void this.enviarEmailCompraAprovada(venda.id);
+        this.logger.log(
+          `Pagamento confirmado via webhook AgilizePay para venda ${venda.id}`,
+        );
+        return {
+          message: 'Webhook processado',
+          data: { gatewayId: txid, status: 'CONFIRMADA' },
+        };
+      }
+
+      const vendaSena = await this.prisma.vendaSena.findFirst({
+        where: { gatewayId: txid },
+        select: { id: true, status: true },
+      });
+
+      if (!vendaSena) {
+        this.logger.warn(
+          `Venda não encontrada para pagamento AgilizePay ${txid}`,
+        );
+        return {
+          message: 'Webhook processado',
+          data: { gatewayId: txid, status: 'VENDA_NAO_ENCONTRADA' },
+        };
+      }
+
+      if (vendaSena.status !== StatusVendaSena.PENDENTE) {
+        this.logger.log(
+          `Venda Sena ${vendaSena.id} já processada (status: ${vendaSena.status})`,
+        );
+        return {
+          message: 'Webhook processado',
+          data: { gatewayId: txid, status: 'JA_PROCESSADA' },
+        };
+      }
+
+      await this.vendasSenaService.confirmarPagamento(vendaSena.id, {
+        agilizepayWebhook: body,
+        agilizepayPayment: resultado.payload,
+        confirmadoEm: new Date().toISOString(),
+      });
+      void this.enviarEmailCompraAprovadaSena(vendaSena.id);
+      this.logger.log(
+        `Pagamento confirmado via webhook AgilizePay para venda Sena ${vendaSena.id}`,
+      );
+      return {
+        message: 'Webhook processado',
+        data: { gatewayId: txid, status: 'CONFIRMADA_SENA' },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Erro ao confirmar pagamento AgilizePay ${txid}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return {
+        message: 'Webhook processado',
+        data: { gatewayId: txid, status: 'ERRO' },
+      };
+    } finally {
+      await this.distributedLock.release(lock);
+    }
+  }
+
+  private extrairTxidAgilizePay(body: Record<string, unknown>): string | undefined {
+    return (
+      this.lerString(body, 'idTransaction') ??
+      this.lerString(body, 'txid') ??
+      undefined
+    );
+  }
+
+  // ─── WEBHOOK PIX (FSPay) ───────────────────────────────
+  //
+  // O FSPay não documenta assinatura/secret no webhook — por isso, assim
+  // como no AgilizePay e no Mercado Pago, nunca confiamos no `status`/`type`
+  // embutido no corpo: o status real é sempre buscado via
+  // GET /report/v1/api/cash-in antes de confirmar qualquer pagamento.
+  //
+  // O `idempotency_id` do FSPay é sempre igual ao nosso `vendaId` (é o valor
+  // que enviamos na criação da cobrança), então serve tanto para reconsultar
+  // no gateway quanto para localizar a venda pelo `gatewayId` salvo.
+
+  async processarWebhookFsPay(body: Record<string, unknown>) {
+    this.logger.log(`Webhook FSPay recebido: ${JSON.stringify(body)}`);
+
+    const idempotencyId = this.lerString(body, 'idempotency_id');
+    if (!idempotencyId) {
+      this.logger.warn('Webhook FSPay sem idempotency_id — ignorado');
+      return { message: 'Webhook recebido (sem dados de pagamento)' };
+    }
+
+    const lockKey = `lock:fspay:webhook:${idempotencyId}`;
+    const lock = await this.distributedLock.acquire(lockKey, 30_000);
+    if (!lock) {
+      this.logger.warn(
+        `Webhook FSPay ignorado temporariamente para transação ${idempotencyId} (já em processamento em outra instância)`,
+      );
+      return {
+        message: 'Webhook em processamento',
+        data: { gatewayId: idempotencyId, status: 'EM_PROCESSAMENTO' },
+      };
+    }
+
+    try {
+      const resultado =
+        await this.fsPayPixGateway.consultarCobranca(idempotencyId);
+
+      if (resultado.status !== 'APROVADO') {
+        this.logger.log(
+          `Transação FSPay ${idempotencyId} ainda não aprovada (status=${resultado.status})`,
+        );
+        return {
+          message: 'Webhook processado',
+          data: {
+            gatewayId: idempotencyId,
+            status: `IGNORADO_${resultado.status}`,
+          },
+        };
+      }
+
+      const venda = await this.prisma.venda.findFirst({
+        where: { gatewayId: idempotencyId },
+        select: { id: true, status: true },
+      });
+
+      if (venda) {
+        if (venda.status !== StatusVenda.PENDENTE) {
+          this.logger.log(
+            `Venda ${venda.id} já processada (status: ${venda.status})`,
+          );
+          return {
+            message: 'Webhook processado',
+            data: { gatewayId: idempotencyId, status: 'JA_PROCESSADA' },
+          };
+        }
+
+        await this.vendasService.confirmarPagamento(venda.id, {
+          fspayWebhook: body,
+          fspayPayment: resultado.payload,
+          confirmadoEm: new Date().toISOString(),
+        });
+        await this.notificarConfirmacaoPagamentoN8n(venda.id, idempotencyId);
+        void this.enviarEmailCompraAprovada(venda.id);
+        this.logger.log(
+          `Pagamento confirmado via webhook FSPay para venda ${venda.id}`,
+        );
+        return {
+          message: 'Webhook processado',
+          data: { gatewayId: idempotencyId, status: 'CONFIRMADA' },
+        };
+      }
+
+      const vendaSena = await this.prisma.vendaSena.findFirst({
+        where: { gatewayId: idempotencyId },
+        select: { id: true, status: true },
+      });
+
+      if (!vendaSena) {
+        this.logger.warn(
+          `Venda não encontrada para pagamento FSPay ${idempotencyId}`,
+        );
+        return {
+          message: 'Webhook processado',
+          data: { gatewayId: idempotencyId, status: 'VENDA_NAO_ENCONTRADA' },
+        };
+      }
+
+      if (vendaSena.status !== StatusVendaSena.PENDENTE) {
+        this.logger.log(
+          `Venda Sena ${vendaSena.id} já processada (status: ${vendaSena.status})`,
+        );
+        return {
+          message: 'Webhook processado',
+          data: { gatewayId: idempotencyId, status: 'JA_PROCESSADA' },
+        };
+      }
+
+      await this.vendasSenaService.confirmarPagamento(vendaSena.id, {
+        fspayWebhook: body,
+        fspayPayment: resultado.payload,
+        confirmadoEm: new Date().toISOString(),
+      });
+      void this.enviarEmailCompraAprovadaSena(vendaSena.id);
+      this.logger.log(
+        `Pagamento confirmado via webhook FSPay para venda Sena ${vendaSena.id}`,
+      );
+      return {
+        message: 'Webhook processado',
+        data: { gatewayId: idempotencyId, status: 'CONFIRMADA_SENA' },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Erro ao confirmar pagamento FSPay ${idempotencyId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return {
+        message: 'Webhook processado',
+        data: { gatewayId: idempotencyId, status: 'ERRO' },
       };
     } finally {
       await this.distributedLock.release(lock);
