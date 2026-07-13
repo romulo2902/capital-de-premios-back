@@ -286,7 +286,6 @@ describe('EdicoesService', () => {
       numero: '125',
       dataSorteio: '2099-03-27T10:20',
       dataEncerramento: '2099-03-27T09:59',
-      valorCartela: '10.00',
       raspadinha: false,
       imagemBase64: 'data:image/png;base64,Y2FwYQ==',
       combos: [
@@ -319,6 +318,7 @@ describe('EdicoesService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           imagemUrl: edicao.imagemUrl,
+          valorCartela: new Prisma.Decimal('10.00'),
           qtdNumerosCartela: 15,
           qtdPremios: 1,
           status: StatusEdicao.RASCUNHO,
@@ -339,13 +339,89 @@ describe('EdicoesService', () => {
     expect(result.data.status).toBe(StatusEdicao.RASCUNHO);
   });
 
+  it('create should not require valorCartela when edition uses combos only', async () => {
+    const edicao = {
+      ...criarEdicaoMock({
+        id: 'edicao-combo',
+        numero: '126',
+        dataSorteio: new Date('2099-03-27T13:20:00.000Z'),
+        dataEncerramento: new Date('2099-03-27T12:59:00.000Z'),
+      }),
+      valorCartela: new Prisma.Decimal('10.00'),
+      combos: [
+        {
+          id: 'combo-2',
+          edicaoId: 'edicao-combo',
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          tipoCartela: TipoCartela.DUAS_CHANCES,
+          preco: new Prisma.Decimal('20.00'),
+          rangeInicio: BigInt(1000000),
+          rangeFinal: BigInt(1000199),
+          createdAt: new Date('2026-03-20T10:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        },
+      ],
+    };
+
+    const tx = {
+      edicao: {
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'edicao-combo', numero: '126' }),
+        findUnique: jest.fn().mockResolvedValue(edicao),
+      },
+      premio: {
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      resultadoPremio: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+
+    mockPrisma.$transaction.mockImplementation(async (callback) =>
+      callback(tx),
+    );
+
+    await service.create({
+      numero: '126',
+      dataSorteio: '2099-03-27T10:20',
+      dataEncerramento: '2099-03-27T09:59',
+      raspadinha: false,
+      combos: [
+        {
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          quantidadeCartelas: 2,
+          preco: '20.00',
+          rangeInicio: '1000000',
+          rangeFinal: '1000199',
+        },
+      ],
+      premios: [
+        {
+          descricao: '1º Prêmio',
+          valor: '1000.00',
+        },
+      ],
+    });
+
+    expect(tx.edicao.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          valorCartela: new Prisma.Decimal('10.00'),
+        }),
+      }),
+    );
+  });
+
   it('create should reject when dataEncerramento is already past', async () => {
     await expect(
       service.create({
         numero: '126',
         dataSorteio: '2000-03-27T10:20',
         dataEncerramento: '2000-03-27T09:59',
-        valorCartela: '10.00',
         raspadinha: false,
         combos: [
           {
@@ -448,7 +524,6 @@ describe('EdicoesService', () => {
         numero: '126',
         dataSorteio: '2099-03-27T10:20',
         dataEncerramento: '2099-03-27T09:59',
-        valorCartela: '10.00',
         raspadinha: false,
         combos: [
           {
