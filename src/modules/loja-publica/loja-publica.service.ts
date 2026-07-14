@@ -52,8 +52,6 @@ export interface OpcaoCompraEdicao {
   tipoCompra: TipoCompraEdicao;
   isCombo: boolean;
   quantidadeCartelas: number;
-  valorUnitarioCartela: string;
-  valorUnitario: string;
   valorCombo: string | null;
   preco: string;
   rangeTotalInicio: string;
@@ -116,9 +114,6 @@ export class LojaPublicaService {
     }
 
     const opcoesDeCompra = this.mapearOpcoesCompraDaEdicao(edicaoAtiva.combos);
-    const valorUnitarioCartela = this.formatarValorMonetario(
-      edicaoAtiva.valorCartela,
-    );
 
     return {
       message: 'Dados da home carregados com sucesso',
@@ -131,8 +126,6 @@ export class LojaPublicaService {
           frase: edicaoAtiva.frase,
           imagemUrl: edicaoAtiva.imagemUrl,
           status: edicaoAtiva.status,
-          valorCartela: valorUnitarioCartela,
-          valorUnitarioCartela,
           qtdNumerosCartela: edicaoAtiva.qtdNumerosCartela,
           ...serializarEstadoManutencao(edicaoAtiva),
         },
@@ -387,9 +380,6 @@ export class LojaPublicaService {
           vendaId: venda.id,
           total: vendaAprovada?.total.toString() ?? venda.total.toString(),
           tipoCompra: 'COMBO',
-          valorUnitarioCartela: this.formatarValorMonetario(
-            edicao.valorCartela,
-          ),
           valorCombo: this.formatarValorMonetario(comboSelecionado.preco),
           quantidadeCartelas: dto.quantidadeCartelas,
           status: vendaAprovada?.status ?? StatusVenda.APROVADO,
@@ -472,7 +462,6 @@ export class LojaPublicaService {
         vendaId: venda.id,
         total: venda.total.toString(),
         tipoCompra: 'COMBO',
-        valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
         valorCombo: this.formatarValorMonetario(comboSelecionado.preco),
         quantidadeCartelas: dto.quantidadeCartelas,
         pagamento: dadosPagamento,
@@ -666,11 +655,6 @@ export class LojaPublicaService {
               ),
               imagemUrl: v.edicao.imagemUrl,
               frase: v.edicao.frase,
-              valorCartela: this.formatarValorMonetario(v.edicao.valorCartela),
-              valorUnitarioCartela: this.formatarValorMonetario(
-                v.edicao.valorCartela,
-              ),
-              valorCartelaFormatado: this.formatarMoeda(v.edicao.valorCartela),
               qtdNumerosCartela: v.edicao.qtdNumerosCartela,
               manutencaoAtiva: v.edicao.manutencaoAtiva,
               manutencaoMensagem: v.edicao.manutencaoMensagem,
@@ -681,7 +665,6 @@ export class LojaPublicaService {
                 tipoCompra: opcao.tipoCompra,
                 isCombo: opcao.isCombo,
                 quantidadeCartelas: opcao.quantidadeCartelas,
-                valorUnitarioCartela: opcao.valorUnitarioCartela,
                 valorCombo: opcao.valorCombo,
                 preco: opcao.preco,
                 precoFormatado: this.formatarMoeda(Number(opcao.preco)),
@@ -935,8 +918,6 @@ export class LojaPublicaService {
         tipoCompra: isUnitario ? 'UNITARIO' : 'COMBO',
         isCombo: !isUnitario,
         quantidadeCartelas,
-        valorUnitarioCartela: valorCombo,
-        valorUnitario: valorCombo,
         valorCombo: isUnitario ? null : valorCombo,
         rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
         rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
