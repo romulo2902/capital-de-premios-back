@@ -89,6 +89,23 @@ interface RelacionamentoClienteMaisRecente {
   distribuidorId?: string | null;
 }
 
+interface ClienteCompra {
+  id: string;
+  cpf: string;
+  nome: string;
+  telefone: string;
+  email: string | null;
+  dataNascimento: Date | null;
+}
+
+interface DadosClientePagamento {
+  id: string;
+  cpf: string;
+  nome: string;
+  telefone: string;
+  email: string;
+}
+
 interface CreateVendaOptions {
   skipGateway?: boolean;
   origemParticipacao?: OrigemParticipacao;
@@ -173,17 +190,16 @@ export class VendasService {
       tipoCartelaSolicitada,
     );
 
-    // 2. Buscar ou criar cliente por CPF
-    const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const cliente = await this.buscarOuCriarCliente(
-      cpfLimpo,
-      dto.nome,
-      dto.telefone,
-      dto.dataNascimento,
-      dto.email,
-      dto.vendedorId,
-      dto.distribuidorId,
-    );
+    // 2. Buscar cliente por ID ou criar/resolver pelo CPF legado
+    const cliente = dto.clienteId
+      ? await this.buscarClientePorIdParaCompra(
+          dto.clienteId,
+          dto.vendedorId,
+          dto.distribuidorId,
+        )
+      : await this.buscarOuCriarClientePorDto(dto);
+    const dadosClientePagamento =
+      this.validarDadosClienteParaPagamento(cliente);
 
     // 3. Validar vendedor e distribuidor se informados
     if (dto.vendedorId) {
@@ -343,10 +359,10 @@ export class VendasService {
         quantidadeItens: quantidadeCartelasSolicitada,
         valorUnitarioCentavos: Math.round(valorCartela * 100),
         descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
-        cpfPagador: cpfLimpo,
-        nomePagador: dto.nome,
-        emailPagador: dto.email,
-        telefonePagador: dto.telefone,
+        cpfPagador: dadosClientePagamento.cpf,
+        nomePagador: dadosClientePagamento.nome,
+        emailPagador: dadosClientePagamento.email,
+        telefonePagador: dadosClientePagamento.telefone,
         expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
       });
 
@@ -1707,6 +1723,103 @@ export class VendasService {
   private normalizarTextoOpcional(value: string): string | null {
     const normalizedValue = value.trim();
     return normalizedValue ? normalizedValue : null;
+  }
+
+  private async buscarOuCriarClientePorDto(
+    dto: CreateVendaDto,
+  ): Promise<ClienteCompra> {
+    if (
+      !dto.cpf ||
+      !dto.nome ||
+      !dto.telefone ||
+      !dto.email ||
+      !dto.dataNascimento
+    ) {
+      throw new BadRequestException(
+        'Informe clienteId ou os dados completos do cliente para concluir a compra',
+      );
+    }
+
+    return this.buscarOuCriarCliente(
+      dto.cpf.replace(/\D/g, ''),
+      dto.nome,
+      dto.telefone,
+      dto.dataNascimento,
+      dto.email,
+      dto.vendedorId,
+      dto.distribuidorId,
+    );
+  }
+
+  async buscarClientePorIdParaCompra(
+    clienteId: string,
+    vendedorId?: string,
+    distribuidorId?: string,
+  ): Promise<ClienteCompra> {
+    const relacionamentoMaisRecente =
+      await this.resolverRelacionamentoMaisRecenteDoCliente(
+        vendedorId,
+        distribuidorId,
+      );
+
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+      },
+    });
+
+    if (!cliente) {
+      throw new NotFoundException('Cliente não encontrado');
+    }
+
+    if (Object.keys(relacionamentoMaisRecente).length === 0) {
+      return cliente;
+    }
+
+    return this.prisma.cliente.update({
+      where: { id: clienteId },
+      data: relacionamentoMaisRecente,
+      select: {
+        id: true,
+        cpf: true,
+        nome: true,
+        telefone: true,
+        email: true,
+        dataNascimento: true,
+      },
+    });
+  }
+
+  validarDadosClienteParaPagamento(
+    cliente: ClienteCompra,
+  ): DadosClientePagamento {
+    if (!cliente.email) {
+      throw new BadRequestException(
+        'Cliente sem e-mail cadastrado. Atualize meus-dados antes de concluir a compra',
+      );
+    }
+
+    if (!cliente.dataNascimento) {
+      throw new BadRequestException(
+        'Cliente sem data de nascimento cadastrada. Atualize meus-dados antes de concluir a compra',
+      );
+    }
+
+    validarMaioridade(cliente.dataNascimento);
+
+    return {
+      id: cliente.id,
+      cpf: cliente.cpf.replace(/\D/g, ''),
+      nome: cliente.nome,
+      telefone: cliente.telefone,
+      email: cliente.email,
+    };
   }
 
   private async buscarOuCriarCliente(

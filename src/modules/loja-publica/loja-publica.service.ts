@@ -265,57 +265,71 @@ export class LojaPublicaService {
       );
     }
 
-    const cpfLimpo = dto.cpf.replace(/\D/g, '');
-    const emailNormalizado = dto.email?.trim() || null;
-    if (!dto.dataNascimento) {
-      throw new BadRequestException(
-        'dataNascimento é obrigatória para concluir a compra',
-      );
-    }
-    const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
     const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
     this.logger.log(
       `Checkout loja seller_id=${dto.seller_id ?? 'N/A'} -> vendedorId=${
         sellerOrigem.vendedorId ?? 'null'
       } distribuidorId=${sellerOrigem.distribuidorId ?? 'null'}`,
     );
-    const relacionamentoCliente = this.buildRelacionamentoClienteMaisRecente(
-      dto.seller_id,
-      sellerOrigem,
-    );
-    let cliente = await this.prisma.cliente.findUnique({
-      where: { cpf: cpfLimpo },
-    });
-    if (!cliente) {
-      cliente = await this.prisma.cliente.create({
-        data: {
-          cpf: cpfLimpo,
-          nome: dto.nome,
-          telefone: dto.telefone,
-          email: emailNormalizado,
-          dataNascimento,
-          vendedorId: relacionamentoCliente.vendedorId ?? null,
-          distribuidorId: relacionamentoCliente.distribuidorId ?? null,
-        },
-      });
-    } else if (!cliente.dataNascimento) {
-      cliente = await this.prisma.cliente.update({
-        where: { id: cliente.id },
-        data: {
-          dataNascimento,
-          ...relacionamentoCliente,
-        },
-      });
-    } else {
-      validarMaioridade(cliente.dataNascimento);
 
-      if (Object.keys(relacionamentoCliente).length > 0) {
+    let cliente;
+    if (dto.clienteId) {
+      cliente = await this.vendasService.buscarClientePorIdParaCompra(
+        dto.clienteId,
+        sellerOrigem.vendedorId ?? undefined,
+        sellerOrigem.distribuidorId ?? undefined,
+      );
+    } else {
+      if (!dto.cpf || !dto.nome || !dto.telefone || !dto.dataNascimento) {
+        throw new BadRequestException(
+          'Informe clienteId ou os dados completos do cliente para concluir a compra',
+        );
+      }
+
+      const cpfLimpo = dto.cpf.replace(/\D/g, '');
+      const emailNormalizado = dto.email?.trim() || null;
+      const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
+      const relacionamentoCliente = this.buildRelacionamentoClienteMaisRecente(
+        dto.seller_id,
+        sellerOrigem,
+      );
+      cliente = await this.prisma.cliente.findUnique({
+        where: { cpf: cpfLimpo },
+      });
+      if (!cliente) {
+        cliente = await this.prisma.cliente.create({
+          data: {
+            cpf: cpfLimpo,
+            nome: dto.nome,
+            telefone: dto.telefone,
+            email: emailNormalizado,
+            dataNascimento,
+            vendedorId: relacionamentoCliente.vendedorId ?? null,
+            distribuidorId: relacionamentoCliente.distribuidorId ?? null,
+          },
+        });
+      } else if (!cliente.dataNascimento) {
         cliente = await this.prisma.cliente.update({
           where: { id: cliente.id },
-          data: relacionamentoCliente,
+          data: {
+            dataNascimento,
+            ...relacionamentoCliente,
+          },
         });
+      } else {
+        validarMaioridade(cliente.dataNascimento);
+
+        if (Object.keys(relacionamentoCliente).length > 0) {
+          cliente = await this.prisma.cliente.update({
+            where: { id: cliente.id },
+            data: relacionamentoCliente,
+          });
+        }
       }
     }
+
+    const dadosClientePagamento =
+      this.vendasService.validarDadosClienteParaPagamento(cliente);
 
     const venda = await this.prisma.venda.create({
       data: {
@@ -418,10 +432,10 @@ export class LojaPublicaService {
         quantidadeItens: dto.quantidadeCartelas,
         valorUnitarioCentavos: Math.round(valorSelecionado * 100),
         descricao: `Capital de Prêmios - Edição ${edicao.numero} - ${dto.quantidadeCartelas} iten(s)`,
-        cpfPagador: cpfLimpo,
-        nomePagador: dto.nome,
-        emailPagador: dto.email,
-        telefonePagador: dto.telefone,
+        cpfPagador: dadosClientePagamento.cpf,
+        nomePagador: dadosClientePagamento.nome,
+        emailPagador: dadosClientePagamento.email,
+        telefonePagador: dadosClientePagamento.telefone,
         expiracaoSegundos: 3600,
       });
 
