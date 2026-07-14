@@ -196,6 +196,26 @@ describe('EdicoesService', () => {
     expect(result.data.imagemUrl).toBe(imagemUrl);
   });
 
+  it('findOne should expose ranges only inside combos', async () => {
+    mockPrisma.edicao.findUnique.mockResolvedValue(criarEdicaoMock());
+
+    const result = await service.findOne('edicao-1');
+    const data = result.data as Record<string, unknown>;
+
+    expect(data).not.toHaveProperty('detalhes');
+    expect(data).not.toHaveProperty('valorCartela');
+    expect(data).not.toHaveProperty('valorUnitarioCartela');
+    expect(data).not.toHaveProperty('rangeInicio');
+    expect(data).not.toHaveProperty('rangeFinal');
+    expect(result.data.combos[0]).toEqual(
+      expect.objectContaining({
+        rangeInicio: '1000000',
+        rangeFinal: '1999999',
+        preco: '10.00',
+      }),
+    );
+  });
+
   it('create should upload imagem para o s3 via base64', async () => {
     const edicao = {
       id: 'edicao-1',
