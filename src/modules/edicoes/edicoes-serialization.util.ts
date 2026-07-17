@@ -21,7 +21,7 @@ export function serializarEdicao(
       id: combo.id,
       edicaoId: combo.edicaoId,
       origemParticipacao: combo.origemParticipacao,
-      tipoCompra: quantidadeCartelas === 1 ? 'UNITARIO' : 'COMBO',
+      tipoCompra: 'COMBO',
       quantidadeCartelas,
       valorCombo,
       preco: valorCombo,

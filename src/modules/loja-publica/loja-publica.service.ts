@@ -907,7 +907,6 @@ export class LojaPublicaService {
 
     return combosDigitais.map((combo) => {
       const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
-      const isUnitario = combo.tipoCartela === TipoCartela.UMA_CHANCE;
       const valorCombo = this.formatarValorMonetario(combo.preco);
       const setores = this.expandirSetoresDoCombo(combo, quantidadeCartelas);
       const primeiroSetor = setores[0];
@@ -915,10 +914,10 @@ export class LojaPublicaService {
       return {
         id: combo.id,
         tipoCartela: combo.tipoCartela,
-        tipoCompra: isUnitario ? 'UNITARIO' : 'COMBO',
-        isCombo: !isUnitario,
+        tipoCompra: 'COMBO',
+        isCombo: true,
         quantidadeCartelas,
-        valorCombo: isUnitario ? null : valorCombo,
+        valorCombo,
         rangeTotalInicio: primeiroSetor?.rangeTotalInicio.toString() ?? '0',
         rangeTotalFinal: primeiroSetor?.rangeTotalFinal.toString() ?? '0',
         passoEntreCartelas:
