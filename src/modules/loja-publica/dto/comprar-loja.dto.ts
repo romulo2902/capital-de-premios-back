@@ -18,6 +18,7 @@ import {
   ValidateNested,
   ArrayMinSize,
   Max,
+  ValidateIf,
 } from 'class-validator';
 import { TipoCartela } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
@@ -71,46 +72,69 @@ export class ComprarLojaDto {
   @IsString({ each: true })
   cartelasSelecionadas?: string[];
 
-  @ApiProperty({ example: '12345678900', description: 'CPF do cliente' })
+  @ApiPropertyOptional({
+    example: '76253924-363d-4220-a09c-2218712aa483',
+    description:
+      'ID do cliente já cadastrado. Quando informado, a API usa os dados completos do cadastro e os campos cpf/nome/telefone/email/dataNascimento não precisam ser enviados.',
+  })
+  @IsOptional()
+  @IsUUID('4', { message: 'clienteId deve ser um UUID válido' })
+  clienteId?: string;
+
+  @ApiPropertyOptional({
+    example: '12345678900',
+    description:
+      'CPF do cliente. Obrigatório apenas quando clienteId não for informado.',
+  })
+  @ValidateIf((dto: ComprarLojaDto) => !dto.clienteId)
   @IsString()
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
   @IsCpfValido({ message: 'CPF inválido' })
-  cpf: string;
+  cpf?: string;
 
-  @ApiProperty({ example: 'João da Silva', description: 'Nome do cliente' })
+  @ApiPropertyOptional({
+    example: 'João da Silva',
+    description:
+      'Nome do cliente. Obrigatório apenas quando clienteId não for informado.',
+  })
+  @ValidateIf((dto: ComprarLojaDto) => !dto.clienteId)
   @IsString()
   @IsNotEmpty()
   @MinLength(2)
-  nome: string;
+  nome?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '(61) 99999-9999',
-    description: 'Telefone do cliente',
+    description:
+      'Telefone do cliente. Obrigatório apenas quando clienteId não for informado.',
   })
+  @ValidateIf((dto: ComprarLojaDto) => !dto.clienteId)
   @IsString()
   @IsNotEmpty()
-  telefone: string;
+  telefone?: string;
 
   @ApiPropertyOptional({
     example: 'joao@email.com',
-    description: 'Email do cliente (opcional). String vazia é ignorada.',
+    description:
+      'Email do cliente. Obrigatório para envio do comprovante quando clienteId não for informado. String vazia é ignorada.',
   })
   @Transform(emptyStringToUndefined)
-  @IsOptional()
+  @ValidateIf((dto: ComprarLojaDto) => !dto.clienteId)
   @IsEmail()
   email?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '1990-01-01',
     description:
-      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade.',
+      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade quando clienteId não for informado.',
   })
   @Transform(emptyStringToUndefined)
+  @ValidateIf((dto: ComprarLojaDto) => !dto.clienteId)
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'dataNascimento deve estar no formato YYYY-MM-DD',
   })
-  dataNascimento: string;
+  dataNascimento?: string;
 
   @ApiPropertyOptional({
     example: 'cfda6bc8-665d-4735-a217-3f51775d431c',

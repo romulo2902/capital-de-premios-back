@@ -364,6 +364,8 @@ describe('VendasService', () => {
       id: 'cliente-1',
       cpf: '12345678900',
       nome: 'Romulo Valadares',
+      telefone: '(00) 99999-9999',
+      email: 'romulo.valadares@email.com',
       dataNascimento: new Date('1990-01-01T00:00:00.000Z'),
     };
 

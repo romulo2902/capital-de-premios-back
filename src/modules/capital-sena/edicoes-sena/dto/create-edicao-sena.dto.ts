@@ -70,7 +70,7 @@ export class CreateComboSenaDto {
 
   @ApiProperty({ example: 3 })
   @IsNumber({}, { message: 'quantidade deve ser um número' })
-  @Min(2, { message: 'quantidade deve ser no mínimo 2' })
+  @Min(1, { message: 'quantidade deve ser no mínimo 1' })
   quantidade: number;
 
   @ApiProperty({

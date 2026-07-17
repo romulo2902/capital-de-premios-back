@@ -67,7 +67,8 @@ export class EdicoesService {
     const qtdNumerosCartela = await this.resolverQtdNumerosCartela(combos);
     this.validarCapacidadeCombos(combos, qtdNumerosCartela);
     const qtdPremios = dto.premios.length;
-    const { rangeInicio, rangeFinal } = this.calcularRangesDosCombosDaEdicao(combos);
+    const { rangeInicio, rangeFinal } =
+      this.calcularRangesDosCombosDaEdicao(combos);
 
     const dataSorteio = this.parseDateTime(dto.dataSorteio, 'dataSorteio');
     const dataEncerramento = dto.dataEncerramento
@@ -91,7 +92,7 @@ export class EdicoesService {
           numero: dto.numero,
           dataSorteio,
           dataEncerramento,
-          valorCartela: this.resolverValorCartelaEdicao(dto.valorCartela, combos),
+          valorCartela: this.resolverValorCartelaLegadoEdicao(combos),
           qtdNumerosCartela,
           rangeInicio,
           rangeFinal,
@@ -101,7 +102,9 @@ export class EdicoesService {
           frase: dto.frase,
           imagemUrl: imagemUrl ?? null,
           manutencaoAtiva: dto.manutencaoAtiva ?? false,
-          manutencaoMensagem: this.normalizarMensagemManutencao(dto.manutencaoMensagem),
+          manutencaoMensagem: this.normalizarMensagemManutencao(
+            dto.manutencaoMensagem,
+          ),
           status: StatusEdicao.RASCUNHO,
           combos: {
             create: combos.map((combo) => ({
@@ -116,16 +119,25 @@ export class EdicoesService {
         include: EDICAO_INCLUDE,
       });
 
-      await this.sincronizarPremiosDetalhados(tx, created.id, premiosDetalhados);
+      await this.sincronizarPremiosDetalhados(
+        tx,
+        created.id,
+        premiosDetalhados,
+      );
 
-      return tx.edicao.findUnique({ where: { id: created.id }, include: EDICAO_INCLUDE });
+      return tx.edicao.findUnique({
+        where: { id: created.id },
+        include: EDICAO_INCLUDE,
+      });
     });
 
     if (!item) {
       throw new NotFoundException('Edição não encontrada após a criação');
     }
 
-    this.logger.log(`Edição ${item.numero} criada com ${combos.length} combo(s)`);
+    this.logger.log(
+      `Edição ${item.numero} criada com ${combos.length} combo(s)`,
+    );
     return {
       message: 'Edição criada com sucesso.',
       data: await this.serializarEdicaoComEstoque(item),
@@ -207,7 +219,9 @@ export class EdicoesService {
       this.validarCapacidadeCombos(combosEfetivos, qtdNumerosCartelaEfetivo);
     }
 
-    const qtdPremiosEfetivo = dto.premios ? dto.premios.length : atual.qtdPremios;
+    const qtdPremiosEfetivo = dto.premios
+      ? dto.premios.length
+      : atual.qtdPremios;
 
     const dataSorteio = dto.dataSorteio
       ? this.parseDateTime(dto.dataSorteio, 'dataSorteio')
@@ -221,11 +235,6 @@ export class EdicoesService {
     const resumoRanges = dto.combos
       ? this.calcularRangesDosCombosDaEdicao(combosEfetivos)
       : undefined;
-
-    const valorCartelaEfetivo =
-      dto.valorCartela !== undefined
-        ? this.normalizarValorCartela(dto.valorCartela)
-        : undefined;
 
     const imagemUrl = await this.resolverImagemUrl(
       `edicoes/${dto.numero ?? atual.numero}`,
@@ -249,15 +258,26 @@ export class EdicoesService {
         ...(dto.numero !== undefined ? { numero: dto.numero } : {}),
         ...(dto.dataSorteio ? { dataSorteio } : {}),
         ...(dto.dataEncerramento !== undefined ? { dataEncerramento } : {}),
-        ...(valorCartelaEfetivo !== undefined ? { valorCartela: valorCartelaEfetivo } : {}),
+        ...(dto.combos
+          ? {
+              valorCartela:
+                this.resolverValorCartelaLegadoEdicao(combosEfetivos),
+            }
+          : {}),
         ...(dto.combos ? { qtdNumerosCartela: qtdNumerosCartelaEfetivo } : {}),
         ...(dto.premios ? { qtdPremios: qtdPremiosEfetivo } : {}),
         ...(dto.destino ? { destino: dto.destino } : {}),
         ...(dto.raspadinha !== undefined ? { raspadinha: dto.raspadinha } : {}),
         ...(dto.frase !== undefined ? { frase: dto.frase } : {}),
-        ...(dto.manutencaoAtiva !== undefined ? { manutencaoAtiva: dto.manutencaoAtiva } : {}),
+        ...(dto.manutencaoAtiva !== undefined
+          ? { manutencaoAtiva: dto.manutencaoAtiva }
+          : {}),
         ...(dto.manutencaoMensagem !== undefined
-          ? { manutencaoMensagem: this.normalizarMensagemManutencao(dto.manutencaoMensagem) }
+          ? {
+              manutencaoMensagem: this.normalizarMensagemManutencao(
+                dto.manutencaoMensagem,
+              ),
+            }
           : {}),
         ...(imagemUrl !== undefined ? { imagemUrl } : {}),
         ...(resumoRanges ?? {}),
@@ -299,7 +319,10 @@ export class EdicoesService {
     base64?: string,
   ): Promise<string | undefined> {
     if (base64) {
-      const url = await this.s3UploadService.uploadImageFromBase64(base64, folder);
+      const url = await this.s3UploadService.uploadImageFromBase64(
+        base64,
+        folder,
+      );
       return url ?? undefined;
     }
 
@@ -606,7 +629,8 @@ export class EdicoesService {
     }
 
     const esperados = edicao.combos.reduce(
-      (total, combo) => total + Number(combo.rangeFinal - combo.rangeInicio + 1n),
+      (total, combo) =>
+        total + Number(combo.rangeFinal - combo.rangeInicio + 1n),
       0,
     );
 
@@ -622,7 +646,9 @@ export class EdicoesService {
     return { esperados, existentes, faltantes, pronto: faltantes === 0 };
   }
 
-  private normalizarCombos(combos: CreateEdicaoComboDto[]): ComboEdicaoNormalizado[] {
+  private normalizarCombos(
+    combos: CreateEdicaoComboDto[],
+  ): ComboEdicaoNormalizado[] {
     return combos.map((combo) => ({
       origemParticipacao: combo.origemParticipacao,
       tipoCartela: this.resolverTipoCartelaCombo(combo),
@@ -632,7 +658,9 @@ export class EdicoesService {
     }));
   }
 
-  private normalizarCombosExistentes(edicao: EdicaoComRelacoes): ComboEdicaoNormalizado[] {
+  private normalizarCombosExistentes(
+    edicao: EdicaoComRelacoes,
+  ): ComboEdicaoNormalizado[] {
     return edicao.combos.map((combo) => ({
       origemParticipacao: combo.origemParticipacao,
       tipoCartela: combo.tipoCartela,
@@ -654,7 +682,11 @@ export class EdicoesService {
       );
     }
 
-    if (combo.tipoCartela && tipoCartelaPelaQuantidade && combo.tipoCartela !== tipoCartelaPelaQuantidade) {
+    if (
+      combo.tipoCartela &&
+      tipoCartelaPelaQuantidade &&
+      combo.tipoCartela !== tipoCartelaPelaQuantidade
+    ) {
       throw new BadRequestException(
         `Conflito entre tipoCartela e quantidadeCartelas (${combo.quantidadeCartelas}) no combo`,
       );
@@ -676,7 +708,9 @@ export class EdicoesService {
       const qtd = this.obterQuantidadeCartelas(combo.tipoCartela);
       const chave = `${combo.origemParticipacao}:${qtd}`;
       if (chaves.has(chave)) {
-        throw new ConflictException(`Combo duplicado: ${qtd} cartela(s) para ${combo.origemParticipacao}`);
+        throw new ConflictException(
+          `Combo duplicado: ${qtd} cartela(s) para ${combo.origemParticipacao}`,
+        );
       }
       chaves.add(chave);
 
@@ -688,7 +722,11 @@ export class EdicoesService {
     }
 
     const ordenados = [...combos].sort((a, b) =>
-      a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0,
+      a.rangeInicio < b.rangeInicio
+        ? -1
+        : a.rangeInicio > b.rangeInicio
+          ? 1
+          : 0,
     );
     for (let i = 1; i < ordenados.length; i++) {
       const prev = ordenados[i - 1];
@@ -716,7 +754,9 @@ export class EdicoesService {
     return { rangeInicio, rangeFinal };
   }
 
-  private async resolverQtdNumerosCartela(combos: ComboEdicaoNormalizado[]): Promise<number> {
+  private async resolverQtdNumerosCartela(
+    combos: ComboEdicaoNormalizado[],
+  ): Promise<number> {
     let qtdNumerosCartela: number | null = null;
 
     for (const combo of combos) {
@@ -751,7 +791,8 @@ export class EdicoesService {
       (total, combo) => total + (combo.rangeFinal - combo.rangeInicio + 1n),
       0n,
     );
-    const totalCombinacoes = obterTotalCombinacoesCartelaUtil(qtdNumerosCartela);
+    const totalCombinacoes =
+      obterTotalCombinacoesCartelaUtil(qtdNumerosCartela);
 
     if (totalCartelas > totalCombinacoes) {
       throw new BadRequestException(
@@ -760,21 +801,30 @@ export class EdicoesService {
     }
   }
 
-  private resolverValorCartelaEdicao(
-    valorCartela: string | undefined,
+  private resolverValorCartelaLegadoEdicao(
     combos: ComboEdicaoNormalizado[],
   ): Prisma.Decimal {
-    if (valorCartela !== undefined) {
-      return this.normalizarValorCartela(valorCartela);
-    }
-    const comboUmaChance = combos.find((c) => c.tipoCartela === TipoCartela.UMA_CHANCE);
+    const comboUmaChance = combos.find(
+      (c) => c.tipoCartela === TipoCartela.UMA_CHANCE,
+    );
     if (comboUmaChance) return comboUmaChance.preco;
     if (combos.length === 0) {
-      throw new BadRequestException('Não foi possível definir valorCartela sem combos configurados');
+      throw new BadRequestException(
+        'Não foi possível definir valorCartela sem combos configurados',
+      );
     }
-    throw new BadRequestException(
-      'valorCartela é obrigatório quando os combos não incluem cartela única (1 cartela)',
-    );
+
+    const comboBase = [...combos].sort((a, b) => {
+      const qtdA = this.obterQuantidadeCartelas(a.tipoCartela);
+      const qtdB = this.obterQuantidadeCartelas(b.tipoCartela);
+
+      if (qtdA !== qtdB) return qtdA - qtdB;
+      return a.preco.comparedTo(b.preco);
+    })[0];
+
+    return comboBase.preco
+      .div(this.obterQuantidadeCartelas(comboBase.tipoCartela))
+      .toDecimalPlaces(2);
   }
 
   private normalizarValorCartela(valorCartela: string): Prisma.Decimal {
@@ -836,10 +886,10 @@ export class EdicoesService {
     const idsNoPayload = premiosPayload
       .map((p) => p.id)
       .filter((id): id is string => !!id);
-    
+
     // Prêmios que não estão no payload devem ser removidos
     const premiosParaRemover = premiosExistentes.filter(
-      (p) => !idsNoPayload.includes(p.id)
+      (p) => !idsNoPayload.includes(p.id),
     );
 
     if (premiosParaRemover.length > 0) {

@@ -7,7 +7,6 @@ import {
   IsEnum,
   IsOptional,
   IsString,
-  Matches,
   ValidateNested,
 } from 'class-validator';
 import { DestinoEdicao } from '@prisma/client';
@@ -17,8 +16,6 @@ import {
   parsePremiosInput,
 } from './edicao-input-parsers.util';
 import { CreateEdicaoPremioDto } from './create-edicao-premio.dto';
-
-const VALOR_CARTELA_REGEX = /^\d+([.,]\d{1,2})?$/;
 
 const parseBooleanInput = ({ value }: TransformFnParams): unknown => {
   if (typeof value === 'boolean') {
@@ -67,18 +64,6 @@ export class CreateEdicaoDto {
   @IsOptional()
   @IsString({ message: 'dataEncerramento deve ser um texto' })
   dataEncerramento?: string;
-
-  @ApiPropertyOptional({
-    example: '10.00',
-    description:
-      'Valor unitário da cartela única. Quando omitido, a API só deriva a partir de um combo de 1 cartela.',
-  })
-  @IsOptional()
-  @IsString({ message: 'valorCartela deve ser um texto' })
-  @Matches(VALOR_CARTELA_REGEX, {
-    message: 'valorCartela deve ser um valor monetário válido',
-  })
-  valorCartela?: string;
 
   @ApiPropertyOptional({
     enum: DestinoEdicao,

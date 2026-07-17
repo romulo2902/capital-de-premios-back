@@ -15,6 +15,7 @@ import {
   MinLength,
   IsArray,
   IsIn,
+  ValidateIf,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { OrigemParticipacao, TipoPagamento } from '@prisma/client';
@@ -115,47 +116,65 @@ export class CreateVendaDto {
   @IsString({ each: true, message: 'cada item de combosSelecionados deve ser um texto' })
   combosSelecionados?: string[];
 
-  // --- Dados do cliente (auto-cadastro ou lookup) ---
+  // --- Dados do cliente (auto-cadastro/lookup por CPF, ou referência por clienteId) ---
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    example: '76253924-363d-4220-a09c-2218712aa483',
+    description:
+      'ID do cliente já cadastrado. Quando informado, a API usa os dados completos do cadastro e os campos cpf/nome/telefone/email/dataNascimento não precisam ser enviados.',
+  })
+  @IsOptional()
+  @IsUUID('4', { message: 'clienteId deve ser um UUID válido' })
+  clienteId?: string;
+
+  @ApiPropertyOptional({
     example: '12345678900',
-    description: 'CPF do cliente (somente números, 11 dígitos).',
+    description:
+      'CPF do cliente (somente números, 11 dígitos). Obrigatório apenas quando clienteId não for informado.',
   })
+  @ValidateIf((dto: CreateVendaDto) => !dto.clienteId)
   @Matches(/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/, { message: 'CPF inválido' })
-  cpf: string;
+  cpf?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'Romulo Valadares',
-    description: 'Nome completo do cliente.',
+    description:
+      'Nome completo do cliente. Obrigatório apenas quando clienteId não for informado.',
   })
+  @ValidateIf((dto: CreateVendaDto) => !dto.clienteId)
   @IsString({ message: 'nome deve ser um texto' })
   @MinLength(2, { message: 'nome deve ter no mínimo 2 caracteres' })
-  nome: string;
+  nome?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '(00) 99999-9999',
-    description: 'Telefone do cliente com DDD.',
+    description:
+      'Telefone do cliente com DDD. Obrigatório apenas quando clienteId não for informado.',
   })
+  @ValidateIf((dto: CreateVendaDto) => !dto.clienteId)
   @IsString({ message: 'telefone deve ser um texto' })
-  telefone: string;
+  telefone?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'romulo.valadares@email.com',
-    description: 'E-mail do cliente. Obrigatório para envio do comprovante de compra.',
+    description:
+      'E-mail do cliente. Obrigatório para envio do comprovante de compra quando clienteId não for informado.',
   })
+  @ValidateIf((dto: CreateVendaDto) => !dto.clienteId)
   @IsEmail({}, { message: 'e-mail inválido' })
-  email!: string;
+  email?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '1985-04-11',
     description:
-      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade.',
+      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade quando clienteId não for informado.',
   })
+  @ValidateIf((dto: CreateVendaDto) => !dto.clienteId)
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'dataNascimento deve estar no formato YYYY-MM-DD',
   })
-  dataNascimento: string;
+  dataNascimento?: string;
 
   // --- Origem da venda ---
 
