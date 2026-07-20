@@ -256,7 +256,7 @@ export class LojaPublicaService {
         sellerOrigem.distribuidorId ?? undefined,
       );
     } else {
-      if (!dto.cpf || !dto.nome || !dto.telefone || !dto.dataNascimento) {
+      if (!dto.cpf || !dto.nome || !dto.telefone) {
         throw new BadRequestException(
           'Informe clienteId ou os dados completos do cliente para concluir a compra',
         );
@@ -264,7 +264,9 @@ export class LojaPublicaService {
 
       const cpfLimpo = dto.cpf.replace(/\D/g, '');
       const emailNormalizado = dto.email?.trim() || null;
-      const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
+      const dataNascimento = dto.dataNascimento
+        ? parseEValidarDataNascimento(dto.dataNascimento)
+        : null;
       const relacionamentoCliente = this.buildRelacionamentoClienteMaisRecente(
         dto.seller_id,
         sellerOrigem,
@@ -284,7 +286,7 @@ export class LojaPublicaService {
             distribuidorId: relacionamentoCliente.distribuidorId ?? null,
           },
         });
-      } else if (!cliente.dataNascimento) {
+      } else if (!cliente.dataNascimento && dataNascimento) {
         cliente = await this.prisma.cliente.update({
           where: { id: cliente.id },
           data: {
@@ -293,7 +295,9 @@ export class LojaPublicaService {
           },
         });
       } else {
-        validarMaioridade(cliente.dataNascimento);
+        if (cliente.dataNascimento) {
+          validarMaioridade(cliente.dataNascimento);
+        }
 
         if (Object.keys(relacionamentoCliente).length > 0) {
           cliente = await this.prisma.cliente.update({
