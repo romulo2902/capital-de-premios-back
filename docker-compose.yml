@@ -11,10 +11,7 @@ services:
       DOCKER_DATABASE_HOST: ${DOCKER_DATABASE_HOST:-}
       DOCKER_REDIS_HOST: ${DOCKER_REDIS_HOST:-}
       TZ: America/Sao_Paulo
-    ports:
-      - '${PORT:-3000}:${PORT:-3000}'
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
+    network_mode: host
     volumes:
       - ${FIREBASE_MOUNT_HOST_DIR:-../firebase}:${FIREBASE_MOUNT_CONTAINER_DIR:-/home/jair/projetos/freela/capital-premios/firebase}:ro
     healthcheck:
