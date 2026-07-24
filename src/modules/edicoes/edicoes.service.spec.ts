@@ -571,6 +571,117 @@ describe('EdicoesService', () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  describe('guardas de range na criacao da edicao', () => {
+    // Payload minimo valido; cada teste varia só o que quer exercitar.
+    function payloadComCombo(
+      combo: Partial<{ rangeInicio: string; rangeFinal: string }> = {},
+    ) {
+      return {
+        numero: '127',
+        dataSorteio: '2099-03-27T10:20',
+        dataEncerramento: '2099-03-27T09:59',
+        raspadinha: false,
+        combos: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            quantidadeCartelas: 2,
+            preco: '20.00',
+            rangeInicio: '1000000',
+            rangeFinal: '1000199',
+            ...combo,
+          },
+        ],
+        premios: [{ descricao: '1º Prêmio', valor: '1000.00' }],
+      };
+    }
+
+    const matrizPadrao = {
+      sequenciaBolas: Array.from({ length: 15 }, (_, index) => index + 1),
+    };
+
+    beforeEach(() => {
+      mockPrisma.edicao.findFirst.mockResolvedValue(null);
+      mockPrisma.matrizRange.findFirst.mockResolvedValue(matrizPadrao);
+    });
+
+    // Restaura o default global para nao vazar para os testes seguintes.
+    afterEach(() => {
+      mockPrisma.matrizRange.findFirst.mockResolvedValue(matrizPadrao);
+    });
+
+    it('rejeita quando a matriz nao esta carregada para o range do combo', async () => {
+      mockPrisma.matrizRange.findFirst.mockResolvedValue(null);
+
+      await expect(service.create(payloadComCombo())).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.create(payloadComCombo())).rejects.toThrow(
+        /matriz precisa estar carregada/i,
+      );
+    });
+
+    it('rejeita quando a linha da matriz nao tem sequencia de bolas', async () => {
+      mockPrisma.matrizRange.findFirst.mockResolvedValue({
+        sequenciaBolas: [],
+      });
+
+      await expect(service.create(payloadComCombo())).rejects.toThrow(
+        /não possui sequência de bolas válida/i,
+      );
+    });
+
+    it('rejeita quando os combos exigem mais cartelas do que existem combinacoes', async () => {
+      // 1 número por cartela => C(50,1) = 50 combinações únicas possíveis,
+      // mas o range abaixo pede 200 cartelas.
+      mockPrisma.matrizRange.findFirst.mockResolvedValue({
+        sequenciaBolas: [1],
+      });
+
+      await expect(service.create(payloadComCombo())).rejects.toThrow(
+        /só existem 50 combinações únicas/i,
+      );
+    });
+
+    it('deriva qtdNumerosCartela do tamanho da sequencia na matriz', async () => {
+      mockPrisma.matrizRange.findFirst.mockResolvedValue({
+        sequenciaBolas: [1, 2, 3, 4, 5, 6],
+      });
+
+      const tx = {
+        edicao: {
+          create: jest.fn().mockResolvedValue({ id: 'e1', numero: '127' }),
+          findUnique: jest.fn().mockResolvedValue({
+            ...criarEdicaoMock({
+              id: 'e1',
+              numero: '127',
+              dataSorteio: new Date('2099-03-27T13:20:00.000Z'),
+              dataEncerramento: new Date('2099-03-27T12:59:00.000Z'),
+            }),
+            combos: [],
+          }),
+        },
+        premio: {
+          findMany: jest.fn().mockResolvedValue([]),
+          create: jest.fn().mockResolvedValue({}),
+          update: jest.fn().mockResolvedValue({}),
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        resultadoPremio: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      };
+      mockPrisma.$transaction.mockImplementation(async (callback) =>
+        callback(tx),
+      );
+
+      await service.create(payloadComCombo());
+
+      expect(tx.edicao.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ qtdNumerosCartela: 6 }),
+        }),
+      );
+    });
+  });
+
   it('ativar should ignore ENCERRADA edicoes when checking operation conflict', async () => {
     const edicao = criarEdicaoMock({
       id: 'edicao-rascunho',
