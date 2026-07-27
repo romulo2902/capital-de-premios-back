@@ -1676,4 +1676,85 @@ describe('VendasService', () => {
       expect(result.message).toBe('Status da venda atualizado com sucesso');
     });
   });
+
+  /**
+   * O checkout da loja passou a coletar apenas CPF, nome e WhatsApp, entao
+   * email e dataNascimento sao opcionais. Estes testes travam esse contrato e
+   * garantem que a checagem de maioridade continua valendo quando a data
+   * existe — a relaxacao nao pode virar bypass silencioso.
+   */
+  describe('validarDadosClienteParaPagamento', () => {
+    function cliente(
+      overrides: Partial<{
+        email: string | null;
+        dataNascimento: Date | null;
+      }> = {},
+    ) {
+      return {
+        id: 'cliente-1',
+        cpf: '111.444.777-35',
+        nome: 'Fulano',
+        telefone: '61999998888',
+        email: 'fulano@email.com',
+        dataNascimento: new Date('1990-01-01T00:00:00.000Z'),
+        ...overrides,
+      };
+    }
+
+    function nascidoHaAnos(anos: number): Date {
+      const data = new Date();
+      data.setUTCFullYear(data.getUTCFullYear() - anos);
+      // afasta da borda do aniversario para o teste nao depender do dia
+      data.setUTCDate(data.getUTCDate() - 1);
+      return data;
+    }
+
+    it('aceita cliente sem email e sem dataNascimento', () => {
+      const resultado = service.validarDadosClienteParaPagamento(
+        cliente({ email: null, dataNascimento: null }),
+      );
+
+      expect(resultado.id).toBe('cliente-1');
+      expect(resultado.email).toBeUndefined();
+      // CPF vai sem mascara para o gateway
+      expect(resultado.cpf).toBe('11144477735');
+    });
+
+    it('aceita cliente sem email mas com dataNascimento valida', () => {
+      const resultado = service.validarDadosClienteParaPagamento(
+        cliente({ email: null, dataNascimento: nascidoHaAnos(30) }),
+      );
+
+      expect(resultado.email).toBeUndefined();
+      expect(resultado.nome).toBe('Fulano');
+    });
+
+    it('mantem o email quando o cliente tem um cadastrado', () => {
+      const resultado = service.validarDadosClienteParaPagamento(cliente());
+
+      expect(resultado.email).toBe('fulano@email.com');
+    });
+
+    it('ainda bloqueia menor de idade quando a dataNascimento existe', () => {
+      expect(() =>
+        service.validarDadosClienteParaPagamento(
+          cliente({ dataNascimento: nascidoHaAnos(17) }),
+        ),
+      ).toThrow(BadRequestException);
+
+      expect(() =>
+        service.validarDadosClienteParaPagamento(
+          cliente({ dataNascimento: nascidoHaAnos(17) }),
+        ),
+      ).toThrow(/menores de 18 anos/i);
+    });
+
+    it('aceita cliente que acabou de completar 18 anos', () => {
+      expect(() =>
+        service.validarDadosClienteParaPagamento(
+          cliente({ dataNascimento: nascidoHaAnos(18) }),
+        ),
+      ).not.toThrow();
+    });
+  });
 });
