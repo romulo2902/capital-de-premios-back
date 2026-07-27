@@ -116,20 +116,20 @@ export class ComprarLojaDto {
   @ApiPropertyOptional({
     example: 'joao@email.com',
     description:
-      'Email do cliente. Obrigatório para envio do comprovante quando clienteId não for informado. String vazia é ignorada.',
+      'Email do cliente (opcional). Se informado, é usado para enviar o comprovante de compra. String vazia é ignorada.',
   })
   @Transform(emptyStringToUndefined)
-  @ValidateIf((dto: ComprarLojaDto) => !dto.clienteId)
+  @IsOptional()
   @IsEmail()
   email?: string;
 
   @ApiPropertyOptional({
     example: '1990-01-01',
     description:
-      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade quando clienteId não for informado.',
+      'Data de nascimento do cliente no formato YYYY-MM-DD (opcional). Se informada, é usada para validar maioridade.',
   })
   @Transform(emptyStringToUndefined)
-  @ValidateIf((dto: ComprarLojaDto) => !dto.clienteId)
+  @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'dataNascimento deve estar no formato YYYY-MM-DD',

@@ -103,7 +103,7 @@ interface DadosClientePagamento {
   cpf: string;
   nome: string;
   telefone: string;
-  email: string;
+  email?: string;
 }
 
 interface CreateVendaOptions {
@@ -1728,13 +1728,7 @@ export class VendasService {
   private async buscarOuCriarClientePorDto(
     dto: CreateVendaDto,
   ): Promise<ClienteCompra> {
-    if (
-      !dto.cpf ||
-      !dto.nome ||
-      !dto.telefone ||
-      !dto.email ||
-      !dto.dataNascimento
-    ) {
+    if (!dto.cpf || !dto.nome || !dto.telefone) {
       throw new BadRequestException(
         'Informe clienteId ou os dados completos do cliente para concluir a compra',
       );
@@ -1799,26 +1793,16 @@ export class VendasService {
   validarDadosClienteParaPagamento(
     cliente: ClienteCompra,
   ): DadosClientePagamento {
-    if (!cliente.email) {
-      throw new BadRequestException(
-        'Cliente sem e-mail cadastrado. Atualize meus-dados antes de concluir a compra',
-      );
+    if (cliente.dataNascimento) {
+      validarMaioridade(cliente.dataNascimento);
     }
-
-    if (!cliente.dataNascimento) {
-      throw new BadRequestException(
-        'Cliente sem data de nascimento cadastrada. Atualize meus-dados antes de concluir a compra',
-      );
-    }
-
-    validarMaioridade(cliente.dataNascimento);
 
     return {
       id: cliente.id,
       cpf: cliente.cpf.replace(/\D/g, ''),
       nome: cliente.nome,
       telefone: cliente.telefone,
-      email: cliente.email,
+      email: cliente.email ?? undefined,
     };
   }
 
@@ -1826,12 +1810,14 @@ export class VendasService {
     cpf: string,
     nome: string,
     telefone: string,
-    dataNascimentoInput: string,
+    dataNascimentoInput?: string,
     email?: string,
     vendedorId?: string,
     distribuidorId?: string,
   ) {
-    const dataNascimento = parseEValidarDataNascimento(dataNascimentoInput);
+    const dataNascimento = dataNascimentoInput
+      ? parseEValidarDataNascimento(dataNascimentoInput)
+      : null;
     const relacionamentoMaisRecente =
       await this.resolverRelacionamentoMaisRecenteDoCliente(
         vendedorId,
@@ -1842,7 +1828,7 @@ export class VendasService {
     });
 
     if (existente) {
-      if (!existente.dataNascimento) {
+      if (!existente.dataNascimento && dataNascimento) {
         return this.prisma.cliente.update({
           where: { id: existente.id },
           data: {

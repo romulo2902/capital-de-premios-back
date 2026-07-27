@@ -92,7 +92,7 @@ export class FsPayPixGateway implements PaymentGateway {
       idempotency_id: input.vendaId,
       document: input.cpfPagador.replace(/\D/g, ''),
       description: input.descricao,
-      email: input.emailPagador,
+      email: input.emailPagador || 'cliente.sem.email@capitaldepremios.com.br',
       name: input.nomePagador,
       expiration_date: this.formatarExpirationDate(expiracaoSegundos),
     };
