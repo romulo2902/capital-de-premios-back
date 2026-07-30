@@ -87,6 +87,9 @@ export class LojaPublicaService {
   private static readonly CONTATO_LIMITE_IP_MAXIMO = 8;
   private static readonly CONTATO_LIMITE_CPF_JANELA_SEGUNDOS = 3600;
   private static readonly CONTATO_LIMITE_CPF_MAXIMO = 3;
+  /** Busca com folga: a ordem final depende do prêmio, resolvido só depois. */
+  private static readonly GANHADORES_BUSCA_LIMITE = 24;
+  private static readonly GANHADORES_EXIBICAO_LIMITE = 12;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -721,6 +724,108 @@ export class LojaPublicaService {
     };
   }
 
+  /**
+   * Ganhadores recentes para a seção "Hall da Fama" da loja.
+   *
+   * A fonte da verdade é `Bilhete.ganhador` + `Bilhete.premioId`, e não
+   * `Premio.ganhadorBilheteId`: aquele aceita N linhas por prêmio, este é
+   * single-valued. Com isso, se o sorteio algum dia passar a registrar empates,
+   * o rateio (`valorPorGanhador`/`totalGanhadores`) já sai correto sem
+   * alteração aqui — hoje há sempre um ganhador por prêmio.
+   */
+  async getGanhadores() {
+    const bilhetes = await this.prisma.bilhete.findMany({
+      where: {
+        ganhador: true,
+        premioId: { not: null },
+        venda: {
+          status: StatusVenda.APROVADO,
+          edicao: { status: StatusEdicao.FINALIZADA },
+        },
+      },
+      include: {
+        venda: {
+          include: {
+            cliente: { select: { nome: true, cidade: true, estado: true } },
+            vendedor: { select: { nome: true } },
+            edicao: { select: { numero: true, dataSorteio: true } },
+          },
+        },
+      },
+      orderBy: { venda: { edicao: { dataSorteio: 'desc' } } },
+      take: LojaPublicaService.GANHADORES_BUSCA_LIMITE,
+    });
+
+    if (bilhetes.length === 0) {
+      return { message: 'Nenhum ganhador registrado', data: [] };
+    }
+
+    // `Bilhete.premioId` não tem @relation, então o prêmio vem em query separada.
+    const premioIds = [
+      ...new Set(
+        bilhetes
+          .map((bilhete) => bilhete.premioId)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+
+    const premios = await this.prisma.premio.findMany({
+      where: { id: { in: premioIds } },
+      select: { id: true, ordem: true, descricao: true, valor: true },
+    });
+    const premioPorId = new Map(premios.map((premio) => [premio.id, premio]));
+
+    const ganhadoresPorPremio = new Map<string, number>();
+    for (const bilhete of bilhetes) {
+      const premioId = bilhete.premioId;
+      if (premioId) {
+        ganhadoresPorPremio.set(
+          premioId,
+          (ganhadoresPorPremio.get(premioId) ?? 0) + 1,
+        );
+      }
+    }
+
+    const ganhadores = bilhetes
+      .map((bilhete) => {
+        const premio = premioPorId.get(bilhete.premioId!);
+        if (!premio) {
+          return null;
+        }
+
+        const totalGanhadores = ganhadoresPorPremio.get(bilhete.premioId!) ?? 1;
+        const valorPremio = Number(premio.valor);
+        const { cliente, vendedor, edicao } = bilhete.venda;
+
+        return {
+          id: bilhete.id,
+          nome: this.abreviarNome(cliente.nome),
+          cidade: cliente.cidade,
+          estado: cliente.estado,
+          premioOrdem: premio.ordem,
+          premioDescricao: premio.descricao,
+          valorPremio,
+          valorPorGanhador: valorPremio / totalGanhadores,
+          totalGanhadores,
+          vendedorNome: vendedor?.nome ?? null,
+          edicaoNumero: edicao.numero,
+          dataSorteio: edicao.dataSorteio,
+        };
+      })
+      .filter((ganhador): ganhador is NonNullable<typeof ganhador> =>
+        ganhador !== null,
+      )
+      // A ordenação do banco cobre a data; a ordem do prêmio só é conhecida
+      // depois de resolver os prêmios, então o desempate acontece aqui.
+      .sort((a, b) => {
+        const porData = b.dataSorteio.getTime() - a.dataSorteio.getTime();
+        return porData !== 0 ? porData : a.premioOrdem - b.premioOrdem;
+      })
+      .slice(0, LojaPublicaService.GANHADORES_EXIBICAO_LIMITE);
+
+    return { message: 'Ganhadores carregados', data: ganhadores };
+  }
+
   async getPagina(slug: string) {
     return this.conteudoService.findBySlug(slug);
   }
@@ -761,6 +866,26 @@ export class LojaPublicaService {
 
   private mascararCPF(cpf: string): string {
     return `${cpf.substring(0, 3)}.***.***-${cpf.substring(9, 11)}`;
+  }
+
+  /**
+   * "JANIELSON BARBOSA COSTA" → "JANIELSON B C".
+   *
+   * O Hall da Fama é público, então o sobrenome do cliente vira inicial.
+   */
+  private abreviarNome(nome: string): string {
+    const partes = nome.trim().split(/\s+/).filter(Boolean);
+
+    if (partes.length === 0) {
+      return '';
+    }
+
+    const [primeiro, ...sobrenomes] = partes;
+    const iniciais = sobrenomes
+      .map((sobrenome) => `${sobrenome.charAt(0).toUpperCase()}`)
+      .join(' ');
+
+    return iniciais ? `${primeiro} ${iniciais}` : primeiro;
   }
 
   private mascararEmail(email: string | null): string | null {

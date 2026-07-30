@@ -4,6 +4,7 @@ import {
   OrigemParticipacao,
   Prisma,
   StatusEdicao,
+  StatusVenda,
   TipoCartela,
 } from '@prisma/client';
 import { LojaPublicaService } from './loja-publica.service';
@@ -374,5 +375,269 @@ describe('LojaPublicaService — getResultados', () => {
         orderBy: { dataSorteio: 'desc' },
       }),
     );
+  });
+});
+
+/**
+ * A loja usa GET /loja/ganhadores para a secao "Hall da Fama".
+ *
+ * Dois contratos importantes travados aqui:
+ *
+ * 1. O nome do cliente NUNCA sai completo — a pagina e publica.
+ * 2. O rateio vem de contar bilhetes ganhadores por premio, e nao de
+ *    `Premio.ganhadorBilheteId` (single-valued). Hoje o sorteio registra um
+ *    ganhador por premio, mas se passar a registrar empates o rateio ja
+ *    funciona sem alteracao no service.
+ */
+describe('LojaPublicaService — getGanhadores', () => {
+  let service: LojaPublicaService;
+
+  const mockPrisma = {
+    bilhete: {
+      findMany: jest.fn(),
+    },
+    premio: {
+      findMany: jest.fn(),
+    },
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        LojaPublicaService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: VendasService, useValue: {} },
+        { provide: ConteudoService, useValue: {} },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
+        { provide: PaymentGatewayFactory, useValue: {} },
+        {
+          provide: RedisService,
+          useValue: { isConfigured: () => false, client: null },
+        },
+      ],
+    }).compile();
+
+    service = module.get<LojaPublicaService>(LojaPublicaService);
+  });
+
+  function montarBilhete(params: {
+    id: string;
+    premioId: string;
+    clienteNome: string;
+    cidade?: string | null;
+    estado?: string | null;
+    vendedorNome?: string | null;
+    edicaoNumero?: string;
+    dataSorteio?: Date;
+  }) {
+    // `??` nao serve aqui: os testes de campo nulo passam null de proposito, e
+    // o default engoliria justamente o caso sob teste.
+    return {
+      id: params.id,
+      premioId: params.premioId,
+      ganhador: true,
+      venda: {
+        cliente: {
+          nome: params.clienteNome,
+          cidade: 'cidade' in params ? params.cidade : 'VALPARAISO',
+          estado: 'estado' in params ? params.estado : 'GO',
+        },
+        vendedor:
+          'vendedorNome' in params
+            ? params.vendedorNome === null
+              ? null
+              : { nome: params.vendedorNome }
+            : { nome: 'ADEGA BEBIDAS PONTO NOVO' },
+        edicao: {
+          numero: params.edicaoNumero ?? '001',
+          dataSorteio: params.dataSorteio ?? new Date('2026-07-26T20:00:00Z'),
+        },
+      },
+    };
+  }
+
+  it('abrevia o sobrenome do ganhador', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'bilhete-1',
+        premioId: 'premio-1',
+        clienteNome: 'JANIELSON BARBOSA COSTA',
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 },
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0].nome).toBe('JANIELSON B C');
+  });
+
+  it('mantem nome unico sem sobrenome intacto', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'bilhete-1',
+        premioId: 'premio-1',
+        clienteNome: 'MADONNA',
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 },
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0].nome).toBe('MADONNA');
+  });
+
+  it('rateia o valor quando um premio tem varios bilhetes ganhadores', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'bilhete-1',
+        premioId: 'premio-3',
+        clienteNome: 'MARCUS A B',
+      }),
+      montarBilhete({
+        id: 'bilhete-2',
+        premioId: 'premio-3',
+        clienteNome: 'EDUARDO M S',
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      { id: 'premio-3', ordem: 3, descricao: '3º Prêmio', valor: 7000 },
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data).toHaveLength(2);
+    for (const ganhador of resposta.data) {
+      expect(ganhador.totalGanhadores).toBe(2);
+      expect(ganhador.valorPremio).toBe(7000);
+      expect(ganhador.valorPorGanhador).toBe(3500);
+    }
+  });
+
+  it('nao rateia quando o premio tem um unico ganhador', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'bilhete-1',
+        premioId: 'premio-1',
+        clienteNome: 'VICENTE DE PAULA',
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 5000 },
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0]).toMatchObject({
+      totalGanhadores: 1,
+      valorPremio: 5000,
+      valorPorGanhador: 5000,
+    });
+  });
+
+  it('propaga cidade, estado e vendedor nulos sem quebrar', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'bilhete-1',
+        premioId: 'premio-1',
+        clienteNome: 'SEM ENDERECO',
+        cidade: null,
+        estado: null,
+        vendedorNome: null,
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 1000 },
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0]).toMatchObject({
+      cidade: null,
+      estado: null,
+      vendedorNome: null,
+    });
+  });
+
+  it('ordena por data do sorteio desc e desempata pela ordem do premio', async () => {
+    const antiga = new Date('2026-06-14T20:00:00Z');
+    const recente = new Date('2026-07-26T20:00:00Z');
+
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'b-antiga',
+        premioId: 'premio-antigo',
+        clienteNome: 'ANTIGO A',
+        dataSorteio: antiga,
+        edicaoNumero: '002',
+      }),
+      montarBilhete({
+        id: 'b-recente-2',
+        premioId: 'premio-2',
+        clienteNome: 'SEGUNDO S',
+        dataSorteio: recente,
+      }),
+      montarBilhete({
+        id: 'b-recente-1',
+        premioId: 'premio-1',
+        clienteNome: 'PRIMEIRO P',
+        dataSorteio: recente,
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      { id: 'premio-antigo', ordem: 1, descricao: '1º', valor: 100 },
+      { id: 'premio-2', ordem: 2, descricao: '2º', valor: 200 },
+      { id: 'premio-1', ordem: 1, descricao: '1º', valor: 300 },
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data.map((g) => g.id)).toEqual([
+      'b-recente-1',
+      'b-recente-2',
+      'b-antiga',
+    ]);
+  });
+
+  it('busca apenas bilhetes ganhadores de vendas aprovadas em edicoes finalizadas', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data).toEqual([]);
+    expect(mockPrisma.bilhete.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          ganhador: true,
+          premioId: { not: null },
+          venda: {
+            status: StatusVenda.APROVADO,
+            edicao: { status: StatusEdicao.FINALIZADA },
+          },
+        }),
+      }),
+    );
+    // Sem bilhetes, nem precisa ir buscar premio.
+    expect(mockPrisma.premio.findMany).not.toHaveBeenCalled();
+  });
+
+  it('descarta bilhete cujo premio nao existe mais', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'bilhete-orfao',
+        premioId: 'premio-removido',
+        clienteNome: 'ORFAO O',
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data).toEqual([]);
   });
 });
