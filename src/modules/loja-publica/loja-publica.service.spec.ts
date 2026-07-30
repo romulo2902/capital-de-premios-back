@@ -640,4 +640,159 @@ describe('LojaPublicaService — getGanhadores', () => {
 
     expect(resposta.data).toEqual([]);
   });
+
+  it('entrega dataSorteio em ISO, para o payload nao mudar vindo do cache', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'bilhete-1',
+        premioId: 'premio-1',
+        clienteNome: 'ISO T',
+        dataSorteio: new Date('2026-07-26T20:00:00Z'),
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 },
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0].dataSorteio).toBe('2026-07-26T20:00:00.000Z');
+  });
+});
+
+/**
+ * O Hall da Fama é público e sem auth: cada visita à landing bateria no banco.
+ * O cache protege isso — mas nunca pode virar ponto de falha, então uma queda
+ * do Redis tem que degradar para consulta direta em vez de derrubar o endpoint.
+ */
+describe('LojaPublicaService — getGanhadores (cache)', () => {
+  const mockPrisma = {
+    bilhete: { findMany: jest.fn() },
+    premio: { findMany: jest.fn() },
+  };
+
+  const mockRedisClient = {
+    get: jest.fn(),
+    setex: jest.fn(),
+  };
+
+  async function montarService(redisConfigurado: boolean) {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        LojaPublicaService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: VendasService, useValue: {} },
+        { provide: ConteudoService, useValue: {} },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
+        { provide: PaymentGatewayFactory, useValue: {} },
+        {
+          provide: RedisService,
+          useValue: {
+            isConfigured: () => redisConfigurado,
+            client: redisConfigurado ? mockRedisClient : null,
+          },
+        },
+      ],
+    }).compile();
+
+    return module.get<LojaPublicaService>(LojaPublicaService);
+  }
+
+  function mockarUmGanhador() {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      {
+        id: 'bilhete-1',
+        premioId: 'premio-1',
+        ganhador: true,
+        venda: {
+          cliente: { nome: 'CACHE T', cidade: 'BRASILIA', estado: 'DF' },
+          vendedor: { nome: 'VENDEDOR' },
+          edicao: {
+            numero: '001',
+            dataSorteio: new Date('2026-07-26T20:00:00Z'),
+          },
+        },
+      },
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 },
+    ]);
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('grava o resultado no cache apos consultar o banco', async () => {
+    const service = await montarService(true);
+    mockRedisClient.get.mockResolvedValue(null);
+    mockarUmGanhador();
+
+    await service.getGanhadores();
+
+    expect(mockRedisClient.setex).toHaveBeenCalledWith(
+      'loja:ganhadores',
+      300,
+      expect.stringContaining('CACHE T'),
+    );
+  });
+
+  it('serve do cache sem tocar no banco', async () => {
+    const service = await montarService(true);
+    mockRedisClient.get.mockResolvedValue(
+      JSON.stringify([
+        {
+          id: 'bilhete-cacheado',
+          nome: 'DO CACHE',
+          cidade: null,
+          estado: null,
+          premioOrdem: 1,
+          premioDescricao: '1º Prêmio',
+          valorPremio: 3000,
+          valorPorGanhador: 3000,
+          totalGanhadores: 1,
+          vendedorNome: null,
+          edicaoNumero: '001',
+          dataSorteio: '2026-07-26T20:00:00.000Z',
+        },
+      ]),
+    );
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0].nome).toBe('DO CACHE');
+    expect(mockPrisma.bilhete.findMany).not.toHaveBeenCalled();
+  });
+
+  it('cai para o banco quando a leitura do cache falha', async () => {
+    const service = await montarService(true);
+    mockRedisClient.get.mockRejectedValue(new Error('redis fora do ar'));
+    mockarUmGanhador();
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0].nome).toBe('CACHE T');
+    expect(mockPrisma.bilhete.findMany).toHaveBeenCalled();
+  });
+
+  it('responde normalmente quando a gravacao no cache falha', async () => {
+    const service = await montarService(true);
+    mockRedisClient.get.mockResolvedValue(null);
+    mockRedisClient.setex.mockRejectedValue(new Error('redis fora do ar'));
+    mockarUmGanhador();
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0].nome).toBe('CACHE T');
+  });
+
+  it('funciona sem Redis configurado', async () => {
+    const service = await montarService(false);
+    mockarUmGanhador();
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0].nome).toBe('CACHE T');
+    expect(mockRedisClient.get).not.toHaveBeenCalled();
+  });
 });

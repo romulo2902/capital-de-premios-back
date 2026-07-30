@@ -79,6 +79,22 @@ interface AtualizacaoRelacionamentoCliente {
   distribuidorId?: string | null;
 }
 
+/** Item do Hall da Fama. `dataSorteio` em ISO para sobreviver ao cache JSON. */
+export interface GanhadorLoja {
+  id: string;
+  nome: string;
+  cidade: string | null;
+  estado: string | null;
+  premioOrdem: number;
+  premioDescricao: string;
+  valorPremio: number;
+  valorPorGanhador: number;
+  totalGanhadores: number;
+  vendedorNome: string | null;
+  edicaoNumero: string;
+  dataSorteio: string;
+}
+
 @Injectable()
 export class LojaPublicaService {
   private readonly logger = new Logger(LojaPublicaService.name);
@@ -90,6 +106,9 @@ export class LojaPublicaService {
   /** Busca com folga: a ordem final depende do prêmio, resolvido só depois. */
   private static readonly GANHADORES_BUSCA_LIMITE = 24;
   private static readonly GANHADORES_EXIBICAO_LIMITE = 12;
+  private static readonly GANHADORES_CACHE_KEY = 'loja:ganhadores';
+  /** Muda só quando um sorteio é finalizado; 5 min é folgado e seguro. */
+  private static readonly GANHADORES_CACHE_TTL_SEGUNDOS = 300;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -734,6 +753,24 @@ export class LojaPublicaService {
    * alteração aqui — hoje há sempre um ganhador por prêmio.
    */
   async getGanhadores() {
+    const cacheados = await this.lerCacheGanhadores();
+    if (cacheados) {
+      return this.montarRespostaGanhadores(cacheados);
+    }
+
+    const ganhadores = await this.consultarGanhadores();
+    await this.gravarCacheGanhadores(ganhadores);
+
+    return this.montarRespostaGanhadores(ganhadores);
+  }
+
+  private montarRespostaGanhadores(ganhadores: GanhadorLoja[]) {
+    return ganhadores.length === 0
+      ? { message: 'Nenhum ganhador registrado', data: ganhadores }
+      : { message: 'Ganhadores carregados', data: ganhadores };
+  }
+
+  private async consultarGanhadores(): Promise<GanhadorLoja[]> {
     const bilhetes = await this.prisma.bilhete.findMany({
       where: {
         ganhador: true,
@@ -757,7 +794,7 @@ export class LojaPublicaService {
     });
 
     if (bilhetes.length === 0) {
-      return { message: 'Nenhum ganhador registrado', data: [] };
+      return [];
     }
 
     // `Bilhete.premioId` não tem @relation, então o prêmio vem em query separada.
@@ -786,44 +823,94 @@ export class LojaPublicaService {
       }
     }
 
-    const ganhadores = bilhetes
-      .map((bilhete) => {
-        const premio = premioPorId.get(bilhete.premioId!);
-        if (!premio) {
-          return null;
-        }
+    return (
+      bilhetes
+        .map((bilhete) => {
+          const premio = premioPorId.get(bilhete.premioId!);
+          if (!premio) {
+            return null;
+          }
 
-        const totalGanhadores = ganhadoresPorPremio.get(bilhete.premioId!) ?? 1;
-        const valorPremio = Number(premio.valor);
-        const { cliente, vendedor, edicao } = bilhete.venda;
+          const totalGanhadores =
+            ganhadoresPorPremio.get(bilhete.premioId!) ?? 1;
+          const valorPremio = Number(premio.valor);
+          const { cliente, vendedor, edicao } = bilhete.venda;
 
-        return {
-          id: bilhete.id,
-          nome: this.abreviarNome(cliente.nome),
-          cidade: cliente.cidade,
-          estado: cliente.estado,
-          premioOrdem: premio.ordem,
-          premioDescricao: premio.descricao,
-          valorPremio,
-          valorPorGanhador: valorPremio / totalGanhadores,
-          totalGanhadores,
-          vendedorNome: vendedor?.nome ?? null,
-          edicaoNumero: edicao.numero,
-          dataSorteio: edicao.dataSorteio,
-        };
-      })
-      .filter((ganhador): ganhador is NonNullable<typeof ganhador> =>
-        ganhador !== null,
-      )
-      // A ordenação do banco cobre a data; a ordem do prêmio só é conhecida
-      // depois de resolver os prêmios, então o desempate acontece aqui.
-      .sort((a, b) => {
-        const porData = b.dataSorteio.getTime() - a.dataSorteio.getTime();
-        return porData !== 0 ? porData : a.premioOrdem - b.premioOrdem;
-      })
-      .slice(0, LojaPublicaService.GANHADORES_EXIBICAO_LIMITE);
+          return {
+            id: bilhete.id,
+            nome: this.abreviarNome(cliente.nome),
+            cidade: cliente.cidade,
+            estado: cliente.estado,
+            premioOrdem: premio.ordem,
+            premioDescricao: premio.descricao,
+            valorPremio,
+            valorPorGanhador: valorPremio / totalGanhadores,
+            totalGanhadores,
+            vendedorNome: vendedor?.nome ?? null,
+            edicaoNumero: edicao.numero,
+            // ISO explícito para o payload ficar idêntico vindo do cache
+            // (JSON) ou do banco (Date).
+            dataSorteio: edicao.dataSorteio.toISOString(),
+          };
+        })
+        .filter((ganhador): ganhador is GanhadorLoja => ganhador !== null)
+        // A ordenação do banco cobre a data; a ordem do prêmio só é conhecida
+        // depois de resolver os prêmios, então o desempate acontece aqui.
+        // Data em ISO ordena corretamente por comparação de string.
+        .sort((a, b) => {
+          const porData = b.dataSorteio.localeCompare(a.dataSorteio);
+          return porData !== 0 ? porData : a.premioOrdem - b.premioOrdem;
+        })
+        .slice(0, LojaPublicaService.GANHADORES_EXIBICAO_LIMITE)
+    );
+  }
 
-    return { message: 'Ganhadores carregados', data: ganhadores };
+  /**
+   * O Hall da Fama só muda quando um sorteio é finalizado, mas o endpoint é
+   * público e sem auth — cada visita à landing bateria no banco. O cache tira
+   * essa carga; falha de Redis nunca derruba o endpoint, apenas volta a
+   * consultar o banco.
+   */
+  private async lerCacheGanhadores(): Promise<GanhadorLoja[] | null> {
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      return null;
+    }
+
+    try {
+      const bruto = await this.redisService.client.get(
+        LojaPublicaService.GANHADORES_CACHE_KEY,
+      );
+      return bruto ? (JSON.parse(bruto) as GanhadorLoja[]) : null;
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao ler cache de ganhadores: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async gravarCacheGanhadores(
+    ganhadores: GanhadorLoja[],
+  ): Promise<void> {
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      return;
+    }
+
+    try {
+      await this.redisService.client.setex(
+        LojaPublicaService.GANHADORES_CACHE_KEY,
+        LojaPublicaService.GANHADORES_CACHE_TTL_SEGUNDOS,
+        JSON.stringify(ganhadores),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao gravar cache de ganhadores: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   async getPagina(slug: string) {

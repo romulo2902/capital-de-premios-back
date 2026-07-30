@@ -377,6 +377,9 @@ model Bilhete {
 
   @@unique([matrizId, edicaoId])
   @@index([edicaoId])
+  // Hall da Fama (GET /loja/ganhadores) filtra por ganhador + premioId. Sem
+  // isso a consulta faz Seq Scan numa tabela que cresce a cada bilhete vendido.
+  @@index([ganhador, premioId])
 }
 
 model Resultado {
