@@ -776,9 +776,19 @@ export class LojaPublicaService {
     // não obriga prêmio premiado, então edições podem ser FINALIZADA vazias. Se
     // as mais recentes forem assim, o Hall da Fama ficaria vazio (e cacheado)
     // mesmo havendo ganhadores em edições anteriores.
+    // O filtro tem que ser IDÊNTICO ao da consulta de bilhetes abaixo. Se a
+    // âncora enxergar mais que ela (ex.: ganhador de venda cancelada), a edição
+    // ocupa vaga na janela sem render ganhador exibível — e pode empurrar para
+    // fora uma edição com ganhadores válidos.
+    const filtroGanhador = {
+      ganhador: true,
+      premioId: { not: null },
+      venda: { status: StatusVenda.APROVADO },
+    } as const;
+
     const edicoesComGanhador = await this.prisma.bilhete.groupBy({
       by: ['edicaoId'],
-      where: { ganhador: true, premioId: { not: null } },
+      where: filtroGanhador,
     });
 
     if (edicoesComGanhador.length === 0) {
@@ -811,10 +821,8 @@ export class LojaPublicaService {
 
     const bilhetes = await this.prisma.bilhete.findMany({
       where: {
-        ganhador: true,
-        premioId: { not: null },
+        ...filtroGanhador,
         edicaoId: { in: edicoes.map((edicao) => edicao.id) },
-        venda: { status: StatusVenda.APROVADO },
       },
       // `select` em vez de `include`: `include` traria todas as colunas de
       // Venda, inclusive o `gatewayPayload` (resposta crua do gateway, com o
@@ -1001,12 +1009,14 @@ export class LojaPublicaService {
   }
 
   /**
-   * "JANIELSON BARBOSA COSTA" → "JANIELSON B C".
+   * "Janielson Barbosa Costa" → "JANIELSON B C".
    *
    * O Hall da Fama é público, então o sobrenome do cliente vira inicial.
+   * Tudo em caixa alta: o checkout não normaliza o que o cliente digita, e
+   * manter só as iniciais maiúsculas produziria "oseias I S".
    */
   private abreviarNome(nome: string): string {
-    const partes = nome.trim().split(/\s+/).filter(Boolean);
+    const partes = nome.trim().toUpperCase().split(/\s+/).filter(Boolean);
 
     if (partes.length === 0) {
       return '';
@@ -1014,7 +1024,7 @@ export class LojaPublicaService {
 
     const [primeiro, ...sobrenomes] = partes;
     const iniciais = sobrenomes
-      .map((sobrenome) => `${sobrenome.charAt(0).toUpperCase()}`)
+      .map((sobrenome) => sobrenome.charAt(0))
       .join(' ');
 
     return iniciais ? `${primeiro} ${iniciais}` : primeiro;

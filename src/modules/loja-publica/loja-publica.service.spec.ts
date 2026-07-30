@@ -503,6 +503,25 @@ describe('LojaPublicaService — getGanhadores', () => {
     expect(resposta.data[0].nome).toBe('JANIELSON B C');
   });
 
+  it('normaliza a caixa do nome inteiro, nao so das iniciais', async () => {
+    // O checkout não normaliza o que o cliente digita: sem isso,
+    // "oseias isidoro sotero" seria publicado como "oseias I S".
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({
+        id: 'bilhete-1',
+        premioId: 'premio-1',
+        clienteNome: 'oseias isidoro sotero',
+      }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      montarPremio({ id: 'premio-1', ordem: 1, valor: 3000 }),
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data[0].nome).toBe('OSEIAS I S');
+  });
+
   it('mantem nome unico sem sobrenome intacto', async () => {
     mockPrisma.bilhete.findMany.mockResolvedValue([
       montarBilhete({
@@ -759,7 +778,11 @@ describe('LojaPublicaService — getGanhadores', () => {
     expect(mockPrisma.bilhete.groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
         by: ['edicaoId'],
-        where: { ganhador: true, premioId: { not: null } },
+        where: {
+          ganhador: true,
+          premioId: { not: null },
+          venda: { status: StatusVenda.APROVADO },
+        },
       }),
     );
     expect(mockPrisma.edicao.findMany).toHaveBeenCalledWith(
@@ -770,6 +793,26 @@ describe('LojaPublicaService — getGanhadores', () => {
         }),
       }),
     );
+  });
+
+  it('ancora e consulta de bilhetes enxergam exatamente o mesmo conjunto', async () => {
+    // Regressão: se a âncora enxergasse mais que a consulta (ex.: ganhador de
+    // venda cancelada), a edição ocuparia vaga na janela sem render ganhador
+    // exibível, podendo empurrar para fora uma edição com ganhadores válidos.
+    mockPrisma.bilhete.findMany.mockResolvedValue([]);
+
+    await service.getGanhadores();
+
+    const [argsGroupBy] = mockPrisma.bilhete.groupBy.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    const [argsFindMany] = mockPrisma.bilhete.findMany.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    const { edicaoId, ...filtroDaConsulta } = argsFindMany.where;
+
+    expect(edicaoId).toBeDefined();
+    expect(argsGroupBy.where).toEqual(filtroDaConsulta);
   });
 
   it('nao consulta ganhadores quando nenhuma edicao tem ganhador', async () => {
