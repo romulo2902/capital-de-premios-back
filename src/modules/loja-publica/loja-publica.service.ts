@@ -714,6 +714,8 @@ export class LojaPublicaService {
         id: e.id,
         numero: e.numero,
         dataSorteio: e.dataSorteio,
+        imagemUrl: e.imagemUrl,
+        frase: e.frase,
         resultado: e.resultado ? e.resultado.numerosApurados : null,
       })),
     };

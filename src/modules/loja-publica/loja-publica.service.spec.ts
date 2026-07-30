@@ -280,3 +280,99 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
     expect(opcoes).toHaveLength(0);
   });
 });
+
+/**
+ * A loja usa GET /loja/resultados para montar a secao "Sorteios Anteriores",
+ * que exibe a imagem promocional de cada edicao finalizada. Sem imagemUrl na
+ * resposta o carrossel cai no placeholder para todos os cards.
+ */
+describe('LojaPublicaService — getResultados', () => {
+  let service: LojaPublicaService;
+
+  const mockPrisma = {
+    edicao: {
+      findMany: jest.fn(),
+    },
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        LojaPublicaService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: VendasService, useValue: {} },
+        { provide: ConteudoService, useValue: {} },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
+        { provide: PaymentGatewayFactory, useValue: {} },
+        {
+          provide: RedisService,
+          useValue: { isConfigured: () => false, client: null },
+        },
+      ],
+    }).compile();
+
+    service = module.get<LojaPublicaService>(LojaPublicaService);
+  });
+
+  it('expoe imagemUrl, frase e numeros apurados de cada edicao finalizada', async () => {
+    mockPrisma.edicao.findMany.mockResolvedValue([
+      {
+        id: 'edicao-1',
+        numero: '001',
+        dataSorteio: new Date('2026-07-26T20:00:00Z'),
+        imagemUrl: 'https://cdn.exemplo.com/edicao-001.png',
+        frase: 'Jeep Renegade',
+        resultado: { numerosApurados: ['12', '34'] },
+      },
+    ]);
+
+    const resposta = await service.getResultados();
+
+    expect(resposta.data).toEqual([
+      {
+        id: 'edicao-1',
+        numero: '001',
+        dataSorteio: new Date('2026-07-26T20:00:00Z'),
+        imagemUrl: 'https://cdn.exemplo.com/edicao-001.png',
+        frase: 'Jeep Renegade',
+        resultado: ['12', '34'],
+      },
+    ]);
+  });
+
+  it('mantem imagemUrl e frase nulos quando a edicao nao os tem', async () => {
+    mockPrisma.edicao.findMany.mockResolvedValue([
+      {
+        id: 'edicao-2',
+        numero: '002',
+        dataSorteio: new Date('2026-06-14T20:00:00Z'),
+        imagemUrl: null,
+        frase: null,
+        resultado: null,
+      },
+    ]);
+
+    const resposta = await service.getResultados();
+
+    expect(resposta.data[0]).toMatchObject({
+      imagemUrl: null,
+      frase: null,
+      resultado: null,
+    });
+  });
+
+  it('busca apenas edicoes FINALIZADA, das mais recentes para as mais antigas', async () => {
+    mockPrisma.edicao.findMany.mockResolvedValue([]);
+
+    await service.getResultados();
+
+    expect(mockPrisma.edicao.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { status: StatusEdicao.FINALIZADA },
+        orderBy: { dataSorteio: 'desc' },
+      }),
+    );
+  });
+});
