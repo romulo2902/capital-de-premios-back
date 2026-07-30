@@ -103,8 +103,8 @@ export class LojaPublicaService {
   private static readonly CONTATO_LIMITE_IP_MAXIMO = 8;
   private static readonly CONTATO_LIMITE_CPF_JANELA_SEGUNDOS = 3600;
   private static readonly CONTATO_LIMITE_CPF_MAXIMO = 3;
-  /** Busca com folga: a ordem final depende do prêmio, resolvido só depois. */
-  private static readonly GANHADORES_BUSCA_LIMITE = 24;
+  /** Janela por edição: garante todos os ganhadores de cada prêmio (rateio). */
+  private static readonly GANHADORES_EDICOES_LIMITE = 5;
   private static readonly GANHADORES_EXIBICAO_LIMITE = 12;
   private static readonly GANHADORES_CACHE_KEY = 'loja:ganhadores';
   /** Muda só quando um sorteio é finalizado; 5 min é folgado e seguro. */
@@ -771,26 +771,48 @@ export class LojaPublicaService {
   }
 
   private async consultarGanhadores(): Promise<GanhadorLoja[]> {
+    // A janela é por EDIÇÃO, não por bilhete. Limitar bilhetes direto quebraria
+    // o rateio: os ganhadores de um mesmo prêmio podem cair na fronteira do
+    // corte e `totalGanhadores` sairia menor que o real — publicando valor por
+    // ganhador inflado. Como um prêmio pertence a exatamente uma edição, buscar
+    // edições inteiras garante contagem completa por prêmio.
+    const edicoes = await this.prisma.edicao.findMany({
+      where: { status: StatusEdicao.FINALIZADA },
+      select: { id: true, numero: true, dataSorteio: true },
+      // `id` desempata: várias edições podem compartilhar a mesma dataSorteio, e
+      // sem critério estável o Postgres devolveria subconjunto arbitrário — a
+      // lista mudaria entre expirações do cache sem nada mudar no banco.
+      orderBy: [{ dataSorteio: 'desc' }, { id: 'desc' }],
+      take: LojaPublicaService.GANHADORES_EDICOES_LIMITE,
+    });
+
+    if (edicoes.length === 0) {
+      return [];
+    }
+
+    const edicaoPorId = new Map(edicoes.map((edicao) => [edicao.id, edicao]));
+
     const bilhetes = await this.prisma.bilhete.findMany({
       where: {
         ganhador: true,
         premioId: { not: null },
-        venda: {
-          status: StatusVenda.APROVADO,
-          edicao: { status: StatusEdicao.FINALIZADA },
-        },
+        edicaoId: { in: edicoes.map((edicao) => edicao.id) },
+        venda: { status: StatusVenda.APROVADO },
       },
-      include: {
+      // `select` em vez de `include`: `include` traria todas as colunas de
+      // Venda, inclusive o `gatewayPayload` (resposta crua do gateway, com o
+      // QR Code em base64) — vários KB por linha, lidos e descartados.
+      select: {
+        id: true,
+        premioId: true,
+        edicaoId: true,
         venda: {
-          include: {
+          select: {
             cliente: { select: { nome: true, cidade: true, estado: true } },
             vendedor: { select: { nome: true } },
-            edicao: { select: { numero: true, dataSorteio: true } },
           },
         },
       },
-      orderBy: { venda: { edicao: { dataSorteio: 'desc' } } },
-      take: LojaPublicaService.GANHADORES_BUSCA_LIMITE,
     });
 
     if (bilhetes.length === 0) {
@@ -827,14 +849,14 @@ export class LojaPublicaService {
       bilhetes
         .map((bilhete) => {
           const premio = premioPorId.get(bilhete.premioId!);
-          if (!premio) {
+          const edicao = edicaoPorId.get(bilhete.edicaoId);
+          if (!premio || !edicao) {
             return null;
           }
 
           const totalGanhadores =
             ganhadoresPorPremio.get(bilhete.premioId!) ?? 1;
-          const valorPremio = Number(premio.valor);
-          const { cliente, vendedor, edicao } = bilhete.venda;
+          const { cliente, vendedor } = bilhete.venda;
 
           return {
             id: bilhete.id,
@@ -843,8 +865,13 @@ export class LojaPublicaService {
             estado: cliente.estado,
             premioOrdem: premio.ordem,
             premioDescricao: premio.descricao,
-            valorPremio,
-            valorPorGanhador: valorPremio / totalGanhadores,
+            valorPremio: premio.valor.toNumber(),
+            // Divisão em Decimal e arredondada: em float, 7000/3 publicaria
+            // 2333.3333333333335 como valor monetário — no JSON e no cache.
+            valorPorGanhador: premio.valor
+              .div(totalGanhadores)
+              .toDecimalPlaces(2)
+              .toNumber(),
             totalGanhadores,
             vendedorNome: vendedor?.nome ?? null,
             edicaoNumero: edicao.numero,
@@ -854,12 +881,13 @@ export class LojaPublicaService {
           };
         })
         .filter((ganhador): ganhador is GanhadorLoja => ganhador !== null)
-        // A ordenação do banco cobre a data; a ordem do prêmio só é conhecida
-        // depois de resolver os prêmios, então o desempate acontece aqui.
-        // Data em ISO ordena corretamente por comparação de string.
+        // Data em ISO ordena corretamente por comparação de string; `id`
+        // desempata para a ordem ser estável entre chamadas.
         .sort((a, b) => {
           const porData = b.dataSorteio.localeCompare(a.dataSorteio);
-          return porData !== 0 ? porData : a.premioOrdem - b.premioOrdem;
+          if (porData !== 0) return porData;
+          const porPremio = a.premioOrdem - b.premioOrdem;
+          return porPremio !== 0 ? porPremio : a.id.localeCompare(b.id);
         })
         .slice(0, LojaPublicaService.GANHADORES_EXIBICAO_LIMITE)
     );

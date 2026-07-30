@@ -378,21 +378,47 @@ describe('LojaPublicaService — getResultados', () => {
   });
 });
 
+const EDICAO_PADRAO = {
+  id: 'edicao-1',
+  numero: '001',
+  dataSorteio: new Date('2026-07-26T20:00:00Z'),
+};
+
+/** `valor` precisa ser Decimal: o service faz `.div()` / `.toNumber()`. */
+function montarPremio(params: {
+  id: string;
+  ordem: number;
+  valor: number | string;
+  descricao?: string;
+}) {
+  return {
+    id: params.id,
+    ordem: params.ordem,
+    descricao: params.descricao ?? `${params.ordem}º Prêmio`,
+    valor: new Prisma.Decimal(params.valor),
+  };
+}
+
 /**
  * A loja usa GET /loja/ganhadores para a secao "Hall da Fama".
  *
- * Dois contratos importantes travados aqui:
+ * Tres contratos importantes travados aqui:
  *
  * 1. O nome do cliente NUNCA sai completo — a pagina e publica.
  * 2. O rateio vem de contar bilhetes ganhadores por premio, e nao de
  *    `Premio.ganhadorBilheteId` (single-valued). Hoje o sorteio registra um
  *    ganhador por premio, mas se passar a registrar empates o rateio ja
  *    funciona sem alteracao no service.
+ * 3. A janela e por EDICAO, nao por bilhete: limitar bilhetes direto faria a
+ *    contagem do rateio sair menor que a real, inflando o valor por ganhador.
  */
 describe('LojaPublicaService — getGanhadores', () => {
   let service: LojaPublicaService;
 
   const mockPrisma = {
+    edicao: {
+      findMany: jest.fn(),
+    },
     bilhete: {
       findMany: jest.fn(),
     },
@@ -403,6 +429,9 @@ describe('LojaPublicaService — getGanhadores', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // A maioria dos testes usa uma única edição; quem precisa de mais
+    // sobrescreve.
+    mockPrisma.edicao.findMany.mockResolvedValue([EDICAO_PADRAO]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -429,15 +458,14 @@ describe('LojaPublicaService — getGanhadores', () => {
     cidade?: string | null;
     estado?: string | null;
     vendedorNome?: string | null;
-    edicaoNumero?: string;
-    dataSorteio?: Date;
+    edicaoId?: string;
   }) {
     // `??` nao serve aqui: os testes de campo nulo passam null de proposito, e
     // o default engoliria justamente o caso sob teste.
     return {
       id: params.id,
       premioId: params.premioId,
-      ganhador: true,
+      edicaoId: params.edicaoId ?? EDICAO_PADRAO.id,
       venda: {
         cliente: {
           nome: params.clienteNome,
@@ -450,10 +478,6 @@ describe('LojaPublicaService — getGanhadores', () => {
               ? null
               : { nome: params.vendedorNome }
             : { nome: 'ADEGA BEBIDAS PONTO NOVO' },
-        edicao: {
-          numero: params.edicaoNumero ?? '001',
-          dataSorteio: params.dataSorteio ?? new Date('2026-07-26T20:00:00Z'),
-        },
       },
     };
   }
@@ -467,7 +491,7 @@ describe('LojaPublicaService — getGanhadores', () => {
       }),
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 },
+      montarPremio({ id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 }),
     ]);
 
     const resposta = await service.getGanhadores();
@@ -484,7 +508,7 @@ describe('LojaPublicaService — getGanhadores', () => {
       }),
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 },
+      montarPremio({ id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 }),
     ]);
 
     const resposta = await service.getGanhadores();
@@ -506,7 +530,7 @@ describe('LojaPublicaService — getGanhadores', () => {
       }),
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      { id: 'premio-3', ordem: 3, descricao: '3º Prêmio', valor: 7000 },
+      montarPremio({ id: 'premio-3', ordem: 3, descricao: '3º Prêmio', valor: 7000 }),
     ]);
 
     const resposta = await service.getGanhadores();
@@ -519,6 +543,23 @@ describe('LojaPublicaService — getGanhadores', () => {
     }
   });
 
+  it('arredonda o rateio em vez de publicar dizima em float', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([
+      montarBilhete({ id: 'b1', premioId: 'p', clienteNome: 'UM U' }),
+      montarBilhete({ id: 'b2', premioId: 'p', clienteNome: 'DOIS D' }),
+      montarBilhete({ id: 'b3', premioId: 'p', clienteNome: 'TRES T' }),
+    ]);
+    mockPrisma.premio.findMany.mockResolvedValue([
+      montarPremio({ id: 'p', ordem: 1, valor: 7000 }),
+    ]);
+
+    const resposta = await service.getGanhadores();
+
+    // Em float isso publicaria 2333.3333333333335 — inclusive dentro do cache.
+    expect(resposta.data[0].valorPorGanhador).toBe(2333.33);
+    expect(resposta.data[0].totalGanhadores).toBe(3);
+  });
+
   it('nao rateia quando o premio tem um unico ganhador', async () => {
     mockPrisma.bilhete.findMany.mockResolvedValue([
       montarBilhete({
@@ -528,7 +569,7 @@ describe('LojaPublicaService — getGanhadores', () => {
       }),
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 5000 },
+      montarPremio({ id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 5000 }),
     ]);
 
     const resposta = await service.getGanhadores();
@@ -552,7 +593,7 @@ describe('LojaPublicaService — getGanhadores', () => {
       }),
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 1000 },
+      montarPremio({ id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 1000 }),
     ]);
 
     const resposta = await service.getGanhadores();
@@ -565,34 +606,35 @@ describe('LojaPublicaService — getGanhadores', () => {
   });
 
   it('ordena por data do sorteio desc e desempata pela ordem do premio', async () => {
-    const antiga = new Date('2026-06-14T20:00:00Z');
-    const recente = new Date('2026-07-26T20:00:00Z');
+    const edicaoAntiga = {
+      id: 'edicao-2',
+      numero: '002',
+      dataSorteio: new Date('2026-06-14T20:00:00Z'),
+    };
+    mockPrisma.edicao.findMany.mockResolvedValue([EDICAO_PADRAO, edicaoAntiga]);
 
     mockPrisma.bilhete.findMany.mockResolvedValue([
       montarBilhete({
         id: 'b-antiga',
         premioId: 'premio-antigo',
         clienteNome: 'ANTIGO A',
-        dataSorteio: antiga,
-        edicaoNumero: '002',
+        edicaoId: edicaoAntiga.id,
       }),
       montarBilhete({
         id: 'b-recente-2',
         premioId: 'premio-2',
         clienteNome: 'SEGUNDO S',
-        dataSorteio: recente,
       }),
       montarBilhete({
         id: 'b-recente-1',
         premioId: 'premio-1',
         clienteNome: 'PRIMEIRO P',
-        dataSorteio: recente,
       }),
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      { id: 'premio-antigo', ordem: 1, descricao: '1º', valor: 100 },
-      { id: 'premio-2', ordem: 2, descricao: '2º', valor: 200 },
-      { id: 'premio-1', ordem: 1, descricao: '1º', valor: 300 },
+      montarPremio({ id: 'premio-antigo', ordem: 1, valor: 100 }),
+      montarPremio({ id: 'premio-2', ordem: 2, valor: 200 }),
+      montarPremio({ id: 'premio-1', ordem: 1, valor: 300 }),
     ]);
 
     const resposta = await service.getGanhadores();
@@ -602,6 +644,41 @@ describe('LojaPublicaService — getGanhadores', () => {
       'b-recente-2',
       'b-antiga',
     ]);
+  });
+
+  it('limita a janela por edicao, e nao por bilhete', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([]);
+
+    await service.getGanhadores();
+
+    // Um `take` de bilhetes cortaria ganhadores do mesmo premio ao meio e
+    // estragaria a contagem do rateio.
+    expect(mockPrisma.bilhete.findMany).toHaveBeenCalledWith(
+      expect.not.objectContaining({ take: expect.anything() }),
+    );
+    expect(mockPrisma.edicao.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { status: StatusEdicao.FINALIZADA },
+        // `id` desempata edicoes com a mesma data, senao a lista mudaria entre
+        // expiracoes do cache.
+        orderBy: [{ dataSorteio: 'desc' }, { id: 'desc' }],
+        take: expect.any(Number),
+      }),
+    );
+  });
+
+  it('nao carrega colunas pesadas da venda (gatewayPayload)', async () => {
+    mockPrisma.bilhete.findMany.mockResolvedValue([]);
+
+    await service.getGanhadores();
+
+    const [args] = mockPrisma.bilhete.findMany.mock.calls[0] as [
+      Record<string, unknown>,
+    ];
+    // `include` traria todas as colunas de Venda, inclusive o gatewayPayload
+    // (QR Code em base64) — varios KB por linha, lidos e descartados.
+    expect(args.include).toBeUndefined();
+    expect(args.select).toBeDefined();
   });
 
   it('busca apenas bilhetes ganhadores de vendas aprovadas em edicoes finalizadas', async () => {
@@ -615,10 +692,8 @@ describe('LojaPublicaService — getGanhadores', () => {
         where: expect.objectContaining({
           ganhador: true,
           premioId: { not: null },
-          venda: {
-            status: StatusVenda.APROVADO,
-            edicao: { status: StatusEdicao.FINALIZADA },
-          },
+          edicaoId: { in: [EDICAO_PADRAO.id] },
+          venda: { status: StatusVenda.APROVADO },
         }),
       }),
     );
@@ -651,7 +726,7 @@ describe('LojaPublicaService — getGanhadores', () => {
       }),
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 },
+      montarPremio({ id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 }),
     ]);
 
     const resposta = await service.getGanhadores();
@@ -667,6 +742,7 @@ describe('LojaPublicaService — getGanhadores', () => {
  */
 describe('LojaPublicaService — getGanhadores (cache)', () => {
   const mockPrisma = {
+    edicao: { findMany: jest.fn() },
     bilhete: { findMany: jest.fn() },
     premio: { findMany: jest.fn() },
   };
@@ -699,23 +775,20 @@ describe('LojaPublicaService — getGanhadores (cache)', () => {
   }
 
   function mockarUmGanhador() {
+    mockPrisma.edicao.findMany.mockResolvedValue([EDICAO_PADRAO]);
     mockPrisma.bilhete.findMany.mockResolvedValue([
       {
         id: 'bilhete-1',
         premioId: 'premio-1',
-        ganhador: true,
+        edicaoId: EDICAO_PADRAO.id,
         venda: {
           cliente: { nome: 'CACHE T', cidade: 'BRASILIA', estado: 'DF' },
           vendedor: { nome: 'VENDEDOR' },
-          edicao: {
-            numero: '001',
-            dataSorteio: new Date('2026-07-26T20:00:00Z'),
-          },
         },
       },
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      { id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 },
+      montarPremio({ id: 'premio-1', ordem: 1, valor: 3000 }),
     ]);
   }
 
