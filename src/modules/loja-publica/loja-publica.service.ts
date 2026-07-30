@@ -79,6 +79,22 @@ interface AtualizacaoRelacionamentoCliente {
   distribuidorId?: string | null;
 }
 
+/** Item do Hall da Fama. `dataSorteio` em ISO para sobreviver ao cache JSON. */
+export interface GanhadorLoja {
+  id: string;
+  nome: string;
+  cidade: string | null;
+  estado: string | null;
+  premioOrdem: number;
+  premioDescricao: string;
+  valorPremio: number;
+  valorPorGanhador: number;
+  totalGanhadores: number;
+  vendedorNome: string | null;
+  edicaoNumero: string;
+  dataSorteio: string;
+}
+
 @Injectable()
 export class LojaPublicaService {
   private readonly logger = new Logger(LojaPublicaService.name);
@@ -87,6 +103,12 @@ export class LojaPublicaService {
   private static readonly CONTATO_LIMITE_IP_MAXIMO = 8;
   private static readonly CONTATO_LIMITE_CPF_JANELA_SEGUNDOS = 3600;
   private static readonly CONTATO_LIMITE_CPF_MAXIMO = 3;
+  /** Janela por edição: garante todos os ganhadores de cada prêmio (rateio). */
+  private static readonly GANHADORES_EDICOES_LIMITE = 5;
+  private static readonly GANHADORES_EXIBICAO_LIMITE = 12;
+  private static readonly GANHADORES_CACHE_KEY = 'loja:ganhadores';
+  /** Muda só quando um sorteio é finalizado; 5 min é folgado e seguro. */
+  private static readonly GANHADORES_CACHE_TTL_SEGUNDOS = 300;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -714,9 +736,234 @@ export class LojaPublicaService {
         id: e.id,
         numero: e.numero,
         dataSorteio: e.dataSorteio,
+        imagemUrl: e.imagemUrl,
+        frase: e.frase,
         resultado: e.resultado ? e.resultado.numerosApurados : null,
       })),
     };
+  }
+
+  /**
+   * Ganhadores recentes para a seção "Hall da Fama" da loja.
+   *
+   * A fonte da verdade é `Bilhete.ganhador` + `Bilhete.premioId`, e não
+   * `Premio.ganhadorBilheteId`: aquele aceita N linhas por prêmio, este é
+   * single-valued. Com isso, se o sorteio algum dia passar a registrar empates,
+   * o rateio (`valorPorGanhador`/`totalGanhadores`) já sai correto sem
+   * alteração aqui — hoje há sempre um ganhador por prêmio.
+   */
+  async getGanhadores() {
+    const cacheados = await this.lerCacheGanhadores();
+    if (cacheados) {
+      return this.montarRespostaGanhadores(cacheados);
+    }
+
+    const ganhadores = await this.consultarGanhadores();
+    await this.gravarCacheGanhadores(ganhadores);
+
+    return this.montarRespostaGanhadores(ganhadores);
+  }
+
+  private montarRespostaGanhadores(ganhadores: GanhadorLoja[]) {
+    return ganhadores.length === 0
+      ? { message: 'Nenhum ganhador registrado', data: ganhadores }
+      : { message: 'Ganhadores carregados', data: ganhadores };
+  }
+
+  private async consultarGanhadores(): Promise<GanhadorLoja[]> {
+    // A janela precisa partir das edições que REALMENTE têm ganhador, não das
+    // finalizadas mais recentes: `finalizarSorteio` só exige status SORTEANDO e
+    // não obriga prêmio premiado, então edições podem ser FINALIZADA vazias. Se
+    // as mais recentes forem assim, o Hall da Fama ficaria vazio (e cacheado)
+    // mesmo havendo ganhadores em edições anteriores.
+    // O filtro tem que ser IDÊNTICO ao da consulta de bilhetes abaixo. Se a
+    // âncora enxergar mais que ela (ex.: ganhador de venda cancelada), a edição
+    // ocupa vaga na janela sem render ganhador exibível — e pode empurrar para
+    // fora uma edição com ganhadores válidos.
+    const filtroGanhador = {
+      ganhador: true,
+      premioId: { not: null },
+      venda: { status: StatusVenda.APROVADO },
+    } as const;
+
+    const edicoesComGanhador = await this.prisma.bilhete.groupBy({
+      by: ['edicaoId'],
+      where: filtroGanhador,
+    });
+
+    if (edicoesComGanhador.length === 0) {
+      return [];
+    }
+
+    // A janela é por EDIÇÃO, não por bilhete. Limitar bilhetes direto quebraria
+    // o rateio: os ganhadores de um mesmo prêmio podem cair na fronteira do
+    // corte e `totalGanhadores` sairia menor que o real — publicando valor por
+    // ganhador inflado. Como um prêmio pertence a exatamente uma edição, buscar
+    // edições inteiras garante contagem completa por prêmio.
+    const edicoes = await this.prisma.edicao.findMany({
+      where: {
+        status: StatusEdicao.FINALIZADA,
+        id: { in: edicoesComGanhador.map((grupo) => grupo.edicaoId) },
+      },
+      select: { id: true, numero: true, dataSorteio: true },
+      // `id` desempata: várias edições podem compartilhar a mesma dataSorteio, e
+      // sem critério estável o Postgres devolveria subconjunto arbitrário — a
+      // lista mudaria entre expirações do cache sem nada mudar no banco.
+      orderBy: [{ dataSorteio: 'desc' }, { id: 'desc' }],
+      take: LojaPublicaService.GANHADORES_EDICOES_LIMITE,
+    });
+
+    if (edicoes.length === 0) {
+      return [];
+    }
+
+    const edicaoPorId = new Map(edicoes.map((edicao) => [edicao.id, edicao]));
+
+    const bilhetes = await this.prisma.bilhete.findMany({
+      where: {
+        ...filtroGanhador,
+        edicaoId: { in: edicoes.map((edicao) => edicao.id) },
+      },
+      // `select` em vez de `include`: `include` traria todas as colunas de
+      // Venda, inclusive o `gatewayPayload` (resposta crua do gateway, com o
+      // QR Code em base64) — vários KB por linha, lidos e descartados.
+      select: {
+        id: true,
+        premioId: true,
+        edicaoId: true,
+        venda: {
+          select: {
+            cliente: { select: { nome: true, cidade: true, estado: true } },
+            vendedor: { select: { nome: true } },
+          },
+        },
+      },
+    });
+
+    if (bilhetes.length === 0) {
+      return [];
+    }
+
+    // `Bilhete.premioId` não tem @relation, então o prêmio vem em query separada.
+    const premioIds = [
+      ...new Set(
+        bilhetes
+          .map((bilhete) => bilhete.premioId)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+
+    const premios = await this.prisma.premio.findMany({
+      where: { id: { in: premioIds } },
+      select: { id: true, ordem: true, descricao: true, valor: true },
+    });
+    const premioPorId = new Map(premios.map((premio) => [premio.id, premio]));
+
+    const ganhadoresPorPremio = new Map<string, number>();
+    for (const bilhete of bilhetes) {
+      const premioId = bilhete.premioId;
+      if (premioId) {
+        ganhadoresPorPremio.set(
+          premioId,
+          (ganhadoresPorPremio.get(premioId) ?? 0) + 1,
+        );
+      }
+    }
+
+    return (
+      bilhetes
+        .map((bilhete) => {
+          const premio = premioPorId.get(bilhete.premioId!);
+          const edicao = edicaoPorId.get(bilhete.edicaoId);
+          if (!premio || !edicao) {
+            return null;
+          }
+
+          const totalGanhadores =
+            ganhadoresPorPremio.get(bilhete.premioId!) ?? 1;
+          const { cliente, vendedor } = bilhete.venda;
+
+          return {
+            id: bilhete.id,
+            nome: this.abreviarNome(cliente.nome),
+            cidade: cliente.cidade,
+            estado: cliente.estado,
+            premioOrdem: premio.ordem,
+            premioDescricao: premio.descricao,
+            valorPremio: premio.valor.toNumber(),
+            // Divisão em Decimal e arredondada: em float, 7000/3 publicaria
+            // 2333.3333333333335 como valor monetário — no JSON e no cache.
+            valorPorGanhador: premio.valor
+              .div(totalGanhadores)
+              .toDecimalPlaces(2)
+              .toNumber(),
+            totalGanhadores,
+            vendedorNome: vendedor?.nome ?? null,
+            edicaoNumero: edicao.numero,
+            // ISO explícito para o payload ficar idêntico vindo do cache
+            // (JSON) ou do banco (Date).
+            dataSorteio: edicao.dataSorteio.toISOString(),
+          };
+        })
+        .filter((ganhador): ganhador is GanhadorLoja => ganhador !== null)
+        // Data em ISO ordena corretamente por comparação de string; `id`
+        // desempata para a ordem ser estável entre chamadas.
+        .sort((a, b) => {
+          const porData = b.dataSorteio.localeCompare(a.dataSorteio);
+          if (porData !== 0) return porData;
+          const porPremio = a.premioOrdem - b.premioOrdem;
+          return porPremio !== 0 ? porPremio : a.id.localeCompare(b.id);
+        })
+        .slice(0, LojaPublicaService.GANHADORES_EXIBICAO_LIMITE)
+    );
+  }
+
+  /**
+   * O Hall da Fama só muda quando um sorteio é finalizado, mas o endpoint é
+   * público e sem auth — cada visita à landing bateria no banco. O cache tira
+   * essa carga; falha de Redis nunca derruba o endpoint, apenas volta a
+   * consultar o banco.
+   */
+  private async lerCacheGanhadores(): Promise<GanhadorLoja[] | null> {
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      return null;
+    }
+
+    try {
+      const bruto = await this.redisService.client.get(
+        LojaPublicaService.GANHADORES_CACHE_KEY,
+      );
+      return bruto ? (JSON.parse(bruto) as GanhadorLoja[]) : null;
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao ler cache de ganhadores: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async gravarCacheGanhadores(
+    ganhadores: GanhadorLoja[],
+  ): Promise<void> {
+    if (!this.redisService.isConfigured() || !this.redisService.client) {
+      return;
+    }
+
+    try {
+      await this.redisService.client.setex(
+        LojaPublicaService.GANHADORES_CACHE_KEY,
+        LojaPublicaService.GANHADORES_CACHE_TTL_SEGUNDOS,
+        JSON.stringify(ganhadores),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao gravar cache de ganhadores: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   async getPagina(slug: string) {
@@ -759,6 +1006,28 @@ export class LojaPublicaService {
 
   private mascararCPF(cpf: string): string {
     return `${cpf.substring(0, 3)}.***.***-${cpf.substring(9, 11)}`;
+  }
+
+  /**
+   * "Janielson Barbosa Costa" → "JANIELSON B C".
+   *
+   * O Hall da Fama é público, então o sobrenome do cliente vira inicial.
+   * Tudo em caixa alta: o checkout não normaliza o que o cliente digita, e
+   * manter só as iniciais maiúsculas produziria "oseias I S".
+   */
+  private abreviarNome(nome: string): string {
+    const partes = nome.trim().toUpperCase().split(/\s+/).filter(Boolean);
+
+    if (partes.length === 0) {
+      return '';
+    }
+
+    const [primeiro, ...sobrenomes] = partes;
+    const iniciais = sobrenomes
+      .map((sobrenome) => sobrenome.charAt(0))
+      .join(' ');
+
+    return iniciais ? `${primeiro} ${iniciais}` : primeiro;
   }
 
   private mascararEmail(email: string | null): string | null {
