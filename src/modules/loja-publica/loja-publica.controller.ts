@@ -97,6 +97,14 @@ export class LojaPublicaController {
     return this.lojaService.getResultados();
   }
 
+  @Get('ganhadores')
+  @ApiOperation({
+    summary: 'Ganhadores recentes para o Hall da Fama (Público)',
+  })
+  getGanhadores() {
+    return this.lojaService.getGanhadores();
+  }
+
   @Get('paginas/:slug')
   @ApiOperation({
     summary: 'Buscar conteúdo de página estática por slug (Público)',
