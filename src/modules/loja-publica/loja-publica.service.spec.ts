@@ -421,6 +421,7 @@ describe('LojaPublicaService — getGanhadores', () => {
     },
     bilhete: {
       findMany: jest.fn(),
+      groupBy: jest.fn(),
     },
     premio: {
       findMany: jest.fn(),
@@ -431,6 +432,9 @@ describe('LojaPublicaService — getGanhadores', () => {
     jest.clearAllMocks();
     // A maioria dos testes usa uma única edição; quem precisa de mais
     // sobrescreve.
+    mockPrisma.bilhete.groupBy.mockResolvedValue([
+      { edicaoId: EDICAO_PADRAO.id },
+    ]);
     mockPrisma.edicao.findMany.mockResolvedValue([EDICAO_PADRAO]);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -658,7 +662,7 @@ describe('LojaPublicaService — getGanhadores', () => {
     );
     expect(mockPrisma.edicao.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { status: StatusEdicao.FINALIZADA },
+        where: expect.objectContaining({ status: StatusEdicao.FINALIZADA }),
         // `id` desempata edicoes com a mesma data, senao a lista mudaria entre
         // expiracoes do cache.
         orderBy: [{ dataSorteio: 'desc' }, { id: 'desc' }],
@@ -716,22 +720,66 @@ describe('LojaPublicaService — getGanhadores', () => {
     expect(resposta.data).toEqual([]);
   });
 
-  it('entrega dataSorteio em ISO, para o payload nao mudar vindo do cache', async () => {
+  it('entrega dataSorteio em ISO, vinda da edicao do bilhete', async () => {
+    // Data propositalmente diferente da EDICAO_PADRAO: com a mesma data a
+    // asserção passaria mesmo se o service pegasse a edição errada.
+    const outraEdicao = {
+      id: 'edicao-outra',
+      numero: '099',
+      dataSorteio: new Date('2025-01-02T03:04:05Z'),
+    };
+    mockPrisma.edicao.findMany.mockResolvedValue([EDICAO_PADRAO, outraEdicao]);
     mockPrisma.bilhete.findMany.mockResolvedValue([
       montarBilhete({
         id: 'bilhete-1',
         premioId: 'premio-1',
         clienteNome: 'ISO T',
-        dataSorteio: new Date('2026-07-26T20:00:00Z'),
+        edicaoId: outraEdicao.id,
       }),
     ]);
     mockPrisma.premio.findMany.mockResolvedValue([
-      montarPremio({ id: 'premio-1', ordem: 1, descricao: '1º Prêmio', valor: 3000 }),
+      montarPremio({ id: 'premio-1', ordem: 1, valor: 3000 }),
     ]);
 
     const resposta = await service.getGanhadores();
 
-    expect(resposta.data[0].dataSorteio).toBe('2026-07-26T20:00:00.000Z');
+    expect(resposta.data[0].dataSorteio).toBe('2025-01-02T03:04:05.000Z');
+    expect(resposta.data[0].edicaoNumero).toBe('099');
+  });
+
+  it('parte das edicoes que tem ganhador, nao das finalizadas mais recentes', async () => {
+    // Regressão: edições podem ser FINALIZADA sem nenhum ganhador
+    // (finalizarSorteio não exige prêmio premiado). Ancorar a janela nas mais
+    // recentes deixava o Hall vazio mesmo havendo ganhadores em edições
+    // anteriores — e vazio por 5 minutos, cacheado.
+    mockPrisma.bilhete.findMany.mockResolvedValue([]);
+
+    await service.getGanhadores();
+
+    expect(mockPrisma.bilhete.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ['edicaoId'],
+        where: { ganhador: true, premioId: { not: null } },
+      }),
+    );
+    expect(mockPrisma.edicao.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: StatusEdicao.FINALIZADA,
+          id: { in: ['edicao-1'] },
+        }),
+      }),
+    );
+  });
+
+  it('nao consulta ganhadores quando nenhuma edicao tem ganhador', async () => {
+    mockPrisma.bilhete.groupBy.mockResolvedValue([]);
+
+    const resposta = await service.getGanhadores();
+
+    expect(resposta.data).toEqual([]);
+    expect(mockPrisma.edicao.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.bilhete.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -743,7 +791,7 @@ describe('LojaPublicaService — getGanhadores', () => {
 describe('LojaPublicaService — getGanhadores (cache)', () => {
   const mockPrisma = {
     edicao: { findMany: jest.fn() },
-    bilhete: { findMany: jest.fn() },
+    bilhete: { findMany: jest.fn(), groupBy: jest.fn() },
     premio: { findMany: jest.fn() },
   };
 
@@ -775,6 +823,9 @@ describe('LojaPublicaService — getGanhadores (cache)', () => {
   }
 
   function mockarUmGanhador() {
+    mockPrisma.bilhete.groupBy.mockResolvedValue([
+      { edicaoId: EDICAO_PADRAO.id },
+    ]);
     mockPrisma.edicao.findMany.mockResolvedValue([EDICAO_PADRAO]);
     mockPrisma.bilhete.findMany.mockResolvedValue([
       {

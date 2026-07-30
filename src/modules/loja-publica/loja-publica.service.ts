@@ -771,13 +771,30 @@ export class LojaPublicaService {
   }
 
   private async consultarGanhadores(): Promise<GanhadorLoja[]> {
+    // A janela precisa partir das edições que REALMENTE têm ganhador, não das
+    // finalizadas mais recentes: `finalizarSorteio` só exige status SORTEANDO e
+    // não obriga prêmio premiado, então edições podem ser FINALIZADA vazias. Se
+    // as mais recentes forem assim, o Hall da Fama ficaria vazio (e cacheado)
+    // mesmo havendo ganhadores em edições anteriores.
+    const edicoesComGanhador = await this.prisma.bilhete.groupBy({
+      by: ['edicaoId'],
+      where: { ganhador: true, premioId: { not: null } },
+    });
+
+    if (edicoesComGanhador.length === 0) {
+      return [];
+    }
+
     // A janela é por EDIÇÃO, não por bilhete. Limitar bilhetes direto quebraria
     // o rateio: os ganhadores de um mesmo prêmio podem cair na fronteira do
     // corte e `totalGanhadores` sairia menor que o real — publicando valor por
     // ganhador inflado. Como um prêmio pertence a exatamente uma edição, buscar
     // edições inteiras garante contagem completa por prêmio.
     const edicoes = await this.prisma.edicao.findMany({
-      where: { status: StatusEdicao.FINALIZADA },
+      where: {
+        status: StatusEdicao.FINALIZADA,
+        id: { in: edicoesComGanhador.map((grupo) => grupo.edicaoId) },
+      },
       select: { id: true, numero: true, dataSorteio: true },
       // `id` desempata: várias edições podem compartilhar a mesma dataSorteio, e
       // sem critério estável o Postgres devolveria subconjunto arbitrário — a
