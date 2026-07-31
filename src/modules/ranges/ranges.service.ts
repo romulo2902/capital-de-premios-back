@@ -362,111 +362,117 @@ export class RangesService {
     return importados;
   }
 
-  private parseCsvEInserir(
+  private async parseCsvEInserir(
     filePath: string,
     job: ImportacaoJob,
   ): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const stream = fs.createReadStream(filePath);
-      stream.on('error', reject);
-      const rl = readline.createInterface({
-        input: stream,
-        crlfDelay: Infinity,
-      });
+    const stream = fs.createReadStream(filePath);
+    const rl = readline.createInterface({
+      input: stream,
+      crlfDelay: Infinity,
+    });
 
-      let lote: MatrizLinha[] = [];
-      let importados = 0;
-      let linhaAtual = 0;
-      let loteNumero = 0;
-      let minNum: bigint | null = null;
-      let maxNum: bigint | null = null;
-      let insertPromise: Promise<void> = Promise.resolve();
+    let lote: MatrizLinha[] = [];
+    let importados = 0;
+    let linhaAtual = 0;
+    let loteNumero = 0;
+    let minNum: bigint | null = null;
+    let maxNum: bigint | null = null;
 
-      const processarLinha = (raw: string): MatrizLinha | null => {
-        const partes = raw.split(/[,;\t]/).map((p) => p.trim());
-        let colA: string;
-        let colB: string;
+    const processarLinha = (raw: string): MatrizLinha | null => {
+      const partes = raw.split(/[,;\t]/).map((p) => p.trim());
+      let colA: string;
+      let colB: string;
 
-        if (partes.length >= 2) {
-          colA = partes[0];
-          colB = partes.slice(1).join('-');
-        } else {
-          const espaco = raw.indexOf(' ');
-          if (espaco < 0) return null;
-          colA = raw.slice(0, espaco).trim();
-          colB = raw.slice(espaco + 1).trim();
-        }
+      if (partes.length >= 2) {
+        colA = partes[0];
+        colB = partes.slice(1).join('-');
+      } else {
+        const espaco = raw.indexOf(' ');
+        if (espaco < 0) return null;
+        colA = raw.slice(0, espaco).trim();
+        colB = raw.slice(espaco + 1).trim();
+      }
 
-        if (!colA || !colB || isNaN(Number(colA))) return null;
+      if (!colA || !colB || isNaN(Number(colA))) return null;
 
-        const sequenciaBolas = colB
-          .split('-')
-          .map((b) => parseInt(b.trim(), 10))
-          .filter((n) => !isNaN(n) && n >= 1 && n <= 50);
+      const sequenciaBolas = colB
+        .split('-')
+        .map((b) => parseInt(b.trim(), 10))
+        .filter((n) => !isNaN(n) && n >= 1 && n <= 50);
 
-        if (sequenciaBolas.length === 0) return null;
+      if (sequenciaBolas.length === 0) return null;
 
-        return { numero: BigInt(colA), sequenciaBolas };
-      };
+      return { numero: BigInt(colA), sequenciaBolas };
+    };
 
-      const flushLote = (loteAtual: MatrizLinha[], numero: number) => {
-        const loteMin = minNum;
-        const loteMax = maxNum;
-        insertPromise = insertPromise
-          .then(async () => {
-            await this.executarInsertLote(loteAtual);
-            importados += loteAtual.length;
-            job.importados = importados;
-            if (loteMin !== null && loteMax !== null) {
-              this.atualizarRangeJob(job, loteMin, loteMax);
-            }
-            if (job.total !== null && job.total > 0) {
-              job.porcentagem = Math.min(
-                99,
-                Math.round((importados / job.total) * 100),
-              );
-            }
-            this.logger.log(
-              `[Job ${job.jobId}] Lote CSV ${numero} — ${importados}${job.total ? `/${job.total}` : ''} (${job.porcentagem ?? '?'}%)`,
-            );
-          })
-          .catch(reject);
-      };
+    // await direto no insert antes de continuar lendo — sem isso, o readline
+    // le o arquivo inteiro (e enfileira todos os lotes na RAM) muito mais
+    // rápido do que o banco consegue drenar, já que nada aqui aguardava o
+    // insert terminar. Testado com 1M linhas reais contra Postgres: sem essa
+    // espera, pico de ~680MB de RSS SÓ pra 1/5 do arquivo de produção
+    // (5M linhas) — projeta bem acima do limite de memória do worker do PM2.
+    const flushLote = async (
+      loteAtual: MatrizLinha[],
+      numero: number,
+      loteMin: bigint | null,
+      loteMax: bigint | null,
+    ): Promise<void> => {
+      if (loteAtual.length === 0) return;
+      await this.executarInsertLote(loteAtual);
+      importados += loteAtual.length;
+      job.importados = importados;
+      if (loteMin !== null && loteMax !== null) {
+        this.atualizarRangeJob(job, loteMin, loteMax);
+      }
+      if (job.total !== null && job.total > 0) {
+        job.porcentagem = Math.min(
+          99,
+          Math.round((importados / job.total) * 100),
+        );
+      }
+      this.logger.log(
+        `[Job ${job.jobId}] Lote CSV ${numero} — ${importados}${job.total ? `/${job.total}` : ''} (${job.porcentagem ?? '?'}%)`,
+      );
+    };
 
-      rl.on('line', (line) => {
+    try {
+      for await (const line of rl) {
         linhaAtual++;
         const raw = line.trim();
-        if (!raw) return;
+        if (!raw) continue;
 
         try {
           const linha = processarLinha(raw);
-          if (!linha) return;
+          if (!linha) continue;
           lote.push(linha);
           if (minNum === null || linha.numero < minNum) minNum = linha.numero;
           if (maxNum === null || linha.numero > maxNum) maxNum = linha.numero;
 
           if (lote.length >= MATRIZ_BATCH_SIZE) {
             loteNumero++;
-            flushLote(lote, loteNumero);
+            const loteParaFlush = lote;
+            const loteMin = minNum;
+            const loteMax = maxNum;
             lote = [];
+            await flushLote(loteParaFlush, loteNumero, loteMin, loteMax);
           }
         } catch {
           this.logger.warn(
             `[Job ${job.jobId}] Linha CSV ${linhaAtual} inválida, ignorada`,
           );
         }
-      });
+      }
 
-      rl.on('close', () => {
-        if (lote.length > 0) {
-          loteNumero++;
-          flushLote(lote, loteNumero);
-        }
-        insertPromise.then(() => resolve(importados)).catch(reject);
-      });
+      if (lote.length > 0) {
+        loteNumero++;
+        await flushLote(lote, loteNumero, minNum, maxNum);
+      }
 
-      rl.on('error', reject);
-    });
+      return importados;
+    } finally {
+      rl.close();
+    }
   }
 
   private async executarInsertLote(lote: MatrizLinha[]): Promise<void> {

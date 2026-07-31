@@ -10,7 +10,14 @@ module.exports = {
       watch: false,
       time: true,
       merge_logs: true,
-      max_memory_restart: '512M',
+      // 1G: a VPS (t3.xlarge, 4 vCPU / 16GB) e praticamente dedicada a API
+      // (Postgres/Redis sao gerenciados fora, RDS/managed). Testado com o
+      // import de matriz real (5M linhas): pico de ~486MB rodando sozinho,
+      // sem trafego concorrente. 512M deixava so ~26MB de folga e derrubou o
+      // worker em producao durante o upload; 1G da margem para trafego
+      // normal no mesmo worker sem esconder um vazamento de memoria real
+      // (4 workers x 1G = 4GB no pior caso, longe do teto de 16GB).
+      max_memory_restart: '1G',
       min_uptime: '10s',
       listen_timeout: 10000,
       kill_timeout: 10000,
