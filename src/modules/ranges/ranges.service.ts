@@ -14,6 +14,7 @@ import {
   normalizePagination,
 } from '../../common/utils/pagination.util';
 import { FiltroRangesDto } from './dto/filtro-ranges.dto';
+import * as fs from 'fs';
 import { Readable } from 'stream';
 import * as readline from 'readline';
 import * as ExcelJS from 'exceljs';
@@ -98,7 +99,7 @@ export class RangesService {
     message: string;
     data: { jobId: string; status: string };
   }> {
-    if (!file?.buffer) {
+    if (!file?.path) {
       throw new BadRequestException('Arquivo inválido ou vazio');
     }
 
@@ -133,7 +134,8 @@ export class RangesService {
     });
 
     return {
-      message: 'Importação iniciada. Consulte o status em GET /admin/ranges/matriz/upload/status.',
+      message:
+        'Importação iniciada. Consulte o status em GET /admin/ranges/matriz/upload/status.',
       data: { jobId, status: 'em_andamento' },
     };
   }
@@ -174,7 +176,12 @@ export class RangesService {
 
     return {
       message,
-      data: { status: 'sem_importacao_ativa', registrosNaMatriz: total, rangeInicio, rangeFinal } satisfies MatrizStatus,
+      data: {
+        status: 'sem_importacao_ativa',
+        registrosNaMatriz: total,
+        rangeInicio,
+        rangeFinal,
+      } satisfies MatrizStatus,
     };
   }
 
@@ -188,37 +195,53 @@ export class RangesService {
       `[Job ${job.jobId}] Iniciando: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(1)} MB)`,
     );
 
-    let importados: number;
+    try {
+      let importados: number;
 
-    if (this.isXlsx(file)) {
-      // XLSX: total de linhas não é conhecido sem parse completo — porcentagem fica null até concluir
-      importados = await this.parseXlsxEInserir(file.buffer, job);
-    } else {
-      // CSV: conta \n antes de começar para ter percentagem real
-      job.total = this.contarLinhasCSV(file.buffer);
-      importados = await this.parseCsvEInserir(file.buffer, job);
+      if (this.isXlsx(file)) {
+        // XLSX: total de linhas não é conhecido sem parse completo — porcentagem fica null até concluir
+        importados = await this.parseXlsxEInserir(file.path, job);
+      } else {
+        // CSV: conta \n antes de começar para ter percentagem real
+        job.total = await this.contarLinhasCSV(file.path);
+        importados = await this.parseCsvEInserir(file.path, job);
+      }
+
+      if (importados === 0) {
+        throw new Error(
+          'Nenhuma linha válida encontrada no arquivo. Formatos aceitos: CSV e XLSX.',
+        );
+      }
+
+      job.status = 'concluido';
+      job.importados = importados;
+      job.porcentagem = 100;
+      job.concluidoEm = new Date();
+
+      this.logger.log(`[Job ${job.jobId}] Concluído: ${importados} registros`);
+    } finally {
+      // Arquivo temporário do diskStorage — remove sempre, sucesso ou erro,
+      // para não acumular lixo em /tmp a cada upload.
+      fs.promises.unlink(file.path).catch((err: Error) => {
+        this.logger.warn(
+          `[Job ${job.jobId}] Falha ao remover arquivo temporário: ${err.message}`,
+        );
+      });
     }
-
-    if (importados === 0) {
-      throw new Error(
-        'Nenhuma linha válida encontrada no arquivo. Formatos aceitos: CSV e XLSX.',
-      );
-    }
-
-    job.status = 'concluido';
-    job.importados = importados;
-    job.porcentagem = 100;
-    job.concluidoEm = new Date();
-
-    this.logger.log(`[Job ${job.jobId}] Concluído: ${importados} registros`);
   }
 
-  private contarLinhasCSV(buffer: Buffer): number {
-    let count = 0;
-    for (let i = 0; i < buffer.length; i++) {
-      if (buffer[i] === 0x0a) count++;
-    }
-    return count;
+  private contarLinhasCSV(filePath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      let count = 0;
+      fs.createReadStream(filePath)
+        .on('data', (chunk: Buffer) => {
+          for (let i = 0; i < chunk.length; i++) {
+            if (chunk[i] === 0x0a) count++;
+          }
+        })
+        .on('end', () => resolve(count))
+        .on('error', reject);
+    });
   }
 
   private atualizarRangeJob(
@@ -250,9 +273,16 @@ export class RangesService {
   }
 
   private async parseXlsxEInserir(
-    buffer: Buffer,
+    filePath: string,
     job: ImportacaoJob,
   ): Promise<number> {
+    // XLSX é o formato de menor volume (a doc já recomenda CSV para 1M+
+    // linhas), então ler pra RAM aqui é aceitável. Ler direto de um stream de
+    // disco (string do path ou fs.createReadStream) aciona uma race condition
+    // conhecida no WorkbookReader do ExcelJS: falha intermitente com "Cannot
+    // read properties of undefined (reading 'sheets')" (~1 em 8 tentativas
+    // testadas). Buffer em memória não tem esse problema.
+    const buffer = await fs.promises.readFile(filePath);
     const stream = Readable.from(buffer);
     const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
       entries: 'emit',
@@ -308,7 +338,9 @@ export class RangesService {
           if (minNum === null || numero < minNum) minNum = numero;
           if (maxNum === null || numero > maxNum) maxNum = numero;
         } catch {
-          this.logger.warn(`[Job ${job.jobId}] Linha XLSX ${linhaAtual} inválida, ignorada`);
+          this.logger.warn(
+            `[Job ${job.jobId}] Linha XLSX ${linhaAtual} inválida, ignorada`,
+          );
         }
 
         if (lote.length >= MATRIZ_BATCH_SIZE) {
@@ -331,11 +363,12 @@ export class RangesService {
   }
 
   private parseCsvEInserir(
-    buffer: Buffer,
+    filePath: string,
     job: ImportacaoJob,
   ): Promise<number> {
     return new Promise((resolve, reject) => {
-      const stream = Readable.from(buffer);
+      const stream = fs.createReadStream(filePath);
+      stream.on('error', reject);
       const rl = readline.createInterface({
         input: stream,
         crlfDelay: Infinity,
@@ -418,7 +451,9 @@ export class RangesService {
             lote = [];
           }
         } catch {
-          this.logger.warn(`[Job ${job.jobId}] Linha CSV ${linhaAtual} inválida, ignorada`);
+          this.logger.warn(
+            `[Job ${job.jobId}] Linha CSV ${linhaAtual} inválida, ignorada`,
+          );
         }
       });
 

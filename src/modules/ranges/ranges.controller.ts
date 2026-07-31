@@ -17,6 +17,10 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { randomUUID } from 'crypto';
+import { extname } from 'path';
+import { tmpdir } from 'os';
 import { RangesService } from './ranges.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -78,6 +82,15 @@ export class RangesController {
   })
   @UseInterceptors(
     FileInterceptor('arquivo', {
+      // Grava em disco em vez de bufferizar o arquivo inteiro na RAM: um CSV de
+      // centenas de MB em memória pode estourar o limite do worker do PM2
+      // (ecosystem.config.cjs) e derrubar o processo no meio da importação.
+      storage: diskStorage({
+        destination: tmpdir(),
+        filename: (_req, file, callback) => {
+          callback(null, `matriz-${randomUUID()}${extname(file.originalname)}`);
+        },
+      }),
       limits: { fileSize: 500 * 1024 * 1024 }, // 500MB — mesmo limite do MulterModule (ranges.module.ts)
     }),
   )
