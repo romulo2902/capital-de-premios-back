@@ -153,7 +153,7 @@ A tela tem duas zonas: **estado atual da matriz** (sempre visível no topo) e **
 │  [ Arraste o arquivo CSV ou XLSX aqui ]             │
 │  ou  [ Selecionar arquivo ]                         │
 │                                                     │
-│  Limite: 250 MB · CSV recomendado para > 1M linhas  │
+│  Limite: 500 MB · CSV recomendado para > 1M linhas  │
 │                    [ Importar ]                     │
 └─────────────────────────────────────────────────────┘
 ```

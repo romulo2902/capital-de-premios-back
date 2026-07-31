@@ -78,7 +78,7 @@ export class RangesController {
   })
   @UseInterceptors(
     FileInterceptor('arquivo', {
-      limits: { fileSize: 250 * 1024 * 1024 }, // 250MB
+      limits: { fileSize: 500 * 1024 * 1024 }, // 500MB — mesmo limite do MulterModule (ranges.module.ts)
     }),
   )
   importarMatriz(@UploadedFile() arquivo: Express.Multer.File) {
