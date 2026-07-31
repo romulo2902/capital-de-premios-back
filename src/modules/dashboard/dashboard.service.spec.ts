@@ -164,6 +164,55 @@ describe('DashboardService', () => {
       expect(mockPrisma.vendedor.count).toHaveBeenCalledWith();
       expect(mockPrisma.distribuidor.count).toHaveBeenCalledWith();
     });
+
+    it('should filter ranking de vendedores (CDP) by edicaoIds when provided', async () => {
+      mockPrisma.cliente.count.mockResolvedValue(1);
+      mockPrisma.vendedor.count.mockResolvedValue(1);
+      mockPrisma.distribuidor.count.mockResolvedValue(1);
+      mockPrisma.vendedor.findMany.mockResolvedValue([]);
+
+      await service.getAdminVisaoGeral({ edicaoIds: ['edicao-1', 'edicao-2'] });
+
+      expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            vendas: {
+              where: {
+                status: 'APROVADO',
+                edicaoId: { in: ['edicao-1', 'edicao-2'] },
+              },
+              select: { total: true, quantidade: true, tipoCartela: true },
+            },
+          }),
+        }),
+      );
+    });
+
+    it('should filter ranking de vendedores (SENA) by edicaoIds when provided', async () => {
+      mockPrisma.cliente.count.mockResolvedValue(1);
+      mockPrisma.vendedor.count.mockResolvedValue(1);
+      mockPrisma.distribuidor.count.mockResolvedValue(1);
+      mockPrisma.vendedor.findMany.mockResolvedValue([]);
+
+      await service.getAdminVisaoGeral({
+        tipo: 'SENA' as never,
+        edicaoIds: ['sena-1'],
+      });
+
+      expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            vendasSena: {
+              where: {
+                status: 'APROVADO',
+                edicaoSenaId: { in: ['sena-1'] },
+              },
+              select: { total: true, quantidade: true },
+            },
+          }),
+        }),
+      );
+    });
   });
 
   describe('getAdminVendasPorEdicao', () => {

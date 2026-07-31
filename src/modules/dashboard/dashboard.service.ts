@@ -45,7 +45,12 @@ export class DashboardService {
               id: true,
               nome: true,
               vendasSena: {
-                where: { status: StatusVendaSena.APROVADO },
+                where: {
+                  status: StatusVendaSena.APROVADO,
+                  ...(filtros.edicaoIds?.length
+                    ? { edicaoSenaId: { in: filtros.edicaoIds } }
+                    : {}),
+                },
                 select: { total: true, quantidade: true },
               },
             },
@@ -104,7 +109,12 @@ export class DashboardService {
             id: true,
             nome: true,
             vendas: {
-              where: { status: StatusVenda.APROVADO },
+              where: {
+                status: StatusVenda.APROVADO,
+                ...(filtros.edicaoIds?.length
+                  ? { edicaoId: { in: filtros.edicaoIds } }
+                  : {}),
+              },
               select: { total: true, quantidade: true, tipoCartela: true },
             },
           },

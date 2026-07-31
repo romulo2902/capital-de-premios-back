@@ -163,6 +163,25 @@ export class EdicoesSenaService {
     );
   }
 
+  // ─── FIND ALL SIMPLES ──────────────────────────────────
+
+  async findAllSimples() {
+    const data = await this.prisma.edicaoSena.findMany({
+      select: {
+        id: true,
+        numero: true,
+        status: true,
+        dataSorteioMegaSena: true,
+      },
+      orderBy: { numero: 'desc' },
+    });
+
+    return {
+      message: 'Edições Sena listadas com sucesso',
+      data,
+    };
+  }
+
   // ─── FIND ONE ──────────────────────────────────────────
 
   async findOne(id: string) {

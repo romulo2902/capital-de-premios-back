@@ -52,6 +52,17 @@ export class EdicoesSenaController {
     return this.edicoesSenaService.findAll(pagination.page, pagination.limit);
   }
 
+  @Get('simples')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Listar edições Sena de forma simplificada (ADMIN apenas)',
+    description:
+      'Retorna apenas id, número, status e data do sorteio, sem prêmios/combos/resultado. Uso recomendado para popular seletores de edição (ex: filtro de relatórios).',
+  })
+  findAllSimples() {
+    return this.edicoesSenaService.findAllSimples();
+  }
+
   @Get(':id')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({ summary: 'Detalhar edição Sena por ID' })

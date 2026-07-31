@@ -61,6 +61,16 @@ export class EdicoesController {
     return this.edicoesService.findUltima();
   }
 
+  @Get('simples')
+  @ApiOperation({
+    summary: 'Listar edições de forma simplificada (ADMIN apenas)',
+    description:
+      'Retorna apenas id, número, status e data do sorteio, sem detalhes/combos/prêmios/estoque. Uso recomendado para popular seletores de edição (ex: filtro de relatórios).',
+  })
+  findAllSimples() {
+    return this.edicoesService.findAllSimples();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Buscar edição por ID (ADMIN)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {

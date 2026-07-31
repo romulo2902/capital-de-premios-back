@@ -187,6 +187,23 @@ export class EdicoesService {
     );
   }
 
+  async findAllSimples() {
+    const data = await this.prisma.edicao.findMany({
+      select: {
+        id: true,
+        numero: true,
+        status: true,
+        dataSorteio: true,
+      },
+      orderBy: { numero: 'desc' },
+    });
+
+    return {
+      message: 'Edições listadas com sucesso',
+      data,
+    };
+  }
+
   async findOne(id: string) {
     const item = await this.prisma.edicao.findUnique({
       where: { id },
