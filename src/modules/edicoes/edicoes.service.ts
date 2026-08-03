@@ -100,6 +100,7 @@ export class EdicoesService {
           destino: dto.destino ?? DestinoEdicao.SITE,
           raspadinha: dto.raspadinha,
           frase: dto.frase,
+          intervalo: this.parseIntervalo(dto.intervalo),
           imagemUrl: imagemUrl ?? null,
           manutencaoAtiva: dto.manutencaoAtiva ?? false,
           manutencaoMensagem: this.normalizarMensagemManutencao(
@@ -269,6 +270,9 @@ export class EdicoesService {
         ...(dto.destino ? { destino: dto.destino } : {}),
         ...(dto.raspadinha !== undefined ? { raspadinha: dto.raspadinha } : {}),
         ...(dto.frase !== undefined ? { frase: dto.frase } : {}),
+        ...(dto.intervalo !== undefined
+          ? { intervalo: this.parseIntervalo(dto.intervalo) }
+          : {}),
         ...(dto.manutencaoAtiva !== undefined
           ? { manutencaoAtiva: dto.manutencaoAtiva }
           : {}),
@@ -336,6 +340,26 @@ export class EdicoesService {
 
     const normalizedMessage = message.trim();
     return normalizedMessage ? normalizedMessage : null;
+  }
+
+  /**
+   * Converte o intervalo entre títulos de uma cartela multi-chance para BigInt.
+   *
+   * Omitido assume 1 (títulos consecutivos, comportamento das edições antigas).
+   * Zero é recusado porque colocaria todas as chances no mesmo título.
+   */
+  private parseIntervalo(intervalo?: string): bigint {
+    if (intervalo === undefined || intervalo.trim() === '') {
+      return 1n;
+    }
+
+    const valor = BigInt(intervalo.trim());
+
+    if (valor < 1n) {
+      throw new BadRequestException('intervalo deve ser no mínimo 1');
+    }
+
+    return valor;
   }
 
   async ativar(id: string) {

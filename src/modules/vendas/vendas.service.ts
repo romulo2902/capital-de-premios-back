@@ -462,6 +462,7 @@ export class VendasService {
         manutencaoMensagem: true,
         dataEncerramento: true,
         valorCartela: true,
+        intervalo: true,
         combos: {
           select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
@@ -528,7 +529,12 @@ export class VendasService {
 
     const quantidadeCartelas = configuracaoVenda.quantidadeCartelas;
     const comboRange = configuracaoVenda.combo;
-    const setores = this.expandirSetoresDoCombo(comboRange, quantidadeCartelas);
+    const intervalo = this.resolverIntervaloDaEdicao(edicao.intervalo);
+    const setores = this.expandirSetoresDoCombo(
+      comboRange,
+      quantidadeCartelas,
+      intervalo,
+    );
     const primeiroSetor = setores[0];
     const segundoSetor = setores[1];
     const quantidadeCombosParaListar =
@@ -540,6 +546,7 @@ export class VendasService {
       comboRange,
       quantidadeCartelas,
       quantidadeCombosParaListar,
+      intervalo,
       {
         cursorNumeroBase: params.cursorNumeroBase
           ? BigInt(params.cursorNumeroBase)
@@ -1926,6 +1933,7 @@ export class VendasService {
     const edicao = await tx.edicao.findUnique({
       where: { id: venda.edicaoId },
       select: {
+        intervalo: true,
         combos: {
           select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
@@ -1973,6 +1981,7 @@ export class VendasService {
         comboRange,
         quantidadeCartelasPorCombo,
         venda.quantidade,
+        this.resolverIntervaloDaEdicao(edicao.intervalo),
         { strict: true },
       );
       matrizDisponiveis = gruposDisponiveis.flat();
@@ -2000,6 +2009,7 @@ export class VendasService {
     combo: { rangeInicio: bigint; rangeFinal: bigint },
     quantidadeCartelasPorCombo: number,
     quantidadeGrupos: number,
+    intervalo: bigint,
     options: {
       cursorNumeroBase?: bigint;
       direcao?: DirecaoCombo;
@@ -2008,7 +2018,11 @@ export class VendasService {
       numerosReservadosAEvitar?: string[];
     } = {},
   ): Promise<MatrizDisponivel[][]> {
-    const setores = this.expandirSetoresDoCombo(combo, quantidadeCartelasPorCombo);
+    const setores = this.expandirSetoresDoCombo(
+      combo,
+      quantidadeCartelasPorCombo,
+      intervalo,
+    );
     const primeiroSetor = setores[0];
 
     if (!primeiroSetor) {
@@ -2325,16 +2339,45 @@ export class VendasService {
     };
   }
 
+  /**
+   * Normaliza o intervalo vindo da edição.
+   *
+   * Edições anteriores à coluna `intervalo` (e mocks de teste) podem não trazer
+   * o campo; nesse caso vale 1, que reproduz o comportamento antigo de títulos
+   * consecutivos. Valor zero ou negativo colocaria todas as chances no mesmo
+   * título, então também cai no mínimo de 1.
+   */
+  private resolverIntervaloDaEdicao(intervalo?: bigint | null): bigint {
+    if (intervalo === undefined || intervalo === null || intervalo < 1n) {
+      return 1n;
+    }
+
+    return intervalo;
+  }
+
+  /**
+   * Expande o range do combo nos setores de cada chance da cartela.
+   *
+   * A chance `c` recebe o título `cabeça + c * intervalo`, então o range
+   * configurado delimita apenas as **cabeças**: os setores das demais chances
+   * são o mesmo range deslocado, e caem fora do range configurado de propósito
+   * (o único teto real é o tamanho da matriz — números inexistentes são
+   * descartados na montagem do grupo).
+   */
   private expandirSetoresDoCombo(
     combo: { rangeInicio: bigint; rangeFinal: bigint },
     quantidadeCartelas: number,
+    intervalo: bigint,
   ): SetorCombo[] {
-    return Array.from({ length: quantidadeCartelas }, (_, i) => ({
-      rangeInicio: combo.rangeInicio + BigInt(i),
-      rangeFinal: combo.rangeFinal - BigInt(quantidadeCartelas - 1 - i),
-      rangeTotalInicio: combo.rangeInicio,
-      rangeTotalFinal: combo.rangeFinal,
-    }));
+    return Array.from({ length: quantidadeCartelas }, (_, i) => {
+      const deslocamento = BigInt(i) * intervalo;
+      return {
+        rangeInicio: combo.rangeInicio + deslocamento,
+        rangeFinal: combo.rangeFinal + deslocamento,
+        rangeTotalInicio: combo.rangeInicio,
+        rangeTotalFinal: combo.rangeFinal,
+      };
+    });
   }
 
   private obterQuantidadeCartelasDaVenda(

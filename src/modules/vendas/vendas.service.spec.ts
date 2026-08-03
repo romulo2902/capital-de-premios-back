@@ -1138,6 +1138,135 @@ describe('VendasService', () => {
       expect(result.data.combos[0].bilhetes[0].numero).toBe('0950000');
       expect(result.data.combos[0].bilhetes[1].numero).toBe('0950001');
     });
+
+    // ─── intervalo entre chances (Plano de Operação) ─────────────────────────
+    //
+    // A chance `c` recebe o título `cabeça + c * intervalo`. O range do combo
+    // delimita só as cabeças — as demais chances caem fora dele de propósito.
+
+    it('aplica o intervalo da edição entre as chances da mesma cartela', async () => {
+      // Cenário real da Edição 002: bloco CAPITAL do cupom de 2 chances,
+      // com o intervalo de 50.000 do Plano de Operação.
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-intervalo',
+        numero: 2,
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
+        valorCartela: new Prisma.Decimal('20.00'),
+        intervalo: BigInt(50000),
+        combos: [
+          {
+            id: 'combo-duas',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(1540001),
+            rangeFinal: BigInt(1550000),
+            preco: new Prisma.Decimal('20.00'),
+          },
+        ],
+      });
+
+      mockPrisma.matrizRange.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'matriz-a',
+            numero: BigInt(1540005),
+            sequenciaBolas: [1, 2, 3],
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: 'matriz-a',
+            numero: BigInt(1540005),
+            sequenciaBolas: [1, 2, 3],
+          },
+          {
+            id: 'matriz-b',
+            numero: BigInt(1590005),
+            sequenciaBolas: [4, 5, 6],
+          },
+        ]);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-intervalo',
+        quantidadeCartelas: 2,
+        limit: 1,
+      });
+
+      expect(result.data.passoEntreCartelas).toBe('50000');
+      // Cabeça 1540005 → chance 2 = 1540005 + 50.000
+      expect(result.data.combos[0].bilhetes[0].numero).toBe('1540005');
+      expect(result.data.combos[0].bilhetes[1].numero).toBe('1590005');
+    });
+
+    it('desloca o range inteiro por chance, sem encolher o range das cabeças', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-setores',
+        numero: 3,
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
+        valorCartela: new Prisma.Decimal('30.00'),
+        intervalo: BigInt(50000),
+        combos: [
+          {
+            id: 'combo-quatro',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.QUATRO_CHANCES,
+            rangeInicio: BigInt(1640001),
+            rangeFinal: BigInt(1650000),
+            preco: new Prisma.Decimal('30.00'),
+          },
+        ],
+      });
+
+      mockPrisma.matrizRange.findMany.mockResolvedValue([]);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-setores',
+        quantidadeCartelas: 4,
+        limit: 1,
+      });
+
+      // Cada setor é o range das cabeças deslocado por c * intervalo, mantendo
+      // a largura original (10.000) — nada de encolher o range final.
+      expect(result.data.setores).toEqual([
+        { indiceCartela: 1, rangeInicio: '1640001', rangeFinal: '1650000' },
+        { indiceCartela: 2, rangeInicio: '1690001', rangeFinal: '1700000' },
+        { indiceCartela: 3, rangeInicio: '1740001', rangeFinal: '1750000' },
+        { indiceCartela: 4, rangeInicio: '1790001', rangeFinal: '1800000' },
+      ]);
+    });
+
+    it('mantém títulos consecutivos quando a edição não tem intervalo definido', async () => {
+      // Edições anteriores à coluna `intervalo` continuam com o passo 1.
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-legada',
+        numero: 4,
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
+        valorCartela: new Prisma.Decimal('30.00'),
+        combos: [
+          {
+            id: 'combo-duas',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(950000),
+            rangeFinal: BigInt(959980),
+            preco: new Prisma.Decimal('50.00'),
+          },
+        ],
+      });
+
+      mockPrisma.matrizRange.findMany.mockResolvedValue([]);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-legada',
+        quantidadeCartelas: 2,
+        limit: 1,
+      });
+
+      expect(result.data.passoEntreCartelas).toBe('1');
+    });
   });
 
   // ─── confirmarPagamento ───────────────────────────────

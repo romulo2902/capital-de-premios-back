@@ -47,6 +47,10 @@ export function serializarEdicao(
     imagemUrl: edicao.imagemUrl ?? null,
     ...serializarEstadoManutencao(edicao),
     qtdNumerosCartela: edicao.qtdNumerosCartela,
+    // BigInt não é serializável em JSON — precisa sair como string, igual aos
+    // ranges dos combos acima. O fallback cobre consultas com `select` parcial
+    // que não tragam a coluna (no banco ela é NOT NULL DEFAULT 1).
+    intervalo: (edicao.intervalo ?? 1n).toString(),
     dataSorteioLocal: formatDateTimeForInput(
       edicao.dataSorteio,
       businessTimeZone,

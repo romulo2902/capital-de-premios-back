@@ -266,6 +266,11 @@ model Edicao {
   qtdNumerosCartela  Int
   rangeInicio        BigInt
   rangeFinal         BigInt
+  // Distância entre os títulos de uma mesma cartela multi-chance, conforme o
+  // Plano de Operação: a chance c recebe o título `cabeça + c * intervalo`.
+  // O range do combo delimita apenas as cabeças — as demais chances caem fora
+  // dele de propósito. Default 1 mantém o comportamento das edições antigas.
+  intervalo          BigInt            @default(1)
   qtdPremios         Int
   destino            DestinoEdicao     @default(SITE)
   raspadinha         Boolean           @default(false)

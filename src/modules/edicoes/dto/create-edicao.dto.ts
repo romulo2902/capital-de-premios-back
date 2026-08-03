@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  Matches,
   ValidateNested,
 } from 'class-validator';
 import { DestinoEdicao } from '@prisma/client';
@@ -90,6 +91,17 @@ export class CreateEdicaoDto {
   @IsOptional()
   @IsString({ message: 'frase deve ser um texto' })
   frase?: string;
+
+  @ApiPropertyOptional({
+    example: '50000',
+    default: '1',
+    description:
+      'Distância entre os títulos de uma mesma cartela multi-chance, conforme o Plano de Operação. A chance `c` recebe o título `cabeça + c * intervalo` — ex.: intervalo 50000 numa cartela de 2 chances com cabeça 1540005 gera os títulos 1540005 e 1590005. O range de cada combo delimita apenas as cabeças; as demais chances caem fora dele. Se omitido, assume 1 (títulos consecutivos).',
+  })
+  @IsOptional()
+  @IsString({ message: 'intervalo deve ser um texto' })
+  @Matches(/^\d+$/, { message: 'intervalo deve conter apenas dígitos' })
+  intervalo?: string;
 
   @ApiPropertyOptional({
     example: false,
