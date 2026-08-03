@@ -39,6 +39,12 @@ import {
   obterQuantidadeCartelas,
   obterTipoCartelaPorQuantidadeCartelas,
 } from '../edicoes/edicoes-range.util';
+import {
+  calcularFaixaOcupadaPeloCombo,
+  expandirSetoresDoCombo as expandirSetoresDoComboUtil,
+  resolverIntervalo,
+  type SetorCombo,
+} from '../edicoes/edicoes-setores.util';
 import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
 import { calcularQuantidadeCartelasDaVenda } from './vendas-quantidade.util';
 import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
@@ -56,13 +62,6 @@ type ComboVenda = {
   preco: Prisma.Decimal;
   rangeInicio: bigint;
   rangeFinal: bigint;
-};
-
-type SetorCombo = {
-  rangeInicio: bigint;
-  rangeFinal: bigint;
-  rangeTotalInicio: bigint;
-  rangeTotalFinal: bigint;
 };
 
 type MatrizDisponivel = {
@@ -1958,12 +1957,22 @@ export class VendasService {
     let matrizDisponiveis: MatrizDisponivel[] = [];
 
     if (combosSelecionados.length > 0) {
+      // A faixa precisa cobrir as chances deslocadas: com intervalo, o título
+      // da chance 2 fica FORA do range configurado (que guarda só as cabeças).
+      // Limitar por [rangeInicio, rangeFinal] descartaria esses títulos e a
+      // compra manual falharia ou entregaria menos cartelas que o contratado.
+      const faixaOcupada = calcularFaixaOcupadaPeloCombo(
+        comboRange,
+        quantidadeCartelasPorCombo,
+        edicao.intervalo,
+      );
+
       const linhas = await tx.matrizRange.findMany({
         where: {
           numero: {
             in: combosSelecionados,
-            gte: comboRange.rangeInicio,
-            lte: comboRange.rangeFinal,
+            gte: faixaOcupada.inicio,
+            lte: faixaOcupada.fim,
           },
           bilhetes: { none: { edicaoId: venda.edicaoId } },
         },
@@ -2348,36 +2357,15 @@ export class VendasService {
    * título, então também cai no mínimo de 1.
    */
   private resolverIntervaloDaEdicao(intervalo?: bigint | null): bigint {
-    if (intervalo === undefined || intervalo === null || intervalo < 1n) {
-      return 1n;
-    }
-
-    return intervalo;
+    return resolverIntervalo(intervalo);
   }
 
-  /**
-   * Expande o range do combo nos setores de cada chance da cartela.
-   *
-   * A chance `c` recebe o título `cabeça + c * intervalo`, então o range
-   * configurado delimita apenas as **cabeças**: os setores das demais chances
-   * são o mesmo range deslocado, e caem fora do range configurado de propósito
-   * (o único teto real é o tamanho da matriz — números inexistentes são
-   * descartados na montagem do grupo).
-   */
   private expandirSetoresDoCombo(
     combo: { rangeInicio: bigint; rangeFinal: bigint },
     quantidadeCartelas: number,
     intervalo: bigint,
   ): SetorCombo[] {
-    return Array.from({ length: quantidadeCartelas }, (_, i) => {
-      const deslocamento = BigInt(i) * intervalo;
-      return {
-        rangeInicio: combo.rangeInicio + deslocamento,
-        rangeFinal: combo.rangeFinal + deslocamento,
-        rangeTotalInicio: combo.rangeInicio,
-        rangeTotalFinal: combo.rangeFinal,
-      };
-    });
+    return expandirSetoresDoComboUtil(combo, quantidadeCartelas, intervalo);
   }
 
   private obterQuantidadeCartelasDaVenda(

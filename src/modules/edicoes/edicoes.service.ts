@@ -34,6 +34,7 @@ import {
 } from './edicoes-range.util';
 import { obterTotalCombinacoesCartela as obterTotalCombinacoesCartelaUtil } from './edicoes-sequencia.util';
 import { serializarEdicao as serializarEdicaoUtil } from './edicoes-serialization.util';
+import { calcularFaixaOcupadaPeloCombo } from './edicoes-setores.util';
 import type { EdicaoComRelacoes } from './edicoes.types';
 
 interface ComboEdicaoNormalizado {
@@ -63,7 +64,8 @@ export class EdicoesService {
 
   async create(dto: CreateEdicaoDto) {
     const combos = this.normalizarCombos(dto.combos);
-    this.validarCombos(combos);
+    const intervalo = this.parseIntervalo(dto.intervalo);
+    this.validarCombos(combos, intervalo);
     const qtdNumerosCartela = await this.resolverQtdNumerosCartela(combos);
     this.validarCapacidadeCombos(combos, qtdNumerosCartela);
     const qtdPremios = dto.premios.length;
@@ -100,7 +102,7 @@ export class EdicoesService {
           destino: dto.destino ?? DestinoEdicao.SITE,
           raspadinha: dto.raspadinha,
           frase: dto.frase,
-          intervalo: this.parseIntervalo(dto.intervalo),
+          intervalo,
           imagemUrl: imagemUrl ?? null,
           manutencaoAtiva: dto.manutencaoAtiva ?? false,
           manutencaoMensagem: this.normalizarMensagemManutencao(
@@ -208,8 +210,15 @@ export class EdicoesService {
       ? this.normalizarCombos(dto.combos)
       : this.normalizarCombosExistentes(atual);
 
-    if (dto.combos) {
-      this.validarCombos(combosEfetivos);
+    // O intervalo entra na validação de colisão: mudar só ele já pode fazer
+    // as faixas ocupadas se sobreporem, mesmo sem mexer nos combos.
+    const intervaloEfetivo =
+      dto.intervalo !== undefined
+        ? this.parseIntervalo(dto.intervalo)
+        : atual.intervalo;
+
+    if (dto.combos || dto.intervalo !== undefined) {
+      this.validarCombos(combosEfetivos, intervaloEfetivo);
     }
 
     const qtdNumerosCartelaEfetivo = dto.combos
@@ -270,9 +279,7 @@ export class EdicoesService {
         ...(dto.destino ? { destino: dto.destino } : {}),
         ...(dto.raspadinha !== undefined ? { raspadinha: dto.raspadinha } : {}),
         ...(dto.frase !== undefined ? { frase: dto.frase } : {}),
-        ...(dto.intervalo !== undefined
-          ? { intervalo: this.parseIntervalo(dto.intervalo) }
-          : {}),
+        ...(dto.intervalo !== undefined ? { intervalo: intervaloEfetivo } : {}),
         ...(dto.manutencaoAtiva !== undefined
           ? { manutencaoAtiva: dto.manutencaoAtiva }
           : {}),
@@ -722,7 +729,10 @@ export class EdicoesService {
     throw new BadRequestException('Informe quantidadeCartelas para o combo');
   }
 
-  private validarCombos(combos: ComboEdicaoNormalizado[]): void {
+  private validarCombos(
+    combos: ComboEdicaoNormalizado[],
+    intervalo: bigint = 1n,
+  ): void {
     if (combos.length === 0) {
       throw new BadRequestException('Informe ao menos um combo para a edição');
     }
@@ -745,19 +755,38 @@ export class EdicoesService {
       }
     }
 
-    const ordenados = [...combos].sort((a, b) =>
-      a.rangeInicio < b.rangeInicio
-        ? -1
-        : a.rangeInicio > b.rangeInicio
-          ? 1
-          : 0,
-    );
-    for (let i = 1; i < ordenados.length; i++) {
-      const prev = ordenados[i - 1];
-      const curr = ordenados[i];
-      if (curr.rangeInicio <= prev.rangeFinal) {
+    // A colisão precisa ser medida sobre a faixa REALMENTE ocupada: com
+    // intervalo, o range configurado guarda só as cabeças e as demais chances
+    // caem depois dele. Dois combos com ranges de cabeça disjuntos ainda podem
+    // brigar pelos mesmos títulos nas chances seguintes.
+    const ocupacoes = combos
+      .map((combo) => ({
+        combo,
+        faixa: calcularFaixaOcupadaPeloCombo(
+          combo,
+          this.obterQuantidadeCartelas(combo.tipoCartela),
+          intervalo,
+        ),
+      }))
+      .sort((a, b) =>
+        a.faixa.inicio < b.faixa.inicio
+          ? -1
+          : a.faixa.inicio > b.faixa.inicio
+            ? 1
+            : 0,
+      );
+
+    for (let i = 1; i < ocupacoes.length; i++) {
+      const prev = ocupacoes[i - 1];
+      const curr = ocupacoes[i];
+
+      if (curr.faixa.inicio <= prev.faixa.fim) {
+        const detalhe =
+          intervalo > 1n
+            ? ` (faixas ocupadas considerando o intervalo ${intervalo}: ${prev.faixa.inicio}-${prev.faixa.fim} e ${curr.faixa.inicio}-${curr.faixa.fim})`
+            : '';
         throw new ConflictException(
-          `Ranges dos combos se sobrepõem: ${prev.rangeInicio}-${prev.rangeFinal} e ${curr.rangeInicio}-${curr.rangeFinal}`,
+          `Ranges dos combos se sobrepõem: ${prev.combo.rangeInicio}-${prev.combo.rangeFinal} e ${curr.combo.rangeInicio}-${curr.combo.rangeFinal}${detalhe}`,
         );
       }
     }

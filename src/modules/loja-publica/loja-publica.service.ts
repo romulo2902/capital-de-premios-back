@@ -14,6 +14,10 @@ import { VendasService } from '../vendas/vendas.service';
 import { ComprarLojaDto } from './dto/comprar-loja.dto';
 import { ReservarCartelasDto } from './dto/reservar-cartelas.dto';
 import {
+  expandirSetoresDoCombo as expandirSetoresDoComboUtil,
+  type SetorCombo,
+} from '../edicoes/edicoes-setores.util';
+import {
   StatusEdicao,
   StatusVenda,
   TipoPagamento,
@@ -135,7 +139,10 @@ export class LojaPublicaService {
       return { message: 'Nenhuma edição ativa no momento', data: null };
     }
 
-    const opcoesDeCompra = this.mapearOpcoesCompraDaEdicao(edicaoAtiva.combos);
+    const opcoesDeCompra = this.mapearOpcoesCompraDaEdicao(
+      edicaoAtiva.combos,
+      edicaoAtiva.intervalo,
+    );
 
     return {
       message: 'Dados da home carregados com sucesso',
@@ -687,6 +694,7 @@ export class LojaPublicaService {
               vendasBloqueadas: v.edicao.manutencaoAtiva,
               opcoesCompra: this.mapearOpcoesCompraDaEdicao(
                 v.edicao.combos,
+                v.edicao.intervalo,
               ).map((opcao) => ({
                 tipoCompra: opcao.tipoCompra,
                 isCombo: opcao.isCombo,
@@ -711,6 +719,7 @@ export class LojaPublicaService {
               v.bilhetes,
               v.edicao.combos,
               v.tipoCartela,
+              v.edicao.intervalo,
             ),
             bilhetes: v.bilhetes.map((b) => ({
               numero: this.formatarNumeroBilhete(b.numero),
@@ -1074,18 +1083,9 @@ export class LojaPublicaService {
   private expandirSetoresDoCombo(
     combo: { rangeInicio: bigint; rangeFinal: bigint },
     quantidadeCartelas: number,
-  ): Array<{
-    rangeInicio: bigint;
-    rangeFinal: bigint;
-    rangeTotalInicio: bigint;
-    rangeTotalFinal: bigint;
-  }> {
-    return Array.from({ length: quantidadeCartelas }, (_, i) => ({
-      rangeInicio: combo.rangeInicio + BigInt(i),
-      rangeFinal: combo.rangeFinal - BigInt(quantidadeCartelas - 1 - i),
-      rangeTotalInicio: combo.rangeInicio,
-      rangeTotalFinal: combo.rangeFinal,
-    }));
+    intervalo?: bigint | null,
+  ): SetorCombo[] {
+    return expandirSetoresDoComboUtil(combo, quantidadeCartelas, intervalo);
   }
 
   private agruparBilhetesPorCombo(
@@ -1096,6 +1096,7 @@ export class LojaPublicaService {
       rangeFinal: bigint;
     }>,
     tipoCartela?: TipoCartela | null,
+    intervalo?: bigint | null,
   ) {
     const grupos = new Map<
       string,
@@ -1108,12 +1109,14 @@ export class LojaPublicaService {
 
     const setores = combos.flatMap((combo) => {
       const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
-      return this.expandirSetoresDoCombo(combo, quantidadeCartelas).map(
-        (setor) => ({
-          ...setor,
-          tipoCartela: combo.tipoCartela,
-        }),
-      );
+      return this.expandirSetoresDoCombo(
+        combo,
+        quantidadeCartelas,
+        intervalo,
+      ).map((setor) => ({
+        ...setor,
+        tipoCartela: combo.tipoCartela,
+      }));
     });
 
     for (const bilhete of bilhetes) {
@@ -1173,6 +1176,7 @@ export class LojaPublicaService {
       rangeInicio: bigint;
       rangeFinal: bigint;
     }>,
+    intervalo?: bigint | null,
   ): OpcaoCompraEdicao[] {
     const combosDigitais = combos.filter(
       (combo) => combo.origemParticipacao === OrigemParticipacao.DIGITAL,
@@ -1181,7 +1185,11 @@ export class LojaPublicaService {
     return combosDigitais.map((combo) => {
       const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
       const valorCombo = this.formatarValorMonetario(combo.preco);
-      const setores = this.expandirSetoresDoCombo(combo, quantidadeCartelas);
+      const setores = this.expandirSetoresDoCombo(
+        combo,
+        quantidadeCartelas,
+        intervalo,
+      );
       const primeiroSetor = setores[0];
 
       return {

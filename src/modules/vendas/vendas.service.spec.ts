@@ -1694,6 +1694,76 @@ describe('VendasService', () => {
         ],
       });
     });
+
+    it('busca os titulos selecionados na faixa deslocada pelo intervalo', async () => {
+      // Com intervalo, o título da 2ª chance fica FORA do range configurado
+      // (que guarda só as cabeças). Se a busca limitasse por
+      // [rangeInicio, rangeFinal], esses títulos sumiriam e a compra manual
+      // falharia ou entregaria menos cartelas que o contratado.
+      mockPrisma.venda.findUnique.mockResolvedValue({
+        ...vendaPendente,
+        quantidade: 1,
+        tipoCartela: TipoCartela.DUAS_CHANCES,
+        gatewayPayload: {
+          combosSelecionados: ['1540005', '1590005'],
+        },
+      });
+
+      const linhas = [
+        { id: 'matriz-1', numero: BigInt(1540005), sequenciaBolas: [1, 2, 3] },
+        { id: 'matriz-2', numero: BigInt(1590005), sequenciaBolas: [4, 5, 6] },
+      ];
+
+      const txMock = {
+        edicao: {
+          findUnique: jest.fn().mockResolvedValue({
+            intervalo: BigInt(50000),
+            combos: [
+              {
+                id: 'combo-1',
+                origemParticipacao: OrigemParticipacao.DIGITAL,
+                tipoCartela: TipoCartela.DUAS_CHANCES,
+                rangeInicio: BigInt(1540001),
+                rangeFinal: BigInt(1550000),
+                preco: null,
+              },
+            ],
+          }),
+        },
+        matrizRange: { findMany: jest.fn().mockResolvedValue(linhas) },
+        bilhete: { createMany: jest.fn().mockResolvedValue({ count: 2 }) },
+        distribuidor: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'distribuidor-1',
+            comissaoPercent: new Prisma.Decimal('20'),
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        comissaoDistribuidor: { create: jest.fn().mockResolvedValue({}) },
+        comissao: { create: jest.fn().mockResolvedValue({ id: 'comissao-1' }) },
+        vendedor: { update: jest.fn().mockResolvedValue({}) },
+        venda: {
+          update: jest.fn().mockResolvedValue({
+            ...vendaPendente,
+            status: StatusVenda.APROVADO,
+          }),
+        },
+      };
+
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
+
+      await service.confirmarPagamento('venda-1');
+
+      // A faixa consultada tem que alcançar 1.590.005 (cabeça + 1 * 50.000).
+      const filtro = txMock.matrizRange.findMany.mock.calls[0][0] as {
+        where: { numero: { gte: bigint; lte: bigint } };
+      };
+      expect(filtro.where.numero.gte).toBe(BigInt(1540001));
+      expect(filtro.where.numero.lte).toBeGreaterThanOrEqual(BigInt(1590005));
+    });
   });
 
   // ─── cancelar ─────────────────────────────────────────

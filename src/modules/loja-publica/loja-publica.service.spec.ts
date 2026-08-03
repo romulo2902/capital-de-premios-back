@@ -15,12 +15,21 @@ import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.fa
 import { RedisService } from '../../common/redis/redis.service';
 
 /**
- * Regras de range validadas aqui (modelo novo: o range vive dentro do combo).
+ * Regras de range validadas aqui (o range vive dentro do combo).
  *
- * Um combo de N chances NÃO vende "as cartelas 1..N" de ranges separados:
- * ele fatia o PRÓPRIO range em N setores deslocados de 1, e o comprador leva
- * um bilhete de cada setor. Estes testes travam esse contrato, que é o que
- * a loja consome via GET /loja/edicao-ativa.
+ * Um combo de N chances NÃO vende "as cartelas 1..N" de ranges separados: o
+ * range configurado guarda as CABEÇAS, e a chance `c` recebe o título
+ * `cabeça + c * intervalo` — os setores são o mesmo range deslocado, e saem do
+ * range configurado de propósito, conforme o Plano de Operação. O comprador
+ * leva um bilhete de cada setor.
+ *
+ * Até a introdução do `intervalo` os setores eram encolhidos para caber dentro
+ * do range (passo fixo de 1); esses testes travavam aquele contrato e foram
+ * reescritos junto com a regra. A proteção contra combos disputando os mesmos
+ * títulos passou a ser a validação de colisão em EdicoesService.validarCombos,
+ * que compara as faixas realmente ocupadas.
+ *
+ * É o que a loja consome via GET /loja/edicao-ativa.
  */
 describe('LojaPublicaService — ranges e setores dos combos', () => {
   let service: LojaPublicaService;
@@ -71,6 +80,7 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
 
   function mockarEdicaoComCombos(
     combos: ReturnType<typeof montarCombo>[],
+    intervalo?: bigint,
   ): void {
     mockPrisma.edicao.findFirst.mockResolvedValue({
       id: 'edicao-1',
@@ -85,6 +95,7 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
       manutencaoMensagem: null,
       premios: [],
       combos,
+      intervalo,
     });
   }
 
@@ -113,7 +124,7 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
     });
   });
 
-  it('combo de 2 chances gera 2 setores deslocados de 1 dentro do proprio range', async () => {
+  it('combo de 2 chances gera 2 setores deslocados pelo intervalo', async () => {
     mockarEdicaoComCombos([
       montarCombo({
         id: 'c2',
@@ -126,9 +137,11 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
     const [opcao] = await obterOpcoes();
 
     expect(opcao.quantidadeCartelas).toBe(2);
+    // Sem intervalo configurado o passo é 1, e o range das cabeças é
+    // preservado inteiro (o setor da 2ª chance é ele deslocado, não encolhido).
     expect(opcao.setores).toEqual([
-      { indiceCartela: 1, rangeInicio: '990000', rangeFinal: '990999' },
-      { indiceCartela: 2, rangeInicio: '990001', rangeFinal: '991000' },
+      { indiceCartela: 1, rangeInicio: '990000', rangeFinal: '991000' },
+      { indiceCartela: 2, rangeInicio: '990001', rangeFinal: '991001' },
     ]);
   });
 
@@ -148,50 +161,62 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
     expect(opcao.setores).toHaveLength(6);
     expect(opcao.setores[0]).toMatchObject({
       rangeInicio: '992000',
-      rangeFinal: '992995',
+      rangeFinal: '993000',
     });
     expect(opcao.setores[5]).toMatchObject({
       rangeInicio: '992005',
-      rangeFinal: '993000',
+      rangeFinal: '993005',
     });
   });
 
-  // Regressao do modelo antigo: os setores NUNCA podem sair do range do combo.
+  // Contrato do Plano de Operação: o range configurado guarda só as CABEÇAS.
+  // As chances seguintes saem dele de propósito (cabeça + c * intervalo), então
+  // o que se garante é o deslocamento correto — não a contenção.
   it.each([
     [TipoCartela.DUAS_CHANCES, 2],
     [TipoCartela.SEIS_CHANCES, 6],
     [TipoCartela.DOZE_CHANCES, 12],
   ])(
-    'setores de %s ficam contidos no range do combo',
+    'setores de %s partem do range das cabecas e deslocam pelo intervalo',
     async (tipoCartela, esperado) => {
       const inicio = 950000n;
       const fim = 951000n;
-      mockarEdicaoComCombos([
-        montarCombo({ id: 'c', tipoCartela, rangeInicio: inicio, rangeFinal: fim }),
-      ]);
+      const intervalo = 50000n;
+      mockarEdicaoComCombos(
+        [
+          montarCombo({
+            id: 'c',
+            tipoCartela,
+            rangeInicio: inicio,
+            rangeFinal: fim,
+          }),
+        ],
+        intervalo,
+      );
 
       const [opcao] = await obterOpcoes();
 
       expect(opcao.setores).toHaveLength(esperado);
-      for (const setor of opcao.setores) {
-        expect(BigInt(setor.rangeInicio)).toBeGreaterThanOrEqual(inicio);
-        expect(BigInt(setor.rangeFinal)).toBeLessThanOrEqual(fim);
-        expect(BigInt(setor.rangeInicio)).toBeLessThanOrEqual(
-          BigInt(setor.rangeFinal),
-        );
-      }
+      opcao.setores.forEach((setor, indice) => {
+        const deslocamento = BigInt(indice) * intervalo;
+        expect(BigInt(setor.rangeInicio)).toBe(inicio + deslocamento);
+        expect(BigInt(setor.rangeFinal)).toBe(fim + deslocamento);
+      });
     },
   );
 
-  it('todos os setores tem o mesmo tamanho e passo 1 entre eles', async () => {
-    mockarEdicaoComCombos([
-      montarCombo({
-        id: 'c6',
-        tipoCartela: TipoCartela.SEIS_CHANCES,
-        rangeInicio: 992000n,
-        rangeFinal: 993000n,
-      }),
-    ]);
+  it('todos os setores tem o mesmo tamanho, com passo igual ao intervalo', async () => {
+    mockarEdicaoComCombos(
+      [
+        montarCombo({
+          id: 'c6',
+          tipoCartela: TipoCartela.SEIS_CHANCES,
+          rangeInicio: 992000n,
+          rangeFinal: 993000n,
+        }),
+      ],
+      50000n,
+    );
 
     const [opcao] = await obterOpcoes();
 
@@ -199,9 +224,9 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
       (s) => BigInt(s.rangeFinal) - BigInt(s.rangeInicio) + 1n,
     );
     expect(new Set(tamanhos.map(String)).size).toBe(1);
-    // tamanho do setor = total do range - (N - 1)
-    expect(tamanhos[0]).toBe(1001n - 5n);
-    expect(opcao.passoEntreCartelas).toBe('1');
+    // O range das cabeças não encolhe mais: todo setor tem a largura original.
+    expect(tamanhos[0]).toBe(1001n);
+    expect(opcao.passoEntreCartelas).toBe('50000');
   });
 
   it('setores sao distintos entre si (garante N bilhetes diferentes)', async () => {
