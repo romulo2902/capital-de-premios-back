@@ -1267,6 +1267,68 @@ describe('VendasService', () => {
 
       expect(result.data.passoEntreCartelas).toBe('1');
     });
+
+    it('pula a cabeca cujo titulo ja foi consumido por uma cartela anterior', async () => {
+      // Cenario do Plano de Operacao: 4 chances, range de cabeca 1-100.000 e
+      // intervalo 50.000. A chance 2 invade o proprio range das cabecas, entao
+      // a cabeca 10 consome o titulo 50.010 — e 50.010 NAO pode virar cabeca
+      // de outra cartela, senao o mesmo titulo sairia em duas cartelas.
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-colisao',
+        numero: 5,
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
+        valorCartela: new Prisma.Decimal('30.00'),
+        intervalo: BigInt(50000),
+        combos: [
+          {
+            id: 'combo-quatro',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.QUATRO_CHANCES,
+            rangeInicio: BigInt(1),
+            rangeFinal: BigInt(100000),
+            preco: new Prisma.Decimal('30.00'),
+          },
+        ],
+      });
+
+      const linha = (numero: number) => ({
+        id: `m-${numero}`,
+        numero: BigInt(numero),
+        sequenciaBolas: [1, 2, 3],
+      });
+
+      mockPrisma.matrizRange.findMany
+        // candidatos a cabeca, em ordem
+        .mockResolvedValueOnce([linha(10), linha(50010), linha(60000)])
+        // todos os titulos necessarios estao livres no banco
+        .mockResolvedValueOnce([
+          linha(10),
+          linha(50010),
+          linha(100010),
+          linha(150010),
+          linha(200010),
+          linha(60000),
+          linha(110000),
+          linha(160000),
+          linha(210000),
+        ]);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-colisao',
+        quantidadeCartelas: 4,
+        limit: 2,
+      });
+
+      const numeros = result.data.combos.map((c) =>
+        c.bilhetes.map((b) => b.numero),
+      );
+
+      // 1a cartela: cabeca 10 -> 10 + c * 50.000
+      expect(numeros[0]).toEqual(['0000010', '0050010', '0100010', '0150010']);
+      // 2a cartela: 50.010 foi PULADO (ja saiu acima), entao vem a 60.000
+      expect(numeros[1]).toEqual(['0060000', '0110000', '0160000', '0210000']);
+    });
   });
 
   // ─── confirmarPagamento ───────────────────────────────
