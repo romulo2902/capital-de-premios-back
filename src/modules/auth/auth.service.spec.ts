@@ -25,6 +25,7 @@ describe('AuthService', () => {
     cliente: {
       findUnique: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     distribuidor: {
       findFirst: jest.fn(),
@@ -248,6 +249,51 @@ describe('AuthService', () => {
           telefone: '(11) 99999-9999',
         }),
       ).rejects.toThrow(UnauthorizedException);
+    });
+
+    // O Capital Sena nunca coleta data de nascimento no checkout, e o login
+    // de lá só pede CPF — exigir a data aqui travava 100% desses clientes.
+    it('não bloqueia login de cliente existente sem data de nascimento cadastrada', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValue({
+        id: 'c-3',
+        cpf: '98765432100',
+        nome: 'Fulano',
+        telefone: '11999999999',
+        dataNascimento: null,
+      });
+
+      const result = await service.loginLoja({ cpf: '987.654.321-00' });
+
+      expect(result.data).toHaveProperty('accessToken');
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('preenche a data de nascimento que faltava quando ela vem no login', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValue({
+        id: 'c-3',
+        cpf: '98765432100',
+        nome: 'Fulano',
+        telefone: '11999999999',
+        dataNascimento: null,
+      });
+      mockPrisma.cliente.update.mockResolvedValue({
+        id: 'c-3',
+        cpf: '98765432100',
+        nome: 'Fulano',
+        telefone: '11999999999',
+        dataNascimento: new Date('1990-01-15T00:00:00.000Z'),
+      });
+
+      const result = await service.loginLoja({
+        cpf: '987.654.321-00',
+        dataNascimento: '1990-01-15',
+      });
+
+      expect(result.data).toHaveProperty('accessToken');
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith({
+        where: { id: 'c-3' },
+        data: { dataNascimento: expect.any(Date) },
+      });
     });
 
     it('deve retornar token para cliente já existente', async () => {
