@@ -309,6 +309,12 @@ model EdicaoCombo {
   preco              Decimal
   rangeInicio        BigInt
   rangeFinal         BigInt
+  // Distância entre os títulos de uma mesma cartela multi-chance, conforme o
+  // Plano de Operação: a chance c recebe o título `cabeça + c * intervalo`.
+  // É por combo — cada produto (2x, 4x, 8x) tem o seu. O range acima delimita
+  // apenas as cabeças; as demais chances caem fora dele de propósito.
+  // Default 1 mantém o comportamento dos combos já cadastrados.
+  intervalo          BigInt             @default(1)
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   edicao             Edicao             @relation(fields: [edicaoId], references: [id], onDelete: Cascade)

@@ -14,6 +14,10 @@ import { VendasService } from '../vendas/vendas.service';
 import { ComprarLojaDto } from './dto/comprar-loja.dto';
 import { ReservarCartelasDto } from './dto/reservar-cartelas.dto';
 import {
+  expandirSetoresDoCombo as expandirSetoresDoComboUtil,
+  type SetorCombo,
+} from '../edicoes/edicoes-setores.util';
+import {
   StatusEdicao,
   StatusVenda,
   TipoPagamento,
@@ -1074,18 +1078,9 @@ export class LojaPublicaService {
   private expandirSetoresDoCombo(
     combo: { rangeInicio: bigint; rangeFinal: bigint },
     quantidadeCartelas: number,
-  ): Array<{
-    rangeInicio: bigint;
-    rangeFinal: bigint;
-    rangeTotalInicio: bigint;
-    rangeTotalFinal: bigint;
-  }> {
-    return Array.from({ length: quantidadeCartelas }, (_, i) => ({
-      rangeInicio: combo.rangeInicio + BigInt(i),
-      rangeFinal: combo.rangeFinal - BigInt(quantidadeCartelas - 1 - i),
-      rangeTotalInicio: combo.rangeInicio,
-      rangeTotalFinal: combo.rangeFinal,
-    }));
+    intervalo?: bigint | null,
+  ): SetorCombo[] {
+    return expandirSetoresDoComboUtil(combo, quantidadeCartelas, intervalo);
   }
 
   private agruparBilhetesPorCombo(
@@ -1094,6 +1089,7 @@ export class LojaPublicaService {
       tipoCartela: TipoCartela;
       rangeInicio: bigint;
       rangeFinal: bigint;
+      intervalo?: bigint | null;
     }>,
     tipoCartela?: TipoCartela | null,
   ) {
@@ -1108,12 +1104,14 @@ export class LojaPublicaService {
 
     const setores = combos.flatMap((combo) => {
       const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
-      return this.expandirSetoresDoCombo(combo, quantidadeCartelas).map(
-        (setor) => ({
-          ...setor,
-          tipoCartela: combo.tipoCartela,
-        }),
-      );
+      return this.expandirSetoresDoCombo(
+        combo,
+        quantidadeCartelas,
+        combo.intervalo,
+      ).map((setor) => ({
+        ...setor,
+        tipoCartela: combo.tipoCartela,
+      }));
     });
 
     for (const bilhete of bilhetes) {
@@ -1172,6 +1170,7 @@ export class LojaPublicaService {
       preco: Prisma.Decimal;
       rangeInicio: bigint;
       rangeFinal: bigint;
+      intervalo?: bigint | null;
     }>,
   ): OpcaoCompraEdicao[] {
     const combosDigitais = combos.filter(
@@ -1181,7 +1180,11 @@ export class LojaPublicaService {
     return combosDigitais.map((combo) => {
       const quantidadeCartelas = obterQuantidadeCartelas(combo.tipoCartela);
       const valorCombo = this.formatarValorMonetario(combo.preco);
-      const setores = this.expandirSetoresDoCombo(combo, quantidadeCartelas);
+      const setores = this.expandirSetoresDoCombo(
+        combo,
+        quantidadeCartelas,
+        combo.intervalo,
+      );
       const primeiroSetor = setores[0];
 
       return {

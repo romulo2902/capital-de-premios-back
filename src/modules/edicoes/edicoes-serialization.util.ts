@@ -27,6 +27,9 @@ export function serializarEdicao(
       preco: valorCombo,
       rangeInicio: combo.rangeInicio.toString(),
       rangeFinal: combo.rangeFinal.toString(),
+      // BigInt não é serializável em JSON. O fallback cobre consultas com
+      // `select` parcial (no banco a coluna é NOT NULL DEFAULT 1).
+      intervalo: (combo.intervalo ?? 1n).toString(),
       createdAt: combo.createdAt,
       updatedAt: combo.updatedAt,
     };

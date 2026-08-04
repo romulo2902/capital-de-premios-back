@@ -34,6 +34,7 @@ import {
 } from './edicoes-range.util';
 import { obterTotalCombinacoesCartela as obterTotalCombinacoesCartelaUtil } from './edicoes-sequencia.util';
 import { serializarEdicao as serializarEdicaoUtil } from './edicoes-serialization.util';
+import { calcularFaixaOcupadaPeloCombo } from './edicoes-setores.util';
 import type { EdicaoComRelacoes } from './edicoes.types';
 
 interface ComboEdicaoNormalizado {
@@ -42,6 +43,7 @@ interface ComboEdicaoNormalizado {
   preco: Prisma.Decimal;
   rangeInicio: bigint;
   rangeFinal: bigint;
+  intervalo: bigint;
 }
 
 interface PremioDetalhadoNormalizado {
@@ -113,6 +115,7 @@ export class EdicoesService {
               preco: combo.preco,
               rangeInicio: combo.rangeInicio,
               rangeFinal: combo.rangeFinal,
+              intervalo: combo.intervalo,
             })),
           },
         },
@@ -309,6 +312,7 @@ export class EdicoesService {
             preco: combo.preco,
             rangeInicio: combo.rangeInicio,
             rangeFinal: combo.rangeFinal,
+            intervalo: combo.intervalo,
           })),
         };
       }
@@ -353,6 +357,26 @@ export class EdicoesService {
 
     const normalizedMessage = message.trim();
     return normalizedMessage ? normalizedMessage : null;
+  }
+
+  /**
+   * Converte o intervalo entre títulos de uma cartela multi-chance para BigInt.
+   *
+   * Omitido assume 1 (títulos consecutivos, comportamento das edições antigas).
+   * Zero é recusado porque colocaria todas as chances no mesmo título.
+   */
+  private parseIntervalo(intervalo?: string): bigint {
+    if (intervalo === undefined || intervalo.trim() === '') {
+      return 1n;
+    }
+
+    const valor = BigInt(intervalo.trim());
+
+    if (valor < 1n) {
+      throw new BadRequestException('intervalo deve ser no mínimo 1');
+    }
+
+    return valor;
   }
 
   async ativar(id: string) {
@@ -672,6 +696,7 @@ export class EdicoesService {
       preco: this.normalizarValorCartela(combo.preco),
       rangeInicio: BigInt(combo.rangeInicio),
       rangeFinal: BigInt(combo.rangeFinal),
+      intervalo: this.parseIntervalo(combo.intervalo),
     }));
   }
 
@@ -684,6 +709,7 @@ export class EdicoesService {
       preco: combo.preco,
       rangeInicio: combo.rangeInicio,
       rangeFinal: combo.rangeFinal,
+      intervalo: combo.intervalo,
     }));
   }
 
@@ -738,19 +764,39 @@ export class EdicoesService {
       }
     }
 
-    const ordenados = [...combos].sort((a, b) =>
-      a.rangeInicio < b.rangeInicio
-        ? -1
-        : a.rangeInicio > b.rangeInicio
-          ? 1
-          : 0,
-    );
-    for (let i = 1; i < ordenados.length; i++) {
-      const prev = ordenados[i - 1];
-      const curr = ordenados[i];
-      if (curr.rangeInicio <= prev.rangeFinal) {
+    // A colisão precisa ser medida sobre a faixa REALMENTE ocupada: com
+    // intervalo, o range configurado guarda só as cabeças e as demais chances
+    // caem depois dele. Dois combos com ranges de cabeça disjuntos ainda podem
+    // brigar pelos mesmos títulos nas chances seguintes.
+    const ocupacoes = combos
+      .map((combo) => ({
+        combo,
+        faixa: calcularFaixaOcupadaPeloCombo(
+          combo,
+          this.obterQuantidadeCartelas(combo.tipoCartela),
+          combo.intervalo,
+        ),
+      }))
+      .sort((a, b) =>
+        a.faixa.inicio < b.faixa.inicio
+          ? -1
+          : a.faixa.inicio > b.faixa.inicio
+            ? 1
+            : 0,
+      );
+
+    for (let i = 1; i < ocupacoes.length; i++) {
+      const prev = ocupacoes[i - 1];
+      const curr = ocupacoes[i];
+
+      if (curr.faixa.inicio <= prev.faixa.fim) {
+        const temIntervalo =
+          prev.combo.intervalo > 1n || curr.combo.intervalo > 1n;
+        const detalhe = temIntervalo
+          ? ` (faixas ocupadas considerando o intervalo de cada combo: ${prev.faixa.inicio}-${prev.faixa.fim} e ${curr.faixa.inicio}-${curr.faixa.fim})`
+          : '';
         throw new ConflictException(
-          `Ranges dos combos se sobrepõem: ${prev.rangeInicio}-${prev.rangeFinal} e ${curr.rangeInicio}-${curr.rangeFinal}`,
+          `Ranges dos combos se sobrepõem: ${prev.combo.rangeInicio}-${prev.combo.rangeFinal} e ${curr.combo.rangeInicio}-${curr.combo.rangeFinal}${detalhe}`,
         );
       }
     }

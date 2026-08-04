@@ -39,6 +39,12 @@ import {
   obterQuantidadeCartelas,
   obterTipoCartelaPorQuantidadeCartelas,
 } from '../edicoes/edicoes-range.util';
+import {
+  calcularFaixaOcupadaPeloCombo,
+  expandirSetoresDoCombo as expandirSetoresDoComboUtil,
+  resolverIntervalo,
+  type SetorCombo,
+} from '../edicoes/edicoes-setores.util';
 import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
 import { calcularQuantidadeCartelasDaVenda } from './vendas-quantidade.util';
 import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
@@ -56,13 +62,8 @@ type ComboVenda = {
   preco: Prisma.Decimal;
   rangeInicio: bigint;
   rangeFinal: bigint;
-};
-
-type SetorCombo = {
-  rangeInicio: bigint;
-  rangeFinal: bigint;
-  rangeTotalInicio: bigint;
-  rangeTotalFinal: bigint;
+  /** Salto entre as chances deste combo. Ver edicoes-setores.util.ts. */
+  intervalo?: bigint | null;
 };
 
 type MatrizDisponivel = {
@@ -463,7 +464,7 @@ export class VendasService {
         dataEncerramento: true,
         valorCartela: true,
         combos: {
-          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
+          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true, intervalo: true },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
         },
       },
@@ -528,7 +529,12 @@ export class VendasService {
 
     const quantidadeCartelas = configuracaoVenda.quantidadeCartelas;
     const comboRange = configuracaoVenda.combo;
-    const setores = this.expandirSetoresDoCombo(comboRange, quantidadeCartelas);
+    const intervalo = this.resolverIntervaloDaEdicao(comboRange.intervalo);
+    const setores = this.expandirSetoresDoCombo(
+      comboRange,
+      quantidadeCartelas,
+      intervalo,
+    );
     const primeiroSetor = setores[0];
     const segundoSetor = setores[1];
     const quantidadeCombosParaListar =
@@ -540,6 +546,7 @@ export class VendasService {
       comboRange,
       quantidadeCartelas,
       quantidadeCombosParaListar,
+      intervalo,
       {
         cursorNumeroBase: params.cursorNumeroBase
           ? BigInt(params.cursorNumeroBase)
@@ -1927,7 +1934,7 @@ export class VendasService {
       where: { id: venda.edicaoId },
       select: {
         combos: {
-          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
+          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true, intervalo: true },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
         },
       },
@@ -1950,12 +1957,22 @@ export class VendasService {
     let matrizDisponiveis: MatrizDisponivel[] = [];
 
     if (combosSelecionados.length > 0) {
+      // A faixa precisa cobrir as chances deslocadas: com intervalo, o título
+      // da chance 2 fica FORA do range configurado (que guarda só as cabeças).
+      // Limitar por [rangeInicio, rangeFinal] descartaria esses títulos e a
+      // compra manual falharia ou entregaria menos cartelas que o contratado.
+      const faixaOcupada = calcularFaixaOcupadaPeloCombo(
+        comboRange,
+        quantidadeCartelasPorCombo,
+        comboRange.intervalo,
+      );
+
       const linhas = await tx.matrizRange.findMany({
         where: {
           numero: {
             in: combosSelecionados,
-            gte: comboRange.rangeInicio,
-            lte: comboRange.rangeFinal,
+            gte: faixaOcupada.inicio,
+            lte: faixaOcupada.fim,
           },
           bilhetes: { none: { edicaoId: venda.edicaoId } },
         },
@@ -1973,6 +1990,7 @@ export class VendasService {
         comboRange,
         quantidadeCartelasPorCombo,
         venda.quantidade,
+        this.resolverIntervaloDaEdicao(comboRange.intervalo),
         { strict: true },
       );
       matrizDisponiveis = gruposDisponiveis.flat();
@@ -2000,6 +2018,7 @@ export class VendasService {
     combo: { rangeInicio: bigint; rangeFinal: bigint },
     quantidadeCartelasPorCombo: number,
     quantidadeGrupos: number,
+    intervalo: bigint,
     options: {
       cursorNumeroBase?: bigint;
       direcao?: DirecaoCombo;
@@ -2008,7 +2027,11 @@ export class VendasService {
       numerosReservadosAEvitar?: string[];
     } = {},
   ): Promise<MatrizDisponivel[][]> {
-    const setores = this.expandirSetoresDoCombo(combo, quantidadeCartelasPorCombo);
+    const setores = this.expandirSetoresDoCombo(
+      combo,
+      quantidadeCartelasPorCombo,
+      intervalo,
+    );
     const primeiroSetor = setores[0];
 
     if (!primeiroSetor) {
@@ -2325,16 +2348,24 @@ export class VendasService {
     };
   }
 
+  /**
+   * Normaliza o intervalo vindo da edição.
+   *
+   * Edições anteriores à coluna `intervalo` (e mocks de teste) podem não trazer
+   * o campo; nesse caso vale 1, que reproduz o comportamento antigo de títulos
+   * consecutivos. Valor zero ou negativo colocaria todas as chances no mesmo
+   * título, então também cai no mínimo de 1.
+   */
+  private resolverIntervaloDaEdicao(intervalo?: bigint | null): bigint {
+    return resolverIntervalo(intervalo);
+  }
+
   private expandirSetoresDoCombo(
     combo: { rangeInicio: bigint; rangeFinal: bigint },
     quantidadeCartelas: number,
+    intervalo: bigint,
   ): SetorCombo[] {
-    return Array.from({ length: quantidadeCartelas }, (_, i) => ({
-      rangeInicio: combo.rangeInicio + BigInt(i),
-      rangeFinal: combo.rangeFinal - BigInt(quantidadeCartelas - 1 - i),
-      rangeTotalInicio: combo.rangeInicio,
-      rangeTotalFinal: combo.rangeFinal,
-    }));
+    return expandirSetoresDoComboUtil(combo, quantidadeCartelas, intervalo);
   }
 
   private obterQuantidadeCartelasDaVenda(

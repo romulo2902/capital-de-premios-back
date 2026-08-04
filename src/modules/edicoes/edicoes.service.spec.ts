@@ -571,6 +571,79 @@ describe('EdicoesService', () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  // Com intervalo, as chances saem do range configurado — dois combos com
+  // ranges de cabeça disjuntos ainda podem brigar pelos mesmos títulos.
+  it('create rejeita combos cujas faixas ocupadas colidem por causa do intervalo', async () => {
+    mockPrisma.edicao.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create({
+        numero: '128',
+        dataSorteio: '2099-03-27T10:20',
+        dataEncerramento: '2099-03-27T09:59',
+        raspadinha: false,
+        combos: [
+          {
+            // Cabeças 1.000.000-1.010.000; a 2ª chance ocupa 1.050.000-1.060.000.
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            preco: '20.00',
+            rangeInicio: '1000000',
+            rangeFinal: '1010000',
+            intervalo: '50000',
+          },
+          {
+            // Cabeças não encostam nas do combo acima, mas caem dentro da
+            // faixa que a 2ª chance dele vai consumir.
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            preco: '10.00',
+            rangeInicio: '1055000',
+            rangeFinal: '1056000',
+          },
+        ],
+        premios: [{ descricao: '1º Prêmio', valor: '1000.00' }],
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('create nao acusa colisao quando as faixas ocupadas ficam separadas', async () => {
+    mockPrisma.edicao.findFirst.mockResolvedValue(null);
+
+    // Só interessa a validação de colisão: o resto do fluxo de create depende
+    // de mocks de transação que não são o alvo deste teste.
+    const erro: unknown = await service
+      .create({
+        numero: '129',
+        dataSorteio: '2099-03-27T10:20',
+        dataEncerramento: '2099-03-27T09:59',
+        raspadinha: false,
+        combos: [
+          {
+            // Faixa ocupada: 1.000.000 até 1.060.000.
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            preco: '20.00',
+            rangeInicio: '1000000',
+            rangeFinal: '1010000',
+            intervalo: '50000',
+          },
+          {
+            // Começa depois disso: não há disputa.
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            preco: '10.00',
+            rangeInicio: '1060001',
+            rangeFinal: '1061000',
+          },
+        ],
+        premios: [{ descricao: '1º Prêmio', valor: '1000.00' }],
+      })
+      .catch((e: unknown) => e);
+
+    expect(erro).not.toBeInstanceOf(ConflictException);
+  });
+
   describe('guardas de range na criacao da edicao', () => {
     // Payload minimo valido; cada teste varia só o que quer exercitar.
     function payloadComCombo(
