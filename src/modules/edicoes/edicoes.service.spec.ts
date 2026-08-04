@@ -582,7 +582,6 @@ describe('EdicoesService', () => {
         dataSorteio: '2099-03-27T10:20',
         dataEncerramento: '2099-03-27T09:59',
         raspadinha: false,
-        intervalo: '50000',
         combos: [
           {
             // Cabeças 1.000.000-1.010.000; a 2ª chance ocupa 1.050.000-1.060.000.
@@ -591,6 +590,7 @@ describe('EdicoesService', () => {
             preco: '20.00',
             rangeInicio: '1000000',
             rangeFinal: '1010000',
+            intervalo: '50000',
           },
           {
             // Cabeças não encostam nas do combo acima, mas caem dentro da
@@ -618,7 +618,6 @@ describe('EdicoesService', () => {
         dataSorteio: '2099-03-27T10:20',
         dataEncerramento: '2099-03-27T09:59',
         raspadinha: false,
-        intervalo: '50000',
         combos: [
           {
             // Faixa ocupada: 1.000.000 até 1.060.000.
@@ -627,6 +626,7 @@ describe('EdicoesService', () => {
             preco: '20.00',
             rangeInicio: '1000000',
             rangeFinal: '1010000',
+            intervalo: '50000',
           },
           {
             // Começa depois disso: não há disputa.

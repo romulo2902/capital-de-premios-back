@@ -67,6 +67,7 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
     rangeInicio: bigint;
     rangeFinal: bigint;
     preco?: string;
+    intervalo?: bigint;
   }) {
     return {
       id: params.id,
@@ -75,12 +76,12 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
       preco: new Prisma.Decimal(params.preco ?? '10.00'),
       rangeInicio: params.rangeInicio,
       rangeFinal: params.rangeFinal,
+      intervalo: params.intervalo,
     };
   }
 
   function mockarEdicaoComCombos(
     combos: ReturnType<typeof montarCombo>[],
-    intervalo?: bigint,
   ): void {
     mockPrisma.edicao.findFirst.mockResolvedValue({
       id: 'edicao-1',
@@ -95,7 +96,6 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
       manutencaoMensagem: null,
       premios: [],
       combos,
-      intervalo,
     });
   }
 
@@ -182,17 +182,15 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
       const inicio = 950000n;
       const fim = 951000n;
       const intervalo = 50000n;
-      mockarEdicaoComCombos(
-        [
-          montarCombo({
-            id: 'c',
-            tipoCartela,
-            rangeInicio: inicio,
-            rangeFinal: fim,
-          }),
-        ],
-        intervalo,
-      );
+      mockarEdicaoComCombos([
+        montarCombo({
+          id: 'c',
+          tipoCartela,
+          rangeInicio: inicio,
+          rangeFinal: fim,
+          intervalo,
+        }),
+      ]);
 
       const [opcao] = await obterOpcoes();
 
@@ -206,17 +204,15 @@ describe('LojaPublicaService — ranges e setores dos combos', () => {
   );
 
   it('todos os setores tem o mesmo tamanho, com passo igual ao intervalo', async () => {
-    mockarEdicaoComCombos(
-      [
-        montarCombo({
-          id: 'c6',
-          tipoCartela: TipoCartela.SEIS_CHANCES,
-          rangeInicio: 992000n,
-          rangeFinal: 993000n,
-        }),
-      ],
-      50000n,
-    );
+    mockarEdicaoComCombos([
+      montarCombo({
+        id: 'c6',
+        tipoCartela: TipoCartela.SEIS_CHANCES,
+        rangeInicio: 992000n,
+        rangeFinal: 993000n,
+        intervalo: 50000n,
+      }),
+    ]);
 
     const [opcao] = await obterOpcoes();
 

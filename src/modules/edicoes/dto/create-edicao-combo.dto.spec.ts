@@ -144,25 +144,25 @@ describe('CreateEdicaoDto — rejeicao dos campos legados de range', () => {
   // O formulario do admin manda o campo sempre, com string vazia quando o
   // usuario nao preenche. @IsOptional() so pula null/undefined, entao sem o
   // @Transform o @Matches barrava o cadastro — 400 em quem deixou em branco.
-  it('aceita intervalo em branco, tratando como nao informado', async () => {
-    await expect(
-      coletarErros({ ...payloadValido, intervalo: '' }),
-    ).resolves.toHaveLength(0);
-  });
-
-  it('aceita intervalo preenchido', async () => {
-    await expect(
-      coletarErros({ ...payloadValido, intervalo: '50000' }),
-    ).resolves.toHaveLength(0);
-  });
-
-  it('rejeita intervalo nao numerico', async () => {
-    const erros = await coletarErros({
+  function comIntervalo(intervalo: string) {
+    return {
       ...payloadValido,
-      intervalo: 'cinquenta mil',
-    });
+      combos: [{ ...payloadValido.combos[0], intervalo }],
+    };
+  }
 
-    expect(erros.map((e) => e.campo)).toContain('intervalo');
+  it('aceita intervalo em branco no combo, tratando como nao informado', async () => {
+    await expect(coletarErros(comIntervalo(''))).resolves.toHaveLength(0);
+  });
+
+  it('aceita intervalo preenchido no combo', async () => {
+    await expect(coletarErros(comIntervalo('50000'))).resolves.toHaveLength(0);
+  });
+
+  it('rejeita intervalo nao numerico, apontando o indice do combo', async () => {
+    const erros = await coletarErros(comIntervalo('cinquenta mil'));
+
+    expect(erros.map((e) => e.campo)).toContain('combos.0.intervalo');
   });
 
   it.each(['valorCartela', 'detalhes'])(

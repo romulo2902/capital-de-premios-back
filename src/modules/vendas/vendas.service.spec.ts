@@ -1153,9 +1153,9 @@ describe('VendasService', () => {
         status: StatusEdicao.ATIVA,
         dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
         valorCartela: new Prisma.Decimal('20.00'),
-        intervalo: BigInt(50000),
         combos: [
           {
+            intervalo: BigInt(50000),
             id: 'combo-duas',
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.DUAS_CHANCES,
@@ -1206,9 +1206,9 @@ describe('VendasService', () => {
         status: StatusEdicao.ATIVA,
         dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
         valorCartela: new Prisma.Decimal('30.00'),
-        intervalo: BigInt(50000),
         combos: [
           {
+            intervalo: BigInt(50000),
             id: 'combo-quatro',
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.QUATRO_CHANCES,
@@ -1279,9 +1279,9 @@ describe('VendasService', () => {
         status: StatusEdicao.ATIVA,
         dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
         valorCartela: new Prisma.Decimal('30.00'),
-        intervalo: BigInt(50000),
         combos: [
           {
+            intervalo: BigInt(50000),
             id: 'combo-quatro',
             origemParticipacao: OrigemParticipacao.DIGITAL,
             tipoCartela: TipoCartela.QUATRO_CHANCES,
@@ -1779,7 +1779,6 @@ describe('VendasService', () => {
       const txMock = {
         edicao: {
           findUnique: jest.fn().mockResolvedValue({
-            intervalo: BigInt(50000),
             combos: [
               {
                 id: 'combo-1',
@@ -1787,6 +1786,7 @@ describe('VendasService', () => {
                 tipoCartela: TipoCartela.DUAS_CHANCES,
                 rangeInicio: BigInt(1540001),
                 rangeFinal: BigInt(1550000),
+                intervalo: BigInt(50000),
                 preco: null,
               },
             ],

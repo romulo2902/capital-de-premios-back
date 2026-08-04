@@ -139,10 +139,7 @@ export class LojaPublicaService {
       return { message: 'Nenhuma edição ativa no momento', data: null };
     }
 
-    const opcoesDeCompra = this.mapearOpcoesCompraDaEdicao(
-      edicaoAtiva.combos,
-      edicaoAtiva.intervalo,
-    );
+    const opcoesDeCompra = this.mapearOpcoesCompraDaEdicao(edicaoAtiva.combos);
 
     return {
       message: 'Dados da home carregados com sucesso',
@@ -694,7 +691,6 @@ export class LojaPublicaService {
               vendasBloqueadas: v.edicao.manutencaoAtiva,
               opcoesCompra: this.mapearOpcoesCompraDaEdicao(
                 v.edicao.combos,
-                v.edicao.intervalo,
               ).map((opcao) => ({
                 tipoCompra: opcao.tipoCompra,
                 isCombo: opcao.isCombo,
@@ -719,7 +715,6 @@ export class LojaPublicaService {
               v.bilhetes,
               v.edicao.combos,
               v.tipoCartela,
-              v.edicao.intervalo,
             ),
             bilhetes: v.bilhetes.map((b) => ({
               numero: this.formatarNumeroBilhete(b.numero),
@@ -1094,9 +1089,9 @@ export class LojaPublicaService {
       tipoCartela: TipoCartela;
       rangeInicio: bigint;
       rangeFinal: bigint;
+      intervalo?: bigint | null;
     }>,
     tipoCartela?: TipoCartela | null,
-    intervalo?: bigint | null,
   ) {
     const grupos = new Map<
       string,
@@ -1112,7 +1107,7 @@ export class LojaPublicaService {
       return this.expandirSetoresDoCombo(
         combo,
         quantidadeCartelas,
-        intervalo,
+        combo.intervalo,
       ).map((setor) => ({
         ...setor,
         tipoCartela: combo.tipoCartela,
@@ -1175,8 +1170,8 @@ export class LojaPublicaService {
       preco: Prisma.Decimal;
       rangeInicio: bigint;
       rangeFinal: bigint;
+      intervalo?: bigint | null;
     }>,
-    intervalo?: bigint | null,
   ): OpcaoCompraEdicao[] {
     const combosDigitais = combos.filter(
       (combo) => combo.origemParticipacao === OrigemParticipacao.DIGITAL,
@@ -1188,7 +1183,7 @@ export class LojaPublicaService {
       const setores = this.expandirSetoresDoCombo(
         combo,
         quantidadeCartelas,
-        intervalo,
+        combo.intervalo,
       );
       const primeiroSetor = setores[0];
 

@@ -43,6 +43,7 @@ interface ComboEdicaoNormalizado {
   preco: Prisma.Decimal;
   rangeInicio: bigint;
   rangeFinal: bigint;
+  intervalo: bigint;
 }
 
 interface PremioDetalhadoNormalizado {
@@ -64,8 +65,7 @@ export class EdicoesService {
 
   async create(dto: CreateEdicaoDto) {
     const combos = this.normalizarCombos(dto.combos);
-    const intervalo = this.parseIntervalo(dto.intervalo);
-    this.validarCombos(combos, intervalo);
+    this.validarCombos(combos);
     const qtdNumerosCartela = await this.resolverQtdNumerosCartela(combos);
     this.validarCapacidadeCombos(combos, qtdNumerosCartela);
     const qtdPremios = dto.premios.length;
@@ -102,7 +102,6 @@ export class EdicoesService {
           destino: dto.destino ?? DestinoEdicao.SITE,
           raspadinha: dto.raspadinha,
           frase: dto.frase,
-          intervalo,
           imagemUrl: imagemUrl ?? null,
           manutencaoAtiva: dto.manutencaoAtiva ?? false,
           manutencaoMensagem: this.normalizarMensagemManutencao(
@@ -116,6 +115,7 @@ export class EdicoesService {
               preco: combo.preco,
               rangeInicio: combo.rangeInicio,
               rangeFinal: combo.rangeFinal,
+              intervalo: combo.intervalo,
             })),
           },
         },
@@ -210,15 +210,8 @@ export class EdicoesService {
       ? this.normalizarCombos(dto.combos)
       : this.normalizarCombosExistentes(atual);
 
-    // O intervalo entra na validação de colisão: mudar só ele já pode fazer
-    // as faixas ocupadas se sobreporem, mesmo sem mexer nos combos.
-    const intervaloEfetivo =
-      dto.intervalo !== undefined
-        ? this.parseIntervalo(dto.intervalo)
-        : atual.intervalo;
-
-    if (dto.combos || dto.intervalo !== undefined) {
-      this.validarCombos(combosEfetivos, intervaloEfetivo);
+    if (dto.combos) {
+      this.validarCombos(combosEfetivos);
     }
 
     const qtdNumerosCartelaEfetivo = dto.combos
@@ -279,7 +272,6 @@ export class EdicoesService {
         ...(dto.destino ? { destino: dto.destino } : {}),
         ...(dto.raspadinha !== undefined ? { raspadinha: dto.raspadinha } : {}),
         ...(dto.frase !== undefined ? { frase: dto.frase } : {}),
-        ...(dto.intervalo !== undefined ? { intervalo: intervaloEfetivo } : {}),
         ...(dto.manutencaoAtiva !== undefined
           ? { manutencaoAtiva: dto.manutencaoAtiva }
           : {}),
@@ -303,6 +295,7 @@ export class EdicoesService {
             preco: combo.preco,
             rangeInicio: combo.rangeInicio,
             rangeFinal: combo.rangeFinal,
+            intervalo: combo.intervalo,
           })),
         };
       }
@@ -686,6 +679,7 @@ export class EdicoesService {
       preco: this.normalizarValorCartela(combo.preco),
       rangeInicio: BigInt(combo.rangeInicio),
       rangeFinal: BigInt(combo.rangeFinal),
+      intervalo: this.parseIntervalo(combo.intervalo),
     }));
   }
 
@@ -698,6 +692,7 @@ export class EdicoesService {
       preco: combo.preco,
       rangeInicio: combo.rangeInicio,
       rangeFinal: combo.rangeFinal,
+      intervalo: combo.intervalo,
     }));
   }
 
@@ -729,10 +724,7 @@ export class EdicoesService {
     throw new BadRequestException('Informe quantidadeCartelas para o combo');
   }
 
-  private validarCombos(
-    combos: ComboEdicaoNormalizado[],
-    intervalo: bigint = 1n,
-  ): void {
+  private validarCombos(combos: ComboEdicaoNormalizado[]): void {
     if (combos.length === 0) {
       throw new BadRequestException('Informe ao menos um combo para a edição');
     }
@@ -765,7 +757,7 @@ export class EdicoesService {
         faixa: calcularFaixaOcupadaPeloCombo(
           combo,
           this.obterQuantidadeCartelas(combo.tipoCartela),
-          intervalo,
+          combo.intervalo,
         ),
       }))
       .sort((a, b) =>
@@ -781,10 +773,11 @@ export class EdicoesService {
       const curr = ocupacoes[i];
 
       if (curr.faixa.inicio <= prev.faixa.fim) {
-        const detalhe =
-          intervalo > 1n
-            ? ` (faixas ocupadas considerando o intervalo ${intervalo}: ${prev.faixa.inicio}-${prev.faixa.fim} e ${curr.faixa.inicio}-${curr.faixa.fim})`
-            : '';
+        const temIntervalo =
+          prev.combo.intervalo > 1n || curr.combo.intervalo > 1n;
+        const detalhe = temIntervalo
+          ? ` (faixas ocupadas considerando o intervalo de cada combo: ${prev.faixa.inicio}-${prev.faixa.fim} e ${curr.faixa.inicio}-${curr.faixa.fim})`
+          : '';
         throw new ConflictException(
           `Ranges dos combos se sobrepõem: ${prev.combo.rangeInicio}-${prev.combo.rangeFinal} e ${curr.combo.rangeInicio}-${curr.combo.rangeFinal}${detalhe}`,
         );

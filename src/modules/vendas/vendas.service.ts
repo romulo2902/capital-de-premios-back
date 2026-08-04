@@ -62,6 +62,8 @@ type ComboVenda = {
   preco: Prisma.Decimal;
   rangeInicio: bigint;
   rangeFinal: bigint;
+  /** Salto entre as chances deste combo. Ver edicoes-setores.util.ts. */
+  intervalo?: bigint | null;
 };
 
 type MatrizDisponivel = {
@@ -461,9 +463,8 @@ export class VendasService {
         manutencaoMensagem: true,
         dataEncerramento: true,
         valorCartela: true,
-        intervalo: true,
         combos: {
-          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
+          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true, intervalo: true },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
         },
       },
@@ -528,7 +529,7 @@ export class VendasService {
 
     const quantidadeCartelas = configuracaoVenda.quantidadeCartelas;
     const comboRange = configuracaoVenda.combo;
-    const intervalo = this.resolverIntervaloDaEdicao(edicao.intervalo);
+    const intervalo = this.resolverIntervaloDaEdicao(comboRange.intervalo);
     const setores = this.expandirSetoresDoCombo(
       comboRange,
       quantidadeCartelas,
@@ -1932,9 +1933,8 @@ export class VendasService {
     const edicao = await tx.edicao.findUnique({
       where: { id: venda.edicaoId },
       select: {
-        intervalo: true,
         combos: {
-          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
+          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true, intervalo: true },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
         },
       },
@@ -1964,7 +1964,7 @@ export class VendasService {
       const faixaOcupada = calcularFaixaOcupadaPeloCombo(
         comboRange,
         quantidadeCartelasPorCombo,
-        edicao.intervalo,
+        comboRange.intervalo,
       );
 
       const linhas = await tx.matrizRange.findMany({
@@ -1990,7 +1990,7 @@ export class VendasService {
         comboRange,
         quantidadeCartelasPorCombo,
         venda.quantidade,
-        this.resolverIntervaloDaEdicao(edicao.intervalo),
+        this.resolverIntervaloDaEdicao(comboRange.intervalo),
         { strict: true },
       );
       matrizDisponiveis = gruposDisponiveis.flat();
