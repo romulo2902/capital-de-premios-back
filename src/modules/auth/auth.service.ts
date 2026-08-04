@@ -192,17 +192,20 @@ export class AuthService {
         });
       }
     } else if (!cliente.dataNascimento) {
-      if (!dto.dataNascimento) {
-        throw new UnauthorizedException(
-          'Cliente sem data de nascimento cadastrada. Informe a data de nascimento para acessar.',
-        );
+      // Sem bloquear o login: mesma tolerância do checkout (VendasService /
+      // VendasSenaService), que também pula a validação de maioridade quando
+      // o cadastro não tem data salva. O Capital Sena nunca coleta essa data,
+      // então exigi-la aqui travava 100% dos clientes vindos de lá — o
+      // formulário de login do Sena só pede CPF, não tem onde digitar.
+      // Quando a data vem informada (login do Capital Prêmios, que ainda
+      // pergunta), aproveitamos para preencher a lacuna do cadastro.
+      if (dto.dataNascimento) {
+        const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
+        cliente = await this.prisma.cliente.update({
+          where: { id: cliente.id },
+          data: { dataNascimento },
+        });
       }
-
-      const dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
-      cliente = await this.prisma.cliente.update({
-        where: { id: cliente.id },
-        data: { dataNascimento },
-      });
     } else {
       validarMaioridade(cliente.dataNascimento);
     }
