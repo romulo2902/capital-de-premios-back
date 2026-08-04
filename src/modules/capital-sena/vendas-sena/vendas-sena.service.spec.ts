@@ -38,6 +38,12 @@ type ServicePrivado = VendasSenaService & {
     vendedorId?: string,
     distribuidorId?: string,
   ): Promise<unknown>;
+  buscarOuCriarClientePorDto(dto: {
+    cpf?: string;
+    nome?: string;
+    telefone?: string;
+    email?: string;
+  }): Promise<unknown>;
   validarDadosClienteParaPagamento(cliente: {
     id: string;
     cpf: string;
@@ -50,7 +56,7 @@ type ServicePrivado = VendasSenaService & {
     cpf: string;
     nome: string;
     telefone: string;
-    email: string;
+    email?: string;
   };
 };
 
@@ -409,8 +415,11 @@ describe('VendasSenaService', () => {
       expect(result).toMatchObject({ id: 'cliente-1' });
     });
 
-    it('exige e-mail salvo para pagar por clienteId', () => {
-      expect(() =>
+    // Mesma regra do Capital Prêmios: o checkout pede só nome, CPF e telefone,
+    // então cadastro sem e-mail nao pode travar o pagamento — o gateway usa um
+    // endereço padrão. Antes isso derrubava a compra com 400.
+    it('permite pagar por clienteId sem e-mail cadastrado', () => {
+      expect(
         service.validarDadosClienteParaPagamento({
           id: 'cliente-1',
           cpf: '06790319107',
@@ -419,7 +428,38 @@ describe('VendasSenaService', () => {
           email: null,
           dataNascimento: new Date('1991-05-01T00:00:00.000Z'),
         }),
-      ).toThrow('Cliente sem e-mail cadastrado');
+      ).toMatchObject({ id: 'cliente-1', email: undefined });
+    });
+
+    // O obrigatorio passou a ser telefone (nao mais e-mail), igual ao
+    // LojaPublicaService do Capital Premios.
+    it('exige cpf, nome e telefone quando nao vem clienteId', async () => {
+      await expect(
+        service.buscarOuCriarClientePorDto({
+          cpf: '06790319107',
+          nome: 'Jair Rodrigues',
+        }),
+      ).rejects.toThrow('dados completos do cliente');
+    });
+
+    it('aceita cadastro novo sem e-mail, com cpf, nome e telefone', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+      mockPrisma.cliente.create.mockResolvedValueOnce({
+        id: 'cliente-novo',
+        cpf: '06790319107',
+        nome: 'Jair Rodrigues',
+        telefone: '(92) 99999-9999',
+        email: null,
+        dataNascimento: null,
+      });
+
+      const result = await service.buscarOuCriarClientePorDto({
+        cpf: '06790319107',
+        nome: 'Jair Rodrigues',
+        telefone: '(92) 99999-9999',
+      });
+
+      expect(result).toMatchObject({ id: 'cliente-novo', email: null });
     });
 
     it('permite pagar por clienteId sem data de nascimento cadastrada', () => {

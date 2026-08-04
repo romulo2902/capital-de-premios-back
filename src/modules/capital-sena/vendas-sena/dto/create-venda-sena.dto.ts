@@ -6,6 +6,7 @@ import {
   IsEmail,
   IsEnum,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
@@ -147,18 +148,20 @@ export class CreateVendaSenaDto {
   @ApiPropertyOptional({
     example: '(11) 99999-9999',
     description:
-      'Telefone do cliente. Opcional: quando não informado, o cliente é criado sem telefone.',
+      'Telefone do cliente. Obrigatório apenas quando clienteId não for informado.',
   })
-  @IsOptional()
+  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
   @IsString({ message: 'telefone deve ser um texto' })
+  @IsNotEmpty({ message: 'telefone é obrigatório' })
   telefone?: string;
 
   @ApiPropertyOptional({
     example: 'maria@email.com',
     description:
-      'E-mail do cliente. Obrigatório para envio do comprovante quando clienteId não for informado.',
+      'E-mail do cliente (opcional). Se informado, é usado para enviar o comprovante de compra. String vazia é ignorada.',
   })
-  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
+  @Transform(emptyStringToUndefined)
+  @IsOptional()
   @IsEmail({}, { message: 'e-mail inválido' })
   email?: string;
 

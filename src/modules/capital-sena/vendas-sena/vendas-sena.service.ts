@@ -82,7 +82,9 @@ interface DadosClientePagamentoSena {
   cpf: string;
   nome: string;
   telefone: string;
-  email: string;
+  // Opcional como no Capital Prêmios: o checkout pede só nome, CPF e telefone.
+  // O gateway usa um endereço padrão quando não há e-mail.
+  email?: string;
 }
 
 @Injectable()
@@ -747,7 +749,9 @@ export class VendasSenaService {
   private async buscarOuCriarClientePorDto(
     dto: CreateVendaSenaDto,
   ): Promise<ClienteSenaCompra> {
-    if (!dto.cpf || !dto.nome || !dto.email) {
+    // Mesmos obrigatórios do Capital Prêmios (LojaPublicaService): CPF, nome e
+    // telefone. E-mail e data de nascimento são opcionais.
+    if (!dto.cpf || !dto.nome || !dto.telefone) {
       throw new BadRequestException(
         'Informe clienteId ou os dados completos do cliente para concluir a compra',
       );
@@ -809,15 +813,14 @@ export class VendasSenaService {
     });
   }
 
+  /**
+   * Mesma regra do Capital Prêmios (VendasService.validarDadosClienteParaPagamento):
+   * e-mail não bloqueia a compra, porque o checkout pede só nome, CPF e
+   * telefone. O gateway substitui por um endereço padrão quando falta.
+   */
   private validarDadosClienteParaPagamento(
     cliente: ClienteSenaCompra,
   ): DadosClientePagamentoSena {
-    if (!cliente.email) {
-      throw new BadRequestException(
-        'Cliente sem e-mail cadastrado. Atualize meus-dados antes de concluir a compra',
-      );
-    }
-
     if (cliente.dataNascimento) {
       validarMaioridade(cliente.dataNascimento);
     }
@@ -827,7 +830,7 @@ export class VendasSenaService {
       cpf: cliente.cpf.replace(/\D/g, ''),
       nome: cliente.nome,
       telefone: cliente.telefone,
-      email: cliente.email,
+      email: cliente.email ?? undefined,
     };
   }
 
