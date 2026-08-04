@@ -4,7 +4,7 @@ import {
   ApiPropertyOptional,
 } from '@nestjs/swagger';
 import { OrigemParticipacao, TipoCartela } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   IsEnum,
   IsIn,
@@ -17,6 +17,15 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
+
+/** Trata campo de formulário em branco como não informado. */
+const parseCampoOpcionalVazio = ({ value }: TransformFnParams): unknown => {
+  if (typeof value === 'string' && value.trim() === '') {
+    return undefined;
+  }
+
+  return value;
+};
 
 const VALOR_COMBO_REGEX = /^\d+([.,]\d{1,2})?$/;
 const RANGE_REGEX = /^\d{7,}$/;
@@ -82,4 +91,19 @@ export class CreateEdicaoComboDto {
   @MinLength(7, { message: 'rangeFinal deve ter no mínimo 7 dígitos' })
   @Matches(RANGE_REGEX, { message: 'rangeFinal deve conter apenas dígitos' })
   rangeFinal: string;
+
+  @ApiPropertyOptional({
+    example: '50000',
+    default: '1',
+    description:
+      'Distância entre os títulos de uma mesma cartela deste combo, conforme o Plano de Operação. A chance `c` recebe o título `cabeça + c * intervalo` — ex.: com intervalo 50000 e 4 chances, a cabeça 10 gera os títulos 10, 50010, 100010 e 150010. O range acima delimita apenas as cabeças; as demais chances caem fora dele. Se omitido, assume 1 (títulos consecutivos).',
+  })
+  // Campo de formulário vazio chega como string vazia, e @IsOptional() só pula
+  // null/undefined — sem isso o @Matches barraria quem não preencheu o
+  // intervalo, que é justamente o caso opcional.
+  @Transform(parseCampoOpcionalVazio)
+  @IsOptional()
+  @IsString({ message: 'intervalo deve ser um texto' })
+  @Matches(/^\d+$/, { message: 'intervalo deve conter apenas dígitos' })
+  intervalo?: string;
 }

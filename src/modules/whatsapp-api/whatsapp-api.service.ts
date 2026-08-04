@@ -958,12 +958,6 @@ export class WhatsappApiService {
       throw new UnauthorizedException('Cliente não encontrado');
     }
 
-    if (!cliente.dataNascimento) {
-      throw new BadRequestException(
-        'Cliente sem data de nascimento cadastrada. Refaça a autenticação em POST /whatsapp/auth',
-      );
-    }
-
     const vendaSenaDto: CreateVendaSenaDto = {
       edicaoSenaId: dto.edicaoSenaId,
       modoSelecao: dto.modoSelecao,
@@ -975,7 +969,9 @@ export class WhatsappApiService {
       nome: cliente.nome,
       telefone: cliente.telefone,
       email: cliente.email ?? '',
-      dataNascimento: cliente.dataNascimento.toISOString().split('T')[0],
+      dataNascimento: cliente.dataNascimento
+        ? cliente.dataNascimento.toISOString().split('T')[0]
+        : undefined,
     };
 
     const resultado = await this.vendasSenaService.create(

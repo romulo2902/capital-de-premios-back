@@ -1138,6 +1138,197 @@ describe('VendasService', () => {
       expect(result.data.combos[0].bilhetes[0].numero).toBe('0950000');
       expect(result.data.combos[0].bilhetes[1].numero).toBe('0950001');
     });
+
+    // ─── intervalo entre chances (Plano de Operação) ─────────────────────────
+    //
+    // A chance `c` recebe o título `cabeça + c * intervalo`. O range do combo
+    // delimita só as cabeças — as demais chances caem fora dele de propósito.
+
+    it('aplica o intervalo da edição entre as chances da mesma cartela', async () => {
+      // Cenário real da Edição 002: bloco CAPITAL do cupom de 2 chances,
+      // com o intervalo de 50.000 do Plano de Operação.
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-intervalo',
+        numero: 2,
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
+        valorCartela: new Prisma.Decimal('20.00'),
+        combos: [
+          {
+            intervalo: BigInt(50000),
+            id: 'combo-duas',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(1540001),
+            rangeFinal: BigInt(1550000),
+            preco: new Prisma.Decimal('20.00'),
+          },
+        ],
+      });
+
+      mockPrisma.matrizRange.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'matriz-a',
+            numero: BigInt(1540005),
+            sequenciaBolas: [1, 2, 3],
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: 'matriz-a',
+            numero: BigInt(1540005),
+            sequenciaBolas: [1, 2, 3],
+          },
+          {
+            id: 'matriz-b',
+            numero: BigInt(1590005),
+            sequenciaBolas: [4, 5, 6],
+          },
+        ]);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-intervalo',
+        quantidadeCartelas: 2,
+        limit: 1,
+      });
+
+      expect(result.data.passoEntreCartelas).toBe('50000');
+      // Cabeça 1540005 → chance 2 = 1540005 + 50.000
+      expect(result.data.combos[0].bilhetes[0].numero).toBe('1540005');
+      expect(result.data.combos[0].bilhetes[1].numero).toBe('1590005');
+    });
+
+    it('desloca o range inteiro por chance, sem encolher o range das cabeças', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-setores',
+        numero: 3,
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
+        valorCartela: new Prisma.Decimal('30.00'),
+        combos: [
+          {
+            intervalo: BigInt(50000),
+            id: 'combo-quatro',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.QUATRO_CHANCES,
+            rangeInicio: BigInt(1640001),
+            rangeFinal: BigInt(1650000),
+            preco: new Prisma.Decimal('30.00'),
+          },
+        ],
+      });
+
+      mockPrisma.matrizRange.findMany.mockResolvedValue([]);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-setores',
+        quantidadeCartelas: 4,
+        limit: 1,
+      });
+
+      // Cada setor é o range das cabeças deslocado por c * intervalo, mantendo
+      // a largura original (10.000) — nada de encolher o range final.
+      expect(result.data.setores).toEqual([
+        { indiceCartela: 1, rangeInicio: '1640001', rangeFinal: '1650000' },
+        { indiceCartela: 2, rangeInicio: '1690001', rangeFinal: '1700000' },
+        { indiceCartela: 3, rangeInicio: '1740001', rangeFinal: '1750000' },
+        { indiceCartela: 4, rangeInicio: '1790001', rangeFinal: '1800000' },
+      ]);
+    });
+
+    it('mantém títulos consecutivos quando a edição não tem intervalo definido', async () => {
+      // Edições anteriores à coluna `intervalo` continuam com o passo 1.
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-legada',
+        numero: 4,
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
+        valorCartela: new Prisma.Decimal('30.00'),
+        combos: [
+          {
+            id: 'combo-duas',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.DUAS_CHANCES,
+            rangeInicio: BigInt(950000),
+            rangeFinal: BigInt(959980),
+            preco: new Prisma.Decimal('50.00'),
+          },
+        ],
+      });
+
+      mockPrisma.matrizRange.findMany.mockResolvedValue([]);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-legada',
+        quantidadeCartelas: 2,
+        limit: 1,
+      });
+
+      expect(result.data.passoEntreCartelas).toBe('1');
+    });
+
+    it('pula a cabeca cujo titulo ja foi consumido por uma cartela anterior', async () => {
+      // Cenario do Plano de Operacao: 4 chances, range de cabeca 1-100.000 e
+      // intervalo 50.000. A chance 2 invade o proprio range das cabecas, entao
+      // a cabeca 10 consome o titulo 50.010 — e 50.010 NAO pode virar cabeca
+      // de outra cartela, senao o mesmo titulo sairia em duas cartelas.
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-colisao',
+        numero: 5,
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01T00:00:00.000Z'),
+        valorCartela: new Prisma.Decimal('30.00'),
+        combos: [
+          {
+            intervalo: BigInt(50000),
+            id: 'combo-quatro',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.QUATRO_CHANCES,
+            rangeInicio: BigInt(1),
+            rangeFinal: BigInt(100000),
+            preco: new Prisma.Decimal('30.00'),
+          },
+        ],
+      });
+
+      const linha = (numero: number) => ({
+        id: `m-${numero}`,
+        numero: BigInt(numero),
+        sequenciaBolas: [1, 2, 3],
+      });
+
+      mockPrisma.matrizRange.findMany
+        // candidatos a cabeca, em ordem
+        .mockResolvedValueOnce([linha(10), linha(50010), linha(60000)])
+        // todos os titulos necessarios estao livres no banco
+        .mockResolvedValueOnce([
+          linha(10),
+          linha(50010),
+          linha(100010),
+          linha(150010),
+          linha(200010),
+          linha(60000),
+          linha(110000),
+          linha(160000),
+          linha(210000),
+        ]);
+
+      const result = await service.listarCombosDisponiveis({
+        edicaoId: 'edicao-colisao',
+        quantidadeCartelas: 4,
+        limit: 2,
+      });
+
+      const numeros = result.data.combos.map((c) =>
+        c.bilhetes.map((b) => b.numero),
+      );
+
+      // 1a cartela: cabeca 10 -> 10 + c * 50.000
+      expect(numeros[0]).toEqual(['0000010', '0050010', '0100010', '0150010']);
+      // 2a cartela: 50.010 foi PULADO (ja saiu acima), entao vem a 60.000
+      expect(numeros[1]).toEqual(['0060000', '0110000', '0160000', '0210000']);
+    });
   });
 
   // ─── confirmarPagamento ───────────────────────────────
@@ -1564,6 +1755,76 @@ describe('VendasService', () => {
           expect.objectContaining({ numero: BigInt(776531) }),
         ],
       });
+    });
+
+    it('busca os titulos selecionados na faixa deslocada pelo intervalo', async () => {
+      // Com intervalo, o título da 2ª chance fica FORA do range configurado
+      // (que guarda só as cabeças). Se a busca limitasse por
+      // [rangeInicio, rangeFinal], esses títulos sumiriam e a compra manual
+      // falharia ou entregaria menos cartelas que o contratado.
+      mockPrisma.venda.findUnique.mockResolvedValue({
+        ...vendaPendente,
+        quantidade: 1,
+        tipoCartela: TipoCartela.DUAS_CHANCES,
+        gatewayPayload: {
+          combosSelecionados: ['1540005', '1590005'],
+        },
+      });
+
+      const linhas = [
+        { id: 'matriz-1', numero: BigInt(1540005), sequenciaBolas: [1, 2, 3] },
+        { id: 'matriz-2', numero: BigInt(1590005), sequenciaBolas: [4, 5, 6] },
+      ];
+
+      const txMock = {
+        edicao: {
+          findUnique: jest.fn().mockResolvedValue({
+            combos: [
+              {
+                id: 'combo-1',
+                origemParticipacao: OrigemParticipacao.DIGITAL,
+                tipoCartela: TipoCartela.DUAS_CHANCES,
+                rangeInicio: BigInt(1540001),
+                rangeFinal: BigInt(1550000),
+                intervalo: BigInt(50000),
+                preco: null,
+              },
+            ],
+          }),
+        },
+        matrizRange: { findMany: jest.fn().mockResolvedValue(linhas) },
+        bilhete: { createMany: jest.fn().mockResolvedValue({ count: 2 }) },
+        distribuidor: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'distribuidor-1',
+            comissaoPercent: new Prisma.Decimal('20'),
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        comissaoDistribuidor: { create: jest.fn().mockResolvedValue({}) },
+        comissao: { create: jest.fn().mockResolvedValue({ id: 'comissao-1' }) },
+        vendedor: { update: jest.fn().mockResolvedValue({}) },
+        venda: {
+          update: jest.fn().mockResolvedValue({
+            ...vendaPendente,
+            status: StatusVenda.APROVADO,
+          }),
+        },
+      };
+
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
+
+      await service.confirmarPagamento('venda-1');
+
+      // A faixa consultada tem que alcançar 1.590.005 (cabeça + 1 * 50.000).
+      const filtro = txMock.matrizRange.findMany.mock.calls[0][0] as {
+        where: { numero: { gte: bigint; lte: bigint } };
+      };
+      expect(filtro.where.numero.gte).toBe(BigInt(1540001));
+      expect(filtro.where.numero.lte).toBeGreaterThanOrEqual(BigInt(1590005));
     });
   });
 
