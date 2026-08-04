@@ -141,6 +141,30 @@ describe('CreateEdicaoDto — rejeicao dos campos legados de range', () => {
     await expect(coletarErros(payloadValido)).resolves.toHaveLength(0);
   });
 
+  // O formulario do admin manda o campo sempre, com string vazia quando o
+  // usuario nao preenche. @IsOptional() so pula null/undefined, entao sem o
+  // @Transform o @Matches barrava o cadastro — 400 em quem deixou em branco.
+  it('aceita intervalo em branco, tratando como nao informado', async () => {
+    await expect(
+      coletarErros({ ...payloadValido, intervalo: '' }),
+    ).resolves.toHaveLength(0);
+  });
+
+  it('aceita intervalo preenchido', async () => {
+    await expect(
+      coletarErros({ ...payloadValido, intervalo: '50000' }),
+    ).resolves.toHaveLength(0);
+  });
+
+  it('rejeita intervalo nao numerico', async () => {
+    const erros = await coletarErros({
+      ...payloadValido,
+      intervalo: 'cinquenta mil',
+    });
+
+    expect(erros.map((e) => e.campo)).toContain('intervalo');
+  });
+
   it.each(['valorCartela', 'detalhes'])(
     'rejeita o campo legado %s',
     async (campo) => {

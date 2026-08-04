@@ -18,6 +18,15 @@ import {
 } from './edicao-input-parsers.util';
 import { CreateEdicaoPremioDto } from './create-edicao-premio.dto';
 
+/** Trata campo de formulário em branco como não informado. */
+const parseCampoOpcionalVazio = ({ value }: TransformFnParams): unknown => {
+  if (typeof value === 'string' && value.trim() === '') {
+    return undefined;
+  }
+
+  return value;
+};
+
 const parseBooleanInput = ({ value }: TransformFnParams): unknown => {
   if (typeof value === 'boolean') {
     return value;
@@ -98,6 +107,10 @@ export class CreateEdicaoDto {
     description:
       'Distância entre os títulos de uma mesma cartela multi-chance, conforme o Plano de Operação. A chance `c` recebe o título `cabeça + c * intervalo` — ex.: intervalo 50000 numa cartela de 2 chances com cabeça 1540005 gera os títulos 1540005 e 1590005. O range de cada combo delimita apenas as cabeças; as demais chances caem fora dele. Se omitido, assume 1 (títulos consecutivos).',
   })
+  // Campo de formulário vazio chega como string vazia, e @IsOptional() só pula
+  // null/undefined — sem isso o @Matches barraria o cadastro de quem não
+  // preencheu o intervalo, que é justamente o caso opcional.
+  @Transform(parseCampoOpcionalVazio)
   @IsOptional()
   @IsString({ message: 'intervalo deve ser um texto' })
   @Matches(/^\d+$/, { message: 'intervalo deve conter apenas dígitos' })
