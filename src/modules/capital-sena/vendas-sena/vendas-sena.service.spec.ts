@@ -332,19 +332,25 @@ describe('VendasSenaService', () => {
       expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
     });
 
-    it('exige data de nascimento para concluir compra Sena', async () => {
+    it('cria cliente Sena sem data de nascimento informada', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValue(null);
+      mockPrisma.cliente.create.mockResolvedValue({ id: 'cliente-novo' });
+
       await expect(
         service.buscarOuCriarCliente(
           '12345678900',
           'Cliente Sem Data',
           '(11) 99999-9999',
           undefined,
+          'sem-data@email.com',
         ),
-      ).rejects.toThrow('dataNascimento é obrigatória para concluir a compra');
+      ).resolves.toMatchObject({ id: 'cliente-novo' });
 
-      expect(mockPrisma.cliente.findUnique).not.toHaveBeenCalled();
-      expect(mockPrisma.cliente.create).not.toHaveBeenCalled();
-      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+      expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ dataNascimento: null }),
+        }),
+      );
     });
   });
 
@@ -403,29 +409,48 @@ describe('VendasSenaService', () => {
       expect(result).toMatchObject({ id: 'cliente-1' });
     });
 
-    it('exige e-mail e data de nascimento salvos para pagar por clienteId', () => {
-      const clienteBase = {
-        id: 'cliente-1',
-        cpf: '06790319107',
-        nome: 'Jair Rodrigues',
-        telefone: '(92) 99999-9999',
-      };
-
+    it('exige e-mail salvo para pagar por clienteId', () => {
       expect(() =>
         service.validarDadosClienteParaPagamento({
-          ...clienteBase,
+          id: 'cliente-1',
+          cpf: '06790319107',
+          nome: 'Jair Rodrigues',
+          telefone: '(92) 99999-9999',
           email: null,
           dataNascimento: new Date('1991-05-01T00:00:00.000Z'),
         }),
       ).toThrow('Cliente sem e-mail cadastrado');
+    });
 
-      expect(() =>
+    it('permite pagar por clienteId sem data de nascimento cadastrada', () => {
+      expect(
         service.validarDadosClienteParaPagamento({
-          ...clienteBase,
+          id: 'cliente-1',
+          cpf: '067.903.191-07',
+          nome: 'Jair Rodrigues',
+          telefone: '(92) 99999-9999',
           email: 'jair@email.com',
           dataNascimento: null,
         }),
-      ).toThrow('Cliente sem data de nascimento cadastrada');
+      ).toMatchObject({ id: 'cliente-1', cpf: '06790319107' });
+    });
+
+    it('ainda bloqueia menor de idade quando a data está cadastrada', () => {
+      const hoje = new Date();
+      const menor = new Date(
+        Date.UTC(hoje.getUTCFullYear() - 15, hoje.getUTCMonth(), 1),
+      );
+
+      expect(() =>
+        service.validarDadosClienteParaPagamento({
+          id: 'cliente-1',
+          cpf: '06790319107',
+          nome: 'Jair Rodrigues',
+          telefone: '(92) 99999-9999',
+          email: 'jair@email.com',
+          dataNascimento: menor,
+        }),
+      ).toThrow('Produto proibido para menores de 18 anos');
     });
   });
 });

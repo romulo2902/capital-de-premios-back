@@ -747,13 +747,7 @@ export class VendasSenaService {
   private async buscarOuCriarClientePorDto(
     dto: CreateVendaSenaDto,
   ): Promise<ClienteSenaCompra> {
-    if (
-      !dto.cpf ||
-      !dto.nome ||
-      !dto.telefone ||
-      !dto.email ||
-      !dto.dataNascimento
-    ) {
+    if (!dto.cpf || !dto.nome || !dto.email) {
       throw new BadRequestException(
         'Informe clienteId ou os dados completos do cliente para concluir a compra',
       );
@@ -762,7 +756,7 @@ export class VendasSenaService {
     return this.buscarOuCriarCliente(
       dto.cpf.replace(/\D/g, ''),
       dto.nome,
-      dto.telefone,
+      dto.telefone ?? '',
       dto.dataNascimento,
       dto.email,
       dto.vendedorId,
@@ -824,13 +818,9 @@ export class VendasSenaService {
       );
     }
 
-    if (!cliente.dataNascimento) {
-      throw new BadRequestException(
-        'Cliente sem data de nascimento cadastrada. Atualize meus-dados antes de concluir a compra',
-      );
+    if (cliente.dataNascimento) {
+      validarMaioridade(cliente.dataNascimento);
     }
-
-    validarMaioridade(cliente.dataNascimento);
 
     return {
       id: cliente.id,
@@ -850,13 +840,9 @@ export class VendasSenaService {
     vendedorId?: string,
     distribuidorId?: string,
   ): Promise<ClienteSenaCompra> {
-    if (!dataNascimentoInput) {
-      throw new BadRequestException(
-        'dataNascimento é obrigatória para concluir a compra',
-      );
-    }
-
-    const dataNascimento = parseEValidarDataNascimento(dataNascimentoInput);
+    const dataNascimento = dataNascimentoInput
+      ? parseEValidarDataNascimento(dataNascimentoInput)
+      : null;
     const relacionamentoMaisRecente =
       await this.resolverRelacionamentoMaisRecenteDoCliente(
         vendedorId,
@@ -865,7 +851,7 @@ export class VendasSenaService {
     const existente = await this.prisma.cliente.findUnique({ where: { cpf } });
 
     if (existente) {
-      if (!existente.dataNascimento) {
+      if (!existente.dataNascimento && dataNascimento) {
         return this.prisma.cliente.update({
           where: { cpf },
           data: {

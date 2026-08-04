@@ -147,9 +147,9 @@ export class CreateVendaSenaDto {
   @ApiPropertyOptional({
     example: '(11) 99999-9999',
     description:
-      'Telefone do cliente. Obrigatório apenas quando clienteId não for informado.',
+      'Telefone do cliente. Opcional: quando não informado, o cliente é criado sem telefone.',
   })
-  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
+  @IsOptional()
   @IsString({ message: 'telefone deve ser um texto' })
   telefone?: string;
 
@@ -165,10 +165,10 @@ export class CreateVendaSenaDto {
   @ApiPropertyOptional({
     example: '1985-04-11',
     description:
-      'Data de nascimento do cliente no formato YYYY-MM-DD. Obrigatória para validar maioridade quando clienteId não for informado.',
+      'Data de nascimento do cliente no formato YYYY-MM-DD. Opcional: quando informada, valida maioridade e é salva no cadastro.',
   })
   @Transform(emptyStringToUndefined)
-  @ValidateIf((dto: CreateVendaSenaDto) => !dto.clienteId)
+  @IsOptional()
   @IsString({ message: 'dataNascimento deve ser um texto' })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'dataNascimento deve estar no formato YYYY-MM-DD',

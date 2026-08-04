@@ -889,7 +889,7 @@ humanizada, e a venda fica marcada como RECUSADO para auditoria interna.
   @ApiResponse({
     status: 400,
     description:
-      'Edição inativa, cartelas/combo inválidos ou cliente sem data de nascimento.',
+      'Edição inativa, cartelas/combo inválidos ou cliente menor de 18 anos.',
   })
   @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
   @ApiResponse({
