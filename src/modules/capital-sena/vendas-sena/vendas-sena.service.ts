@@ -344,10 +344,14 @@ export class VendasSenaService {
       include: VENDA_SENA_INCLUDE,
     });
 
+    const vendaComDistribuidor = await this.anexarDistribuidorNaVendaSena(
+      this.serializarVenda(vendaCompleta!),
+    );
+
     return {
       message: 'Venda Sena criada com sucesso',
       data: {
-        ...this.serializarVenda(vendaCompleta!),
+        ...vendaComDistribuidor,
         pagamento: dadosPagamento,
       },
     };
@@ -437,8 +441,12 @@ export class VendasSenaService {
       this.prisma.vendaSena.count({ where }),
     ]);
 
-    return buildPaginatedResponse(
+    const vendasComDistribuidor = await this.anexarDistribuidorNasVendasSena(
       data.map((v) => this.serializarVenda(v)),
+    );
+
+    return buildPaginatedResponse(
+      vendasComDistribuidor,
       total,
       pagination.page,
       pagination.limit,
@@ -457,7 +465,7 @@ export class VendasSenaService {
       include: VENDA_SENA_INCLUDE,
     });
     if (!venda) throw new NotFoundException('Venda Sena não encontrada');
-    return this.serializarVenda(venda);
+    return this.anexarDistribuidorNaVendaSena(this.serializarVenda(venda));
   }
 
   // ─── FIND BY CLIENTE CPF ──────────────────────────────
@@ -483,8 +491,12 @@ export class VendasSenaService {
       this.prisma.vendaSena.count({ where: { clienteId: cliente.id } }),
     ]);
 
-    return buildPaginatedResponse(
+    const vendasComDistribuidor = await this.anexarDistribuidorNasVendasSena(
       data.map((v) => this.serializarVenda(v)),
+    );
+
+    return buildPaginatedResponse(
+      vendasComDistribuidor,
       total,
       pagination.page,
       pagination.limit,
@@ -1003,6 +1015,113 @@ export class VendasSenaService {
       where.cliente = { cpf: cpfLimpo };
     }
     return where;
+  }
+
+  // ─── DISTRIBUIDOR ──────────────────────────────────────
+  //
+  // VendaSena guarda apenas o escalar distribuidorId — não existe relação
+  // `distribuidor` no schema, então o include nunca traz esse dado. Os helpers
+  // abaixo buscam o distribuidor à parte e o anexam na resposta, do mesmo modo
+  // que o módulo de vendas do Capital Prêmios.
+
+  private async anexarDistribuidorNaVendaSena<T>(venda: T): Promise<T> {
+    if (!venda || typeof venda !== 'object') {
+      return venda;
+    }
+
+    const registro = venda as Record<string, unknown>;
+
+    if (Object.prototype.hasOwnProperty.call(registro, 'distribuidor')) {
+      return venda;
+    }
+
+    const distribuidorId =
+      typeof registro.distribuidorId === 'string'
+        ? registro.distribuidorId
+        : null;
+
+    if (!distribuidorId) {
+      return {
+        ...registro,
+        distribuidor: null,
+      } as T;
+    }
+
+    const distribuidor = await this.prisma.distribuidor.findUnique({
+      where: { id: distribuidorId },
+      select: {
+        id: true,
+        codigo: true,
+        nome: true,
+        email: true,
+        telefone: true,
+      },
+    });
+
+    return {
+      ...registro,
+      distribuidor,
+    } as T;
+  }
+
+  private async anexarDistribuidorNasVendasSena<T>(vendas: T[]): Promise<T[]> {
+    const ids = Array.from(
+      new Set(
+        vendas
+          .map((venda) => {
+            if (!venda || typeof venda !== 'object') {
+              return null;
+            }
+
+            const registro = venda as Record<string, unknown>;
+            return typeof registro.distribuidorId === 'string' &&
+              !Object.prototype.hasOwnProperty.call(registro, 'distribuidor')
+              ? registro.distribuidorId
+              : null;
+          })
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+
+    const distribuidores = ids.length
+      ? await this.prisma.distribuidor.findMany({
+          where: { id: { in: ids } },
+          select: {
+            id: true,
+            codigo: true,
+            nome: true,
+            email: true,
+            telefone: true,
+          },
+        })
+      : [];
+
+    const distribuidoresPorId = new Map(
+      distribuidores.map((distribuidor) => [distribuidor.id, distribuidor]),
+    );
+
+    return vendas.map((venda) => {
+      if (!venda || typeof venda !== 'object') {
+        return venda;
+      }
+
+      const registro = venda as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(registro, 'distribuidor')) {
+        return venda;
+      }
+
+      const distribuidorId =
+        typeof registro.distribuidorId === 'string'
+          ? registro.distribuidorId
+          : null;
+
+      return {
+        ...registro,
+        distribuidor: distribuidorId
+          ? (distribuidoresPorId.get(distribuidorId) ?? null)
+          : null,
+      } as T;
+    });
   }
 
   private serializarVenda(venda: {
