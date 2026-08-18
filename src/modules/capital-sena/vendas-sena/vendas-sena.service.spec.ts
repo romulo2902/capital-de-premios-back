@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import { ModoSelecaoSena } from '@prisma/client';
+import { ModoSelecaoSena, Prisma, StatusVendaSena } from '@prisma/client';
 import { VendasSenaService } from './vendas-sena.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
@@ -76,7 +76,11 @@ describe('VendasSenaService', () => {
     cartelaSena: { create: jest.fn(), deleteMany: jest.fn() },
     cliente: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     vendedor: { findUnique: jest.fn(), update: jest.fn() },
-    distribuidor: { findUnique: jest.fn(), update: jest.fn() },
+    distribuidor: {
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
     usuario: { findUnique: jest.fn() },
     comissaoSena: { create: jest.fn(), delete: jest.fn() },
     comissaoDistribuidorSena: { create: jest.fn() },
@@ -491,6 +495,93 @@ describe('VendasSenaService', () => {
           dataNascimento: menor,
         }),
       ).toThrow('Produto proibido para menores de 18 anos');
+    });
+  });
+  // ─── distribuidor na resposta ────────────────────────────
+  //
+  // VendaSena não tem relação `distribuidor` no Prisma, só o escalar
+  // distribuidorId. Sem o anexo manual a chave some da resposta e o painel
+  // admin fica sem o distribuidor da venda.
+
+  describe('distribuidor na resposta', () => {
+    // ServicePrivado colapsa para `never` (membros privados em conflito);
+    // os métodos públicos são chamados pelo tipo real do service.
+    const servicePublico = () => service as unknown as VendasSenaService;
+
+    const DISTRIBUIDOR = {
+      id: 'dist-1',
+      codigo: 1,
+      nome: 'Distribuidora Norte',
+      email: 'distribuidor@capitalpremios.com',
+      telefone: '(11) 99000-0001',
+    };
+
+    const vendaBase = (distribuidorId: string | null) => ({
+      id: 'venda-sena-1',
+      edicaoSenaId: 'edicao-1',
+      clienteId: 'cliente-1',
+      vendedorId: 'vendedor-1',
+      distribuidorId,
+      comboSenaId: null,
+      quantidade: 1,
+      total: new Prisma.Decimal(5),
+      status: StatusVendaSena.APROVADO,
+      tipoPagamento: 'PIX',
+      gatewayId: null,
+      createdAt: new Date(),
+      edicaoSena: null,
+      cliente: null,
+      vendedor: null,
+      cartelas: [],
+    });
+
+    it('anexa o distribuidor no findOne', async () => {
+      mockPrisma.vendaSena.findUnique.mockResolvedValue(vendaBase('dist-1'));
+      mockPrisma.distribuidor.findUnique.mockResolvedValue(DISTRIBUIDOR);
+
+      const venda = (await servicePublico().findOne('venda-sena-1')) as Record<
+        string,
+        unknown
+      >;
+
+      expect(venda.distribuidor).toEqual(DISTRIBUIDOR);
+      expect(mockPrisma.distribuidor.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'dist-1' } }),
+      );
+    });
+
+    it('retorna distribuidor null quando a venda não tem vínculo', async () => {
+      mockPrisma.vendaSena.findUnique.mockResolvedValue(vendaBase(null));
+
+      const venda = (await servicePublico().findOne('venda-sena-1')) as Record<
+        string,
+        unknown
+      >;
+
+      expect('distribuidor' in venda).toBe(true);
+      expect(venda.distribuidor).toBeNull();
+      expect(mockPrisma.distribuidor.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('anexa o distribuidor no findAll sem consultar o mesmo id duas vezes', async () => {
+      mockPrisma.vendaSena.findMany.mockResolvedValue([
+        vendaBase('dist-1'),
+        { ...vendaBase('dist-1'), id: 'venda-sena-2' },
+        { ...vendaBase(null), id: 'venda-sena-3' },
+      ]);
+      mockPrisma.vendaSena.count.mockResolvedValue(3);
+      mockPrisma.distribuidor.findMany.mockResolvedValue([DISTRIBUIDOR]);
+
+      const resposta = (await servicePublico().findAll({})) as unknown as {
+        data: Record<string, unknown>[];
+      };
+
+      expect(resposta.data[0].distribuidor).toEqual(DISTRIBUIDOR);
+      expect(resposta.data[1].distribuidor).toEqual(DISTRIBUIDOR);
+      expect(resposta.data[2].distribuidor).toBeNull();
+      expect(mockPrisma.distribuidor.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ['dist-1'] } } }),
+      );
     });
   });
 });
