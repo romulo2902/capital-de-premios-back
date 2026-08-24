@@ -2018,4 +2018,86 @@ describe('VendasService', () => {
       ).not.toThrow();
     });
   });
+  // ─── CHARACTERIZATION: derivacao do vinculo cliente ──────────────────
+  // Trava o comportamento ATUAL de resolverRelacionamentoMaisRecenteDoCliente
+  // antes de centralizar a regra num helper unico. O caminho de vendas hoje
+  // NAO valida coerencia entre vendedor e distribuidor informados, enquanto
+  // ClientesService lanca ConflictException no mesmo cenario.
+  describe('buscarClientePorIdParaCompra — vinculo do cliente (legado)', () => {
+    const clienteSelecionado = {
+      id: 'cliente-1',
+      cpf: '12345678901',
+      nome: 'Fulano',
+      telefone: '64999999999',
+      email: 'fulano@email.com',
+      dataNascimento: null,
+    };
+
+    beforeEach(() => {
+      mockPrisma.cliente.findUnique.mockResolvedValue(clienteSelecionado);
+      mockPrisma.cliente.update.mockResolvedValue(clienteSelecionado);
+    });
+
+    it('deriva o distribuidor a partir do vendedor quando nao informado', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        distribuidorId: 'distribuidor-do-vendedor',
+      });
+
+      await service.buscarClientePorIdParaCompra('cliente-1', 'vendedor-1');
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'cliente-1' },
+          data: {
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-do-vendedor',
+          },
+        }),
+      );
+    });
+
+    it('LEGADO: aceita distribuidor divergente do vendedor sem validar', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        distribuidorId: 'distribuidor-real',
+      });
+
+      await service.buscarClientePorIdParaCompra(
+        'cliente-1',
+        'vendedor-1',
+        'distribuidor-divergente',
+      );
+
+      // Comportamento atual: o informado vence, sem ConflictException.
+      // Apos a unificacao do helper este teste deve passar a esperar
+      // ConflictException — a mudanca fica explicita no diff.
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-divergente',
+          },
+        }),
+      );
+    });
+
+    it('mantem o vinculo anterior quando nao ha vendedor nem distribuidor', async () => {
+      await service.buscarClientePorIdParaCompra('cliente-1');
+
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('vincula apenas o distribuidor quando nao ha vendedor', async () => {
+      await service.buscarClientePorIdParaCompra(
+        'cliente-1',
+        undefined,
+        'distribuidor-1',
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { vendedorId: null, distribuidorId: 'distribuidor-1' },
+        }),
+      );
+    });
+  });
 });

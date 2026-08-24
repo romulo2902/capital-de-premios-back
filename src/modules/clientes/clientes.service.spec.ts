@@ -383,4 +383,104 @@ describe('ClientesService', () => {
       }),
     );
   });
+  // ─── CHARACTERIZATION: derivacao do vinculo cliente ──────────────────
+  // Contraparte dos testes em VendasService. Aqui a regra JA e estrita:
+  // par divergente e rejeitado. Este e o comportamento que deve prevalecer
+  // quando os dois caminhos passarem pelo helper unico.
+  describe('create — vinculo do cliente (ADMIN)', () => {
+    const admin = {
+      id: 'usuario-admin',
+      email: 'admin@test.com',
+      cpf: '12345678900',
+      perfil: 'ADMIN',
+      status: 'ATIVO',
+    };
+
+    const dtoBase = {
+      cpf: '200.074.694-20',
+      nome: 'Cliente Teste',
+      telefone: '(84) 99999-9999',
+      dataNascimento: '1990-01-01',
+    };
+
+    it('deriva o distribuidor a partir do vendedor quando nao informado', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+      mockPrisma.vendedor.findUnique.mockResolvedValueOnce({
+        id: 'vendedor-1',
+        distribuidorId: 'distribuidor-do-vendedor',
+      });
+      mockPrisma.cliente.create.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.create({ ...dtoBase, vendedorId: 'vendedor-1' }, admin);
+
+      expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-do-vendedor',
+          }),
+        }),
+      );
+    });
+
+    it('ESTRITO: rejeita distribuidor divergente do vendedor', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+      mockPrisma.vendedor.findUnique.mockResolvedValueOnce({
+        id: 'vendedor-1',
+        distribuidorId: 'distribuidor-real',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValueOnce({
+        id: 'distribuidor-divergente',
+      });
+
+      await expect(
+        service.create(
+          {
+            ...dtoBase,
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-divergente',
+          },
+          admin,
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('permite cliente orfao quando nenhum vinculo e informado', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+      mockPrisma.cliente.create.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.create({ ...dtoBase }, admin);
+
+      expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: null,
+            distribuidorId: null,
+          }),
+        }),
+      );
+    });
+
+    it('permite vinculo apenas com distribuidor, sem vendedor', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+      mockPrisma.distribuidor.findUnique.mockResolvedValueOnce({
+        id: 'distribuidor-1',
+      });
+      mockPrisma.cliente.create.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.create(
+        { ...dtoBase, distribuidorId: 'distribuidor-1' },
+        admin,
+      );
+
+      expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: null,
+            distribuidorId: 'distribuidor-1',
+          }),
+        }),
+      );
+    });
+  });
 });
