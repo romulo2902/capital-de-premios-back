@@ -336,7 +336,10 @@ describe('ClientesService', () => {
     );
   });
 
-  it('update should reject vendedor vinculado a outro distribuidor', async () => {
+  it('update should respeitar o distribuidor informado mesmo divergindo do vendedor', async () => {
+    // Antes esta combinacao era recusada com ConflictException. A regra mudou:
+    // o valor explicito vence, e a coerencia passou a ser garantida no
+    // controller (so ADMIN informa distribuidorId livremente).
     mockPrisma.cliente.findFirst.mockResolvedValueOnce({
       id: 'cliente-3',
       nome: 'Cliente Teste 3',
@@ -349,16 +352,25 @@ describe('ClientesService', () => {
       distribuidorId: 'distribuidor-correto',
     });
     mockPrisma.distribuidor.findUnique.mockResolvedValue({
-      id: 'distribuidor-incorreto',
-      nome: 'Distribuidor Incorreto',
+      id: 'distribuidor-informado',
+      nome: 'Distribuidor Informado',
+    });
+    mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-3' });
+
+    await service.update('cliente-3', {
+      vendedorId: 'vendedor-3',
+      distribuidorId: 'distribuidor-informado',
     });
 
-    await expect(
-      service.update('cliente-3', {
-        vendedorId: 'vendedor-3',
-        distribuidorId: 'distribuidor-incorreto',
+    expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'cliente-3' },
+        data: expect.objectContaining({
+          vendedorId: 'vendedor-3',
+          distribuidorId: 'distribuidor-informado',
+        }),
       }),
-    ).rejects.toThrow(ConflictException);
+    );
   });
 
   it('findOne should nao retornar cliente fora do distribuidor autenticado', async () => {
@@ -423,26 +435,34 @@ describe('ClientesService', () => {
       );
     });
 
-    it('ESTRITO: rejeita distribuidor divergente do vendedor', async () => {
+    it('EXPLICITO VENCE: usa o distribuidor informado mesmo divergindo do vendedor', async () => {
       mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
       mockPrisma.vendedor.findUnique.mockResolvedValueOnce({
         id: 'vendedor-1',
         distribuidorId: 'distribuidor-real',
       });
       mockPrisma.distribuidor.findUnique.mockResolvedValueOnce({
-        id: 'distribuidor-divergente',
+        id: 'distribuidor-informado',
       });
+      mockPrisma.cliente.create.mockResolvedValue({ id: 'cliente-1' });
 
-      await expect(
-        service.create(
-          {
-            ...dtoBase,
+      await service.create(
+        {
+          ...dtoBase,
+          vendedorId: 'vendedor-1',
+          distribuidorId: 'distribuidor-informado',
+        },
+        admin,
+      );
+
+      expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
             vendedorId: 'vendedor-1',
-            distribuidorId: 'distribuidor-divergente',
-          },
-          admin,
-        ),
-      ).rejects.toThrow(ConflictException);
+            distribuidorId: 'distribuidor-informado',
+          }),
+        }),
+      );
     });
 
     it('permite cliente orfao quando nenhum vinculo e informado', async () => {

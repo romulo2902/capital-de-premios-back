@@ -2056,7 +2056,7 @@ describe('VendasService', () => {
       );
     });
 
-    it('LEGADO: aceita distribuidor divergente do vendedor sem validar', async () => {
+    it('EXPLICITO VENCE: usa o distribuidor informado mesmo divergindo do vendedor', async () => {
       mockPrisma.vendedor.findUnique.mockResolvedValue({
         distribuidorId: 'distribuidor-real',
       });
@@ -2064,20 +2064,27 @@ describe('VendasService', () => {
       await service.buscarClientePorIdParaCompra(
         'cliente-1',
         'vendedor-1',
-        'distribuidor-divergente',
+        'distribuidor-informado',
       );
 
-      // Comportamento atual: o informado vence, sem ConflictException.
-      // Apos a unificacao do helper este teste deve passar a esperar
-      // ConflictException — a mudanca fica explicita no diff.
       expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: {
             vendedorId: 'vendedor-1',
-            distribuidorId: 'distribuidor-divergente',
+            distribuidorId: 'distribuidor-informado',
           },
         }),
       );
+    });
+
+    it('rejeita vendedor inexistente antes de gravar o vinculo', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.buscarClientePorIdParaCompra('cliente-1', 'vendedor-fantasma'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
     });
 
     it('mantem o vinculo anterior quando nao ha vendedor nem distribuidor', async () => {

@@ -52,6 +52,7 @@ import {
   parseEValidarDataNascimento,
   validarMaioridade,
 } from '../../common/utils/data-nascimento.util';
+import { resolverVinculoCliente } from '../../common/utils/vinculo-cliente.util';
 import { EmailService } from '../../common/email/email.service';
 
 
@@ -1879,26 +1880,33 @@ export class VendasService {
     vendedorId?: string,
     distribuidorId?: string,
   ): Promise<RelacionamentoClienteMaisRecente> {
+    let distribuidorDoVendedor: string | null = null;
+
     if (vendedorId) {
       const vendedor = await this.prisma.vendedor.findUnique({
         where: { id: vendedorId },
         select: { distribuidorId: true },
       });
 
-      return {
+      // A validação equivalente já existe em `create`, mas só depois de o
+      // cliente ser resolvido. Antecipar aqui evita gravar o vínculo com um
+      // vendedor inexistente antes de a venda falhar.
+      if (!vendedor) {
+        throw new NotFoundException('Vendedor não encontrado');
+      }
+
+      distribuidorDoVendedor = vendedor.distribuidorId;
+    }
+
+    // `null` = nada informado; neste contexto significa preservar o vínculo
+    // atual do cliente, então devolvemos um objeto vazio.
+    return (
+      resolverVinculoCliente({
         vendedorId,
-        distribuidorId: distribuidorId ?? vendedor?.distribuidorId ?? null,
-      };
-    }
-
-    if (distribuidorId) {
-      return {
-        vendedorId: null,
         distribuidorId,
-      };
-    }
-
-    return {};
+        distribuidorDoVendedor,
+      }) ?? {}
+    );
   }
 
   private validarJanelaDeVenda(

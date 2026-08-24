@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { resolverVinculoCliente } from '../../common/utils/vinculo-cliente.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
@@ -195,12 +196,8 @@ export class ClientesService {
       if (!vendedor) {
         throw new NotFoundException('Vendedor não encontrado');
       }
-
-      if (distribuidorId && vendedor.distribuidorId !== distribuidorId) {
-        throw new ConflictException(
-          'O vendedor informado não pertence ao distribuidor informado',
-        );
-      }
+      // Não valida coerência com o distribuidor informado: o valor explícito
+      // vence (ver resolverVinculoCliente).
     }
 
     if (distribuidorId) {
@@ -242,16 +239,10 @@ export class ClientesService {
       }
     }
 
-    if (
-      vendedor &&
-      distribuidorId &&
-      vendedor.distribuidorId !== distribuidorId
-    ) {
-      throw new ConflictException(
-        'O vendedor informado não pertence ao distribuidor informado',
-      );
-    }
-
+    // Divergência entre vendedor e distribuidor informados não é erro: o valor
+    // explícito vence (ver resolverVinculoCliente). Para VENDEDOR e
+    // DISTRIBUIDOR isso é irrelevante — os guards abaixo já obrigam o vínculo
+    // a ser o do próprio usuário, então só ADMIN chega a informar um par livre.
     if (user.perfil === 'VENDEDOR') {
       if (!user.vendedorId) {
         throw new ForbiddenException(
@@ -311,10 +302,15 @@ export class ClientesService {
       };
     }
 
-    return {
-      vendedorId: vendedor?.id ?? null,
-      distribuidorId: distribuidorId ?? vendedor?.distribuidorId ?? null,
-    };
+    // ADMIN: vínculo livre. `null` significa nenhum vínculo informado, que na
+    // criação equivale a um cliente órfão.
+    return (
+      resolverVinculoCliente({
+        vendedorId,
+        distribuidorId,
+        distribuidorDoVendedor: vendedor?.distribuidorId,
+      }) ?? { vendedorId: null, distribuidorId: null }
+    );
   }
 
   async create(dto: CreateClienteDto, user: RequestUser) {
@@ -550,14 +546,16 @@ export class ClientesService {
     }
 
     if (vendedorId !== undefined || distribuidorId !== undefined) {
+      // Campo ausente no DTO (`undefined`) preserva o valor atual; campo
+      // presente — inclusive `null` — sobrescreve.
       const finalVendedorId =
         vendedorId !== undefined ? vendedorId : clienteAtual.vendedorId;
-      const finalDistribuidorIdBase =
+      const finalDistribuidorId =
         distribuidorId !== undefined
           ? distribuidorId
           : clienteAtual.distribuidorId;
 
-      let finalDistribuidorId = finalDistribuidorIdBase;
+      let distribuidorDoVendedor: string | null = null;
 
       if (finalVendedorId) {
         const vendedor = await this.prisma.vendedor.findUnique({
@@ -569,20 +567,17 @@ export class ClientesService {
           throw new NotFoundException('Vendedor não encontrado');
         }
 
-        if (
-          finalDistribuidorId &&
-          vendedor.distribuidorId !== finalDistribuidorId
-        ) {
-          throw new ConflictException(
-            'O vendedor informado não pertence ao distribuidor informado',
-          );
-        }
-
-        finalDistribuidorId = vendedor.distribuidorId;
+        distribuidorDoVendedor = vendedor.distribuidorId;
       }
 
-      data.vendedorId = finalVendedorId ?? null;
-      data.distribuidorId = finalDistribuidorId ?? null;
+      const vinculo = resolverVinculoCliente({
+        vendedorId: finalVendedorId,
+        distribuidorId: finalDistribuidorId,
+        distribuidorDoVendedor,
+      });
+
+      data.vendedorId = vinculo?.vendedorId ?? null;
+      data.distribuidorId = vinculo?.distribuidorId ?? null;
     }
 
     return this.prisma.cliente.update({
