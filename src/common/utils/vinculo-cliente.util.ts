@@ -1,7 +1,4 @@
-import {
-  ConflictException,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { InternalServerErrorException } from '@nestjs/common';
 
 /**
  * Vínculo comercial de um Cliente: o vendedor que o atendeu e o distribuidor
@@ -35,9 +32,13 @@ export interface EntradaVinculoCliente {
 /**
  * Decide o vínculo final de um cliente a partir do que foi informado.
  *
- * Regra: quando há vendedor, o distribuidor é **sempre** o do vendedor. Um
- * `distribuidorId` informado só é aceito se coincidir — divergência é erro, não
- * preferência do chamador.
+ * Regra: **o valor explícito vence**. Um `distribuidorId` informado é sempre
+ * respeitado, mesmo quando difere do distribuidor do vendedor — a derivação
+ * serve apenas para preencher o campo quando ele chega vazio.
+ *
+ * A coerência entre vendedor e distribuidor é responsabilidade de quem chama:
+ * os controllers só permitem informar `distribuidorId` explicitamente para
+ * ADMIN; para VENDEDOR e DISTRIBUIDOR o vínculo vem do token.
  *
  * Retorna `null` quando nada foi informado. Cabe ao chamador decidir o que isso
  * significa no seu contexto: preservar o vínculo atual (atualização) ou gravar
@@ -52,7 +53,10 @@ export function resolverVinculoCliente({
   const distribuidor = normalizarId(distribuidorId);
 
   if (vendedor) {
-    if (!distribuidorDoVendedor) {
+    const distribuidorFinal =
+      distribuidor ?? normalizarId(distribuidorDoVendedor);
+
+    if (!distribuidorFinal) {
       // Só acontece se o vendedor não existir ou se a FK NOT NULL for violada.
       // Devolver `{ vendedor, null }` gravaria o estado incoerente que a CHECK
       // constraint recusa — melhor falhar aqui, com contexto.
@@ -61,13 +65,7 @@ export function resolverVinculoCliente({
       );
     }
 
-    if (distribuidor && distribuidor !== distribuidorDoVendedor) {
-      throw new ConflictException(
-        'O vendedor informado não pertence ao distribuidor informado',
-      );
-    }
-
-    return { vendedorId: vendedor, distribuidorId: distribuidorDoVendedor };
+    return { vendedorId: vendedor, distribuidorId: distribuidorFinal };
   }
 
   if (distribuidor) {

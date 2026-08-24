@@ -1,7 +1,4 @@
-import {
-  ConflictException,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { InternalServerErrorException } from '@nestjs/common';
 import { resolverVinculoCliente } from './vinculo-cliente.util';
 
 describe('resolverVinculoCliente', () => {
@@ -37,14 +34,33 @@ describe('resolverVinculoCliente', () => {
       ).toEqual({ vendedorId: 'vendedor-1', distribuidorId: DIST });
     });
 
-    it('vendedor e distribuidor divergentes → ConflictException', () => {
-      expect(() =>
+    it('vendedor e distribuidor divergentes → o informado vence', () => {
+      // Decisao de projeto: valor explicito na requisicao e autoritativo.
+      // A coerencia e garantida no controller, que so deixa ADMIN informar
+      // distribuidorId — VENDEDOR e DISTRIBUIDOR herdam do token.
+      expect(
         resolverVinculoCliente({
           vendedorId: 'vendedor-1',
           distribuidorId: 'outro-distribuidor',
           distribuidorDoVendedor: DIST,
         }),
-      ).toThrow(ConflictException);
+      ).toEqual({
+        vendedorId: 'vendedor-1',
+        distribuidorId: 'outro-distribuidor',
+      });
+    });
+
+    it('vendedor com distribuidor informado e sem derivacao → usa o informado', () => {
+      expect(
+        resolverVinculoCliente({
+          vendedorId: 'vendedor-1',
+          distribuidorId: 'distribuidor-1',
+          distribuidorDoVendedor: null,
+        }),
+      ).toEqual({
+        vendedorId: 'vendedor-1',
+        distribuidorId: 'distribuidor-1',
+      });
     });
 
     it('somente distribuidor → vincula sem vendedor', () => {
@@ -96,7 +112,7 @@ describe('resolverVinculoCliente', () => {
       ).toEqual({ vendedorId: 'vendedor-1', distribuidorId: DIST });
     });
 
-    it('distribuidor vazio nao conta como divergencia', () => {
+    it('distribuidor vazio cai na derivacao, nao sobrescreve com vazio', () => {
       expect(
         resolverVinculoCliente({
           vendedorId: 'vendedor-1',
@@ -121,6 +137,11 @@ describe('resolverVinculoCliente', () => {
       {
         vendedorId: 'vendedor-1',
         distribuidorId: DIST,
+        distribuidorDoVendedor: DIST,
+      },
+      {
+        vendedorId: 'vendedor-1',
+        distribuidorId: 'outro-distribuidor',
         distribuidorDoVendedor: DIST,
       },
     ];
