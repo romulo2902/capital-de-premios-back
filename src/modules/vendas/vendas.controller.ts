@@ -56,10 +56,15 @@ export class VendasController {
       'Criar venda (ADMIN manual sem gateway; DISTRIBUIDOR/VENDEDOR com pagamento)',
   })
   create(@Body() dto: CreateVendaDto, @CurrentUser() user: RequestUser) {
+    // O vínculo comercial vem do token, nunca do corpo. Sem limpar o campo
+    // oposto, um VENDEDOR poderia informar `distribuidorId` de outra rede e
+    // desviar a comissão do distribuidor para ela. Só ADMIN informa livremente.
     if (user.perfil === 'VENDEDOR' && user.vendedorId) {
       dto.vendedorId = user.vendedorId;
+      delete dto.distribuidorId;
     } else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
       dto.distribuidorId = user.distribuidorId;
+      delete dto.vendedorId;
     }
     return this.vendasService.create(dto, user);
   }
@@ -102,11 +107,13 @@ export class VendasController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
-  findAll(
-    @Query() filtros: FiltroVendasDto,
-    @CurrentUser() user: RequestUser,
-  ) {
-    return this.vendasService.findAll(filtros.page, filtros.limit, filtros, user);
+  findAll(@Query() filtros: FiltroVendasDto, @CurrentUser() user: RequestUser) {
+    return this.vendasService.findAll(
+      filtros.page,
+      filtros.limit,
+      filtros,
+      user,
+    );
   }
 
   @Get('cliente/:cpf')

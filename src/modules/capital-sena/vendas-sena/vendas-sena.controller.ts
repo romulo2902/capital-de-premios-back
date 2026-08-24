@@ -39,10 +39,15 @@ export class VendasSenaController {
       'Criar venda Sena — recebe `numeros` do frontend com 6 números + bola extra (ADMIN=aprova direto, DISTRIBUIDOR/VENDEDOR=gateway)',
   })
   create(@Body() dto: CreateVendaSenaDto, @CurrentUser() user: RequestUser) {
-    if (user.perfil === 'VENDEDOR' && user.vendedorId)
+    // Ver VendasController.create: o vínculo comercial vem do token, nunca do
+    // corpo. Só ADMIN informa vendedorId/distribuidorId livremente.
+    if (user.perfil === 'VENDEDOR' && user.vendedorId) {
       dto.vendedorId = user.vendedorId;
-    else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId)
+      delete dto.distribuidorId;
+    } else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
       dto.distribuidorId = user.distribuidorId;
+      delete dto.vendedorId;
+    }
     return this.vendasSenaService.create(dto, user);
   }
 
