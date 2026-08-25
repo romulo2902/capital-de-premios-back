@@ -36,6 +36,21 @@ WHERE c."vendedorId" = v.id
 -- Não valida que V e D concordem: por decisão de projeto o valor explícito
 -- vence (ver resolverVinculoCliente). Isso é invariante entre tabelas e
 -- exigiria trigger; a coerência é garantida nos controllers.
+--
+-- LIMITAÇÃO CONHECIDA — apagar um Distribuidor pode falhar por causa desta
+-- constraint. `Cliente_distribuidorId_fkey` é `ON DELETE SET NULL`, então o
+-- DELETE tenta zerar `Cliente.distribuidorId`; num cliente que tem vendedor
+-- isso produz o par (vendedor, null) e o CHECK aborta a operação inteira.
+-- O erro cita `Cliente_vinculo_coerente` em vez do vínculo que bloqueia.
+--
+-- Só acontece com o par cruzado (vendedor da rede A + distribuidor B), que a
+-- regra do valor explícito permite: fora dele, a FK `Vendedor_distribuidorId_fkey`
+-- obriga a remover os vendedores antes, e isso já zera `Cliente.vendedorId`.
+--
+-- Nenhum caminho da API é afetado: `DistribuidoresService.remove` é soft
+-- delete (`status: INATIVO`). Vale para limpeza manual (psql/Prisma Studio),
+-- scripts de dados e para quem for implementar hard delete. Saída: limpar
+-- `Cliente.vendedorId` desses clientes antes de apagar o distribuidor.
 ALTER TABLE "Cliente"
   ADD CONSTRAINT "Cliente_vinculo_coerente"
   CHECK ("vendedorId" IS NULL OR "distribuidorId" IS NOT NULL)
