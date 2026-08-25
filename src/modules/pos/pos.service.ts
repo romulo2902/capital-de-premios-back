@@ -72,12 +72,22 @@ export class PosService {
     return { message: 'Edições ativas listadas com sucesso', data: edicoes };
   }
 
-  async buscarClientePorCpf(cpf: string, user: RequestUser) {
-    const escopo = await this.buildClienteScope(user);
+  /**
+   * Autofill do terminal: busca o cliente por CPF em toda a base, sem filtrar
+   * por vendedor ou distribuidor.
+   *
+   * O terminal atende quem chega no balcão — inclusive o cliente de outra rede
+   * e o que nunca comprou com ninguém — e obrigar a redigitar um cadastro que
+   * já existe só produzia CPF duplicado. Autenticação continua obrigatória
+   * (`PosAuthGuard`, restrito a VENDEDOR e DISTRIBUIDOR).
+   *
+   * Consultar não move ninguém de carteira: o vínculo da venda vem do token
+   * (`aplicarVinculoDoToken`) e o cadastro só é reapontado quando a compra
+   * acontece.
+   */
+  async buscarClientePorCpf(cpf: string) {
     const cliente = await this.prisma.cliente.findFirst({
-      where: {
-        AND: [this.buildClienteCpfWhere(cpf), escopo],
-      },
+      where: this.buildClienteCpfWhere(cpf),
       select: {
         id: true,
         cpf: true,
@@ -704,59 +714,5 @@ export class PosService {
    */
   private buildClienteCpfWhere(cpf: string) {
     return { cpf: { in: variacoesDeCpf(cpf) } };
-  }
-
-  /**
-   * Escopo de LEITURA do autofill do POS.
-   *
-   * A carteira é da rede: qualquer vendedor enxerga os clientes do próprio
-   * distribuidor (os dos colegas e os captados direto pelo distribuidor), para
-   * que um cliente já cadastrado na casa não precise ser redigitado só porque
-   * quem está no terminal é outro vendedor. Cliente órfão — sem vendedor e sem
-   * distribuidor — continua fora do POS.
-   *
-   * Isto NÃO afeta a comissão: o vínculo da venda vem do token
-   * (`aplicarVinculoDoToken`) e o cadastro do cliente é reapontado pela regra
-   * de compra, não por quem o consultou.
-   *
-   * A rede vem do banco porque o token do POS carrega só o `vendedorId`.
-   */
-  private async buildClienteScope(user: RequestUser) {
-    if (user.perfil === 'DISTRIBUIDOR') {
-      if (!user.distribuidorId) {
-        throw new ForbiddenException(
-          'Usuário distribuidor sem vínculo válido para consultar clientes no POS',
-        );
-      }
-
-      return { distribuidorId: user.distribuidorId };
-    }
-
-    if (user.perfil === 'VENDEDOR') {
-      if (!user.vendedorId) {
-        throw new ForbiddenException(
-          'Usuário vendedor sem vínculo válido para consultar clientes no POS',
-        );
-      }
-
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: user.vendedorId },
-        select: { distribuidorId: true },
-      });
-
-      // Sem vendedor não há rede: recusar é mais seguro do que devolver um
-      // escopo vazio, que abriria a base inteira no terminal.
-      if (!vendedor) {
-        throw new ForbiddenException(
-          'Usuário vendedor sem vínculo válido para consultar clientes no POS',
-        );
-      }
-
-      return { distribuidorId: vendedor.distribuidorId };
-    }
-
-    throw new ForbiddenException(
-      'Perfil sem permissão para consultar clientes no POS',
-    );
   }
 }

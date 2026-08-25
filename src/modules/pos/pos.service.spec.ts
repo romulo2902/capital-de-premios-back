@@ -56,15 +56,6 @@ describe('PosService', () => {
     vendedorId: 'vend-1',
   };
 
-  const distribuidor: RequestUser = {
-    id: 'user-2',
-    email: null,
-    cpf: '98765432100',
-    perfil: 'DISTRIBUIDOR',
-    status: 'ATIVO',
-    distribuidorId: 'dist-1',
-  };
-
   beforeEach(async () => {
     jest.clearAllMocks();
     mockPrisma.vendedor.findUnique.mockResolvedValue({
@@ -147,7 +138,7 @@ describe('PosService', () => {
     );
   });
 
-  it('busca cliente por CPF na rede do vendedor para autofill do POS', async () => {
+  it('busca cliente por CPF em toda a base para autofill do POS', async () => {
     mockPrisma.cliente.findFirst.mockResolvedValue({
       id: 'cliente-1',
       cpf: '12345678900',
@@ -159,26 +150,13 @@ describe('PosService', () => {
       estado: 'SP',
     });
 
-    const result = await service.buscarClientePorCpf(
-      '123.456.789-00',
-      vendedor,
-    );
+    const result = await service.buscarClientePorCpf('123.456.789-00');
 
-    // A carteira é da rede: o escopo é o distribuidor do vendedor logado, não
-    // o `vendedorId` dele — um colega de rede atende o mesmo cliente sem
-    // precisar recadastrá-lo.
-    expect(mockPrisma.vendedor.findUnique).toHaveBeenCalledWith({
-      where: { id: 'vend-1' },
-      select: { distribuidorId: true },
-    });
+    // Sem filtro de vínculo: o terminal atende quem chega no balcão, então a
+    // busca é só pelo CPF — nos dois formatos em que ele pode estar gravado.
+    expect(mockPrisma.vendedor.findUnique).not.toHaveBeenCalled();
     expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
-      where: {
-        AND: [
-          // Os dois formatos: cadastro feito pelo painel guarda a máscara.
-          { cpf: { in: ['12345678900', '123.456.789-00'] } },
-          { distribuidorId: 'dist-1' },
-        ],
-      },
+      where: { cpf: { in: ['12345678900', '123.456.789-00'] } },
       select: {
         id: true,
         cpf: true,
@@ -208,10 +186,30 @@ describe('PosService', () => {
     });
   });
 
-  it('retorna encontrado false quando CPF não existe no escopo do POS', async () => {
+  it('acha cliente de outra rede e cliente sem vínculo nenhum', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValue({
+      id: 'cliente-de-outra-rede',
+      cpf: '98765432100',
+      nome: 'Cliente Alheio',
+      telefone: '(21) 98888-7777',
+      email: null,
+      dataNascimento: null,
+      cidade: null,
+      estado: null,
+    });
+
+    const result = await service.buscarClientePorCpf('98765432100');
+
+    expect(result.data).toMatchObject({
+      encontrado: true,
+      cliente: { id: 'cliente-de-outra-rede', dataNascimento: null },
+    });
+  });
+
+  it('retorna encontrado false quando o CPF não existe na base', async () => {
     mockPrisma.cliente.findFirst.mockResolvedValue(null);
 
-    const result = await service.buscarClientePorCpf('12345678900', vendedor);
+    const result = await service.buscarClientePorCpf('12345678900');
 
     expect(result).toEqual({
       message: 'Cliente não encontrado',
@@ -220,45 +218,6 @@ describe('PosService', () => {
         cliente: null,
       },
     });
-  });
-
-  it('rejeita consulta de cliente POS quando vendedor não possui vínculo válido', async () => {
-    await expect(
-      service.buscarClientePorCpf('12345678900', {
-        ...vendedor,
-        vendedorId: undefined,
-      }),
-    ).rejects.toThrow(ForbiddenException);
-  });
-
-  // Escopo vazio abriria a base inteira no terminal: sem cadastro de vendedor
-  // não há rede, e a consulta tem de morrer aqui.
-  it('rejeita consulta de cliente POS quando o vendedor do token não existe mais', async () => {
-    mockPrisma.vendedor.findUnique.mockResolvedValue(null);
-
-    await expect(
-      service.buscarClientePorCpf('12345678900', vendedor),
-    ).rejects.toThrow(ForbiddenException);
-    expect(mockPrisma.cliente.findFirst).not.toHaveBeenCalled();
-  });
-
-  it('busca cliente por CPF no escopo da rede do distribuidor', async () => {
-    mockPrisma.cliente.findFirst.mockResolvedValue(null);
-
-    await service.buscarClientePorCpf('12345678900', distribuidor);
-
-    // O distribuidor já traz a rede no token — nada de lookup de vendedor.
-    expect(mockPrisma.vendedor.findUnique).not.toHaveBeenCalled();
-    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          AND: [
-            { cpf: { in: ['12345678900', '123.456.789-00'] } },
-            { distribuidorId: 'dist-1' },
-          ],
-        },
-      }),
-    );
   });
 
   it('rejeita venda POS com cartão', async () => {
