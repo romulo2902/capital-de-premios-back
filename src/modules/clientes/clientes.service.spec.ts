@@ -155,9 +155,15 @@ describe('ClientesService', () => {
     );
   });
 
-  it('findAll should limitar clientes ao vendedor autenticado', async () => {
+  // A carteira é da rede, não do vendedor: quem está logado enxerga todos os
+  // clientes do próprio distribuidor, inclusive os que outro vendedor da rede
+  // atendeu e os captados direto pelo distribuidor.
+  it('findAll should limitar clientes à rede do vendedor autenticado', async () => {
     mockPrisma.cliente.findMany.mockResolvedValue([]);
     mockPrisma.cliente.count.mockResolvedValue(0);
+    mockPrisma.vendedor.findUnique.mockResolvedValue({
+      distribuidorId: 'distribuidor-1',
+    });
 
     await service.findAll(1, 20, undefined, undefined, undefined, {
       id: 'usuario-vendedor',
@@ -168,11 +174,65 @@ describe('ClientesService', () => {
       vendedorId: 'vendedor-1',
     });
 
+    expect(mockPrisma.vendedor.findUnique).toHaveBeenCalledWith({
+      where: { id: 'vendedor-1' },
+      select: { distribuidorId: true },
+    });
     expect(mockPrisma.cliente.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { vendedorId: 'vendedor-1' },
+        where: { distribuidorId: 'distribuidor-1' },
       }),
     );
+  });
+
+  it('findOne should aceitar cliente de outro vendedor da mesma rede', async () => {
+    mockPrisma.vendedor.findUnique.mockResolvedValue({
+      distribuidorId: 'distribuidor-1',
+    });
+    mockPrisma.cliente.findFirst.mockResolvedValue({
+      id: 'cliente-do-colega',
+      vendedorId: 'vendedor-2',
+      distribuidorId: 'distribuidor-1',
+    });
+
+    const cliente = await service.findOne('cliente-do-colega', {
+      id: 'usuario-vendedor',
+      email: 'vend@test.com',
+      cpf: '12345678900',
+      perfil: 'VENDEDOR',
+      status: 'ATIVO',
+      vendedorId: 'vendedor-1',
+    });
+
+    expect(cliente.id).toBe('cliente-do-colega');
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          AND: [
+            { id: 'cliente-do-colega' },
+            { distribuidorId: 'distribuidor-1' },
+          ],
+        },
+      }),
+    );
+  });
+
+  // Sem cadastro de vendedor não há rede. Cair para escopo vazio devolveria a
+  // base inteira, que é o oposto do que o escopo existe para fazer.
+  it('findAll should recusar vendedor cujo cadastro não existe mais', async () => {
+    mockPrisma.vendedor.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.findAll(1, 20, undefined, undefined, undefined, {
+        id: 'usuario-vendedor',
+        email: 'vend@test.com',
+        cpf: '12345678900',
+        perfil: 'VENDEDOR',
+        status: 'ATIVO',
+        vendedorId: 'vendedor-fantasma',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(mockPrisma.cliente.findMany).not.toHaveBeenCalled();
   });
 
   it('create should vincular cliente ao vendedor autenticado', async () => {
