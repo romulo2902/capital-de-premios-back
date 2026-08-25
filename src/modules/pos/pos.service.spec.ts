@@ -173,7 +173,11 @@ describe('PosService', () => {
     });
     expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
       where: {
-        AND: [{ cpf: '12345678900' }, { distribuidorId: 'dist-1' }],
+        AND: [
+          // Os dois formatos: cadastro feito pelo painel guarda a máscara.
+          { cpf: { in: ['12345678900', '123.456.789-00'] } },
+          { distribuidorId: 'dist-1' },
+        ],
       },
       select: {
         id: true,
@@ -248,7 +252,10 @@ describe('PosService', () => {
     expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          AND: [{ cpf: '12345678900' }, { distribuidorId: 'dist-1' }],
+          AND: [
+            { cpf: { in: ['12345678900', '123.456.789-00'] } },
+            { distribuidorId: 'dist-1' },
+          ],
         },
       }),
     );

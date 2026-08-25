@@ -20,6 +20,7 @@ import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 import { aplicarVinculoDoToken } from '../../common/utils/vinculo-cliente.util';
+import { variacoesDeCpf } from '../../common/utils/cpf.util';
 import { CreateVendaDto } from '../vendas/dto/create-venda.dto';
 import { CreateVendaSenaDto } from '../capital-sena/vendas-sena/dto/create-venda-sena.dto';
 import type { CreatePosVendaDto } from './dto/create-pos-venda.dto';
@@ -72,11 +73,10 @@ export class PosService {
   }
 
   async buscarClientePorCpf(cpf: string, user: RequestUser) {
-    const cpfLimpo = cpf.replace(/\D/g, '');
     const escopo = await this.buildClienteScope(user);
     const cliente = await this.prisma.cliente.findFirst({
       where: {
-        AND: [this.buildClienteCpfWhere(cpfLimpo), escopo],
+        AND: [this.buildClienteCpfWhere(cpf), escopo],
       },
       select: {
         id: true,
@@ -695,8 +695,15 @@ export class PosService {
     }
   }
 
+  /**
+   * Casa o CPF nos dois formatos em que ele pode ter sido gravado.
+   *
+   * Comparar só dígitos deixava de fora o cliente cadastrado pelo painel com
+   * máscara (`031.123.456-75`) — o terminal dizia "não encontrado" para um
+   * cadastro que existe e está na rede do operador.
+   */
   private buildClienteCpfWhere(cpf: string) {
-    return { cpf };
+    return { cpf: { in: variacoesDeCpf(cpf) } };
   }
 
   /**

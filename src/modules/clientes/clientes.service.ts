@@ -23,6 +23,7 @@ import {
   normalizePagination,
 } from '../../common/utils/pagination.util';
 import { parseEValidarDataNascimento } from '../../common/utils/data-nascimento.util';
+import { normalizarCpf, variacoesDeCpf } from '../../common/utils/cpf.util';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 type VendedorDoVinculo = {
@@ -142,18 +143,8 @@ export class ClientesService {
     };
   }
 
-  private formatarCpf(cpf: string): string {
-    const cpfLimpo = cpf.replace(/\D/g, '');
-
-    if (cpfLimpo.length !== 11) {
-      return cpf;
-    }
-
-    return `${cpfLimpo.slice(0, 3)}.${cpfLimpo.slice(3, 6)}.${cpfLimpo.slice(6, 9)}-${cpfLimpo.slice(9, 11)}`;
-  }
-
   private mascararCpf(cpf: string): string {
-    const cpfLimpo = cpf.replace(/\D/g, '');
+    const cpfLimpo = normalizarCpf(cpf);
 
     if (cpfLimpo.length !== 11) {
       return cpf;
@@ -423,8 +414,13 @@ export class ClientesService {
   }
 
   async create(dto: CreateClienteDto, user: RequestUser) {
-    const existing = await this.prisma.cliente.findUnique({
-      where: { cpf: dto.cpf },
+    // Grava só dígitos. O DTO aceita as duas formas, e gravar a mascarada
+    // deixava o cadastro invisível para toda busca por CPF — que compara
+    // dígitos — além de escapar da `@unique`, que não sabe que
+    // `031.123.456-75` e `03112345675` são o mesmo cliente.
+    const cpf = normalizarCpf(dto.cpf);
+    const existing = await this.prisma.cliente.findFirst({
+      where: { cpf: { in: variacoesDeCpf(cpf) } },
     });
     if (existing) throw new ConflictException('CPF já cadastrado');
     if (!dto.dataNascimento) {
@@ -440,7 +436,7 @@ export class ClientesService {
 
     const data: Prisma.ClienteUncheckedCreateInput = {
       ...(dto.codigo ? { codigo: dto.codigo } : {}),
-      cpf: dto.cpf,
+      cpf,
       nome: dto.nome,
       telefone: dto.telefone,
       dataNascimento: parseEValidarDataNascimento(dto.dataNascimento),
@@ -536,7 +532,10 @@ export class ClientesService {
 
   async findByCpf(cpf: string, user?: RequestUser) {
     const cliente = await this.prisma.cliente.findFirst({
-      where: this.mergeWhere({ cpf }, await this.buildHierarchyWhere(user)),
+      where: this.mergeWhere(
+        { cpf: { in: variacoesDeCpf(cpf) } },
+        await this.buildHierarchyWhere(user),
+      ),
     });
     if (!cliente) throw new NotFoundException('Cliente não encontrado');
     return cliente;
@@ -553,11 +552,8 @@ export class ClientesService {
   async buscarMeusDados(
     cpf: string,
   ): Promise<{ message: string; data: { cliente: MeusDadosClienteResponse } }> {
-    const cpfLimpo = cpf.replace(/\D/g, '');
     const cliente = await this.prisma.cliente.findFirst({
-      where: {
-        OR: [{ cpf: cpfLimpo }, { cpf: this.formatarCpf(cpfLimpo) }],
-      },
+      where: { cpf: { in: variacoesDeCpf(cpf) } },
       select: {
         id: true,
         nome: true,
@@ -639,9 +635,11 @@ export class ClientesService {
   async update(id: string, dto: UpdateClienteDto, user?: RequestUser) {
     const clienteAtual = await this.findOne(id, user);
 
-    if (dto.cpf) {
+    const cpf = dto.cpf ? normalizarCpf(dto.cpf) : undefined;
+
+    if (cpf) {
       const conflict = await this.prisma.cliente.findFirst({
-        where: { cpf: dto.cpf, NOT: { id } },
+        where: { cpf: { in: variacoesDeCpf(cpf) }, NOT: { id } },
       });
       if (conflict) throw new ConflictException('CPF já cadastrado');
     }
@@ -664,6 +662,9 @@ export class ClientesService {
 
     const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };
     delete data.codigo;
+    if (cpf) {
+      data.cpf = cpf;
+    }
     if (dto.dataNascimento) {
       data.dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
     }

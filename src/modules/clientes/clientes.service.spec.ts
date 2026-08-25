@@ -70,9 +70,7 @@ describe('ClientesService', () => {
     const result = await service.buscarMeusDados('031.123.456-75');
 
     expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
-      where: {
-        OR: [{ cpf: '03112345675' }, { cpf: '031.123.456-75' }],
-      },
+      where: { cpf: { in: ['03112345675', '031.123.456-75'] } },
       select: {
         id: true,
         nome: true,
@@ -233,6 +231,58 @@ describe('ClientesService', () => {
       }),
     ).rejects.toThrow(ForbiddenException);
     expect(mockPrisma.cliente.findMany).not.toHaveBeenCalled();
+  });
+
+  // O DTO aceita CPF mascarado. Gravar a máscara deixava o cadastro invisível
+  // para toda busca por CPF (que compara dígitos) e escapava da `@unique`.
+  it('create should gravar o CPF só com dígitos', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValueOnce(null);
+    mockPrisma.cliente.create.mockResolvedValue({
+      id: 'cliente-1',
+      nome: 'Tiago Lima',
+      codigo: 1,
+    });
+
+    await service.create(
+      {
+        cpf: '031.123.456-75',
+        nome: 'Tiago Lima',
+        telefone: '(64) 98461-4339',
+        dataNascimento: '1990-05-20',
+      },
+      {
+        id: 'usuario-admin',
+        email: 'admin@test.com',
+        cpf: '00000000000',
+        perfil: 'ADMIN',
+        status: 'ATIVO',
+      },
+    );
+
+    // A checagem de duplicado cobre as duas formas: sem isso, o mesmo cliente
+    // entraria duas vezes, uma em cada formato.
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
+      where: { cpf: { in: ['03112345675', '031.123.456-75'] } },
+    });
+    expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ cpf: '03112345675' }),
+      }),
+    );
+  });
+
+  it('findByCpf should achar cadastro gravado com máscara', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValue({
+      id: 'cliente-1',
+      cpf: '031.123.456-75',
+    });
+
+    const cliente = await service.findByCpf('03112345675');
+
+    expect(cliente.id).toBe('cliente-1');
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
+      where: { cpf: { in: ['03112345675', '031.123.456-75'] } },
+    });
   });
 
   it('create should vincular cliente ao vendedor autenticado', async () => {
