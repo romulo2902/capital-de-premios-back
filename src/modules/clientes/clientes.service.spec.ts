@@ -1,11 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClientesService } from './clientes.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 describe('ClientesService', () => {
   let service: ClientesService;
@@ -498,6 +494,90 @@ describe('ClientesService', () => {
           data: expect.objectContaining({
             vendedorId: null,
             distribuidorId: 'distribuidor-1',
+          }),
+        }),
+      );
+    });
+  });
+  // ─── REGRESSAO: distribuidor armazenado nao e "explicito" ────────────
+  // Só o que chega NA REQUISICAO conta como valor explicito. O distribuidor
+  // ja gravado no cliente nao e escolha do chamador — quando o campo nao vem
+  // no DTO e ha vendedor, o vinculo tem de ser derivado dele.
+  describe('update — origem do distribuidor', () => {
+    it('deriva do vendedor quando o distribuidor nao veio na requisicao', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+        id: 'cliente-x',
+        nome: 'Cliente X',
+        vendedorId: null,
+        distribuidorId: 'distribuidor-antigo',
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-novo',
+        distribuidorId: 'distribuidor-novo',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-x' });
+
+      // PATCH informa SO o vendedor; distribuidorId ausente do DTO.
+      await service.update('cliente-x', { vendedorId: 'vendedor-novo' });
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: 'vendedor-novo',
+            distribuidorId: 'distribuidor-novo',
+          }),
+        }),
+      );
+    });
+
+    it('preserva o distribuidor atual quando nao ha vendedor envolvido', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+        id: 'cliente-y',
+        nome: 'Cliente Y',
+        vendedorId: null,
+        distribuidorId: 'distribuidor-atual',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-y' });
+
+      // Remove o vendedor (ja era nulo) sem tocar no distribuidor.
+      await service.update('cliente-y', { vendedorId: null });
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: null,
+            distribuidorId: 'distribuidor-atual',
+          }),
+        }),
+      );
+    });
+
+    it('distribuidor informado na requisicao continua vencendo', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+        id: 'cliente-z',
+        nome: 'Cliente Z',
+        vendedorId: null,
+        distribuidorId: 'distribuidor-antigo',
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-1',
+        distribuidorId: 'distribuidor-do-vendedor',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-informado',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-z' });
+
+      await service.update('cliente-z', {
+        vendedorId: 'vendedor-1',
+        distribuidorId: 'distribuidor-informado',
+      });
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-informado',
           }),
         }),
       );

@@ -550,10 +550,18 @@ export class ClientesService {
       // presente — inclusive `null` — sobrescreve.
       const finalVendedorId =
         vendedorId !== undefined ? vendedorId : clienteAtual.vendedorId;
-      const finalDistribuidorId =
+
+      // Só conta como explícito o que veio NESTA requisição. O distribuidor
+      // gravado no cliente não é uma escolha do chamador: quando o campo não
+      // vem no DTO e há vendedor, o vínculo é derivado dele — caso contrário
+      // atribuir um vendedor de outra rede deixaria o par incoerente. Sem
+      // vendedor não há de onde derivar, então preserva-se o valor atual.
+      const distribuidorInformado =
         distribuidorId !== undefined
           ? distribuidorId
-          : clienteAtual.distribuidorId;
+          : finalVendedorId
+            ? null
+            : clienteAtual.distribuidorId;
 
       let distribuidorDoVendedor: string | null = null;
 
@@ -572,7 +580,7 @@ export class ClientesService {
 
       const vinculo = resolverVinculoCliente({
         vendedorId: finalVendedorId,
-        distribuidorId: finalDistribuidorId,
+        distribuidorId: distribuidorInformado,
         distribuidorDoVendedor,
       });
 
