@@ -1,4 +1,4 @@
--- Coerência do vínculo comercial do Cliente.
+-- Coerência do vínculo comercial do Cliente — parte 1 de 2.
 --
 -- `Cliente.vendedorId` e `Cliente.distribuidorId` são colunas nullable
 -- independentes, então o banco aceitava o par incoerente
@@ -7,15 +7,26 @@
 --
 -- A regra era mantida só por convenção nos services. A importação em massa
 -- (MigracaoService) não a aplicava, e qualquer caminho novo escapava sem aviso.
---
+
 -- 1) Backfill: deriva o distribuidor a partir do vendedor.
+--
+-- Toca apenas as linhas incoerentes, então pega lock só nelas. Não vale a pena
+-- quebrar em lotes aqui: o Prisma roda a migration inteira numa transação, e
+-- lotes dentro da mesma transação não liberam lock entre iterações.
 UPDATE "Cliente" c
 SET "distribuidorId" = v."distribuidorId"
 FROM "Vendedor" v
 WHERE c."vendedorId" = v.id
   AND c."distribuidorId" IS NULL;
 
--- 2) Constraint: o banco passa a recusar o par incoerente.
+-- 2) Constraint, sem validar agora.
+--
+-- `NOT VALID` faz o ADD CONSTRAINT pegar ACCESS EXCLUSIVE apenas pelo instante
+-- da alteração do catálogo, sem varrer a tabela — a partir daqui toda escrita
+-- nova já é verificada. A varredura das linhas antigas fica para a migration
+-- seguinte, que roda em outra transação: se as duas instruções estivessem
+-- neste mesmo arquivo, o ACCESS EXCLUSIVE seria mantido até o commit e a
+-- tabela ficaria bloqueada durante a validação inteira.
 --
 -- Os outros três estados seguem válidos:
 --   (null, null) — cliente órfão: loja pública sem seller_id, ou importação
@@ -24,8 +35,8 @@ WHERE c."vendedorId" = v.id
 --
 -- Não valida que V e D concordem: por decisão de projeto o valor explícito
 -- vence (ver resolverVinculoCliente). Isso é invariante entre tabelas e
--- exigiria trigger; a coerência é garantida nos controllers, que só permitem
--- ADMIN informar o par livremente.
+-- exigiria trigger; a coerência é garantida nos controllers.
 ALTER TABLE "Cliente"
   ADD CONSTRAINT "Cliente_vinculo_coerente"
-  CHECK ("vendedorId" IS NULL OR "distribuidorId" IS NOT NULL);
+  CHECK ("vendedorId" IS NULL OR "distribuidorId" IS NOT NULL)
+  NOT VALID;
