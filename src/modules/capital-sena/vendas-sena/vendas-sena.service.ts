@@ -29,6 +29,7 @@ import {
   parseEValidarDataNascimento,
   validarMaioridade,
 } from '../../../common/utils/data-nascimento.util';
+import { resolverVinculoCliente } from '../../../common/utils/vinculo-cliente.util';
 
 type PrismaTransactionClient = Prisma.TransactionClient;
 
@@ -907,26 +908,34 @@ export class VendasSenaService {
     vendedorId?: string,
     distribuidorId?: string,
   ): Promise<RelacionamentoClienteMaisRecente> {
+    let distribuidorDoVendedor: string | null = null;
+
     if (vendedorId) {
       const vendedor = await this.prisma.vendedor.findUnique({
         where: { id: vendedorId },
         select: { distribuidorId: true },
       });
 
-      return {
+      // A validação equivalente existe na etapa 5 de `create`, mas o cliente é
+      // resolvido antes dela. Sem antecipar, um vendedorId inexistente tentaria
+      // gravar o par (vendedor, null) — que a CHECK constraint do banco recusa,
+      // devolvendo erro de constraint em vez de 404.
+      if (!vendedor) {
+        throw new NotFoundException('Vendedor não encontrado');
+      }
+
+      distribuidorDoVendedor = vendedor.distribuidorId;
+    }
+
+    // `null` = nada informado; aqui significa preservar o vínculo atual do
+    // cliente, então devolvemos um objeto vazio.
+    return (
+      resolverVinculoCliente({
         vendedorId,
-        distribuidorId: distribuidorId ?? vendedor?.distribuidorId ?? null,
-      };
-    }
-
-    if (distribuidorId) {
-      return {
-        vendedorId: null,
         distribuidorId,
-      };
-    }
-
-    return {};
+        distribuidorDoVendedor,
+      }) ?? {}
+    );
   }
 
   private resolverTipoPagamento(

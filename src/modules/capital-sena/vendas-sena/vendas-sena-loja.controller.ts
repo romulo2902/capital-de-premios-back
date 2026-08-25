@@ -30,6 +30,13 @@ export class VendasSenaLojaController {
       'Comprar cartela(s) Sena — recebe `numeros` do frontend com 6 números + bola extra. Gera PIX/Cartão e aguarda confirmação.',
   })
   comprar(@Body() dto: CreateVendaSenaDto) {
+    // Rota pública e sem autenticação: o vínculo comercial só pode vir de
+    // `seller_id`, que o service resolve contra o banco. Aceitá-lo pelo corpo
+    // deixaria qualquer um escolher para quem vai a comissão — inclusive com
+    // um seller_id válido de distribuidor, já que nesse caso o service faz
+    // `sellerOrigem.vendedorId ?? dto.vendedorId` e o corpo venceria.
+    delete dto.vendedorId;
+    delete dto.distribuidorId;
     return this.vendasSenaService.create(dto);
   }
 
