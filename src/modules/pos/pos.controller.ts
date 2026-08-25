@@ -278,15 +278,15 @@ a ele.
     summary: '3. 🔒 Buscar dados do cliente por CPF para autofill no POS',
     description: `
 Consulta um cliente já cadastrado para preencher automaticamente os campos da
-venda no terminal POS. A busca respeita a hierarquia do operador autenticado:
+venda no terminal POS. A busca varre **toda a base**, sem filtrar por vendedor
+ou distribuidor: o terminal atende quem chega no balcão, inclusive o cliente de
+outra rede e o que ainda não tem vínculo nenhum.
 
-- **VENDEDOR** enxerga todos os clientes do distribuidor dele — os atendidos
-  por qualquer vendedor da rede e os captados direto pelo distribuidor
-- **DISTRIBUIDOR** enxerga os clientes da própria rede
+Exige token do POS (\`VENDEDOR\` ou \`DISTRIBUIDOR\`) — não é rota aberta.
 
-Cliente sem vínculo nenhum (nem vendedor, nem distribuidor) não aparece no POS.
 Consultar o cliente não muda o vínculo dele: a comissão continua saindo do
-token de quem lança a venda.
+token de quem lança a venda, e o cadastro só é reapontado quando a compra
+acontece.
 
 Se o cliente não existir, a API retorna \`encontrado: false\` para o terminal
 seguir com preenchimento manual.
@@ -337,11 +337,8 @@ seguir com preenchimento manual.
     },
   })
   @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
-  buscarClientePorCpf(
-    @Param('cpf') cpf: string,
-    @CurrentUser() user: RequestUser,
-  ) {
-    return this.posService.buscarClientePorCpf(cpf, user);
+  buscarClientePorCpf(@Param('cpf') cpf: string) {
+    return this.posService.buscarClientePorCpf(cpf);
   }
 
   @Post('auth/logout')
