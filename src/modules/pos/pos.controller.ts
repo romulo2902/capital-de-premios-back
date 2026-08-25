@@ -280,8 +280,13 @@ a ele.
 Consulta um cliente já cadastrado para preencher automaticamente os campos da
 venda no terminal POS. A busca respeita a hierarquia do operador autenticado:
 
-- **VENDEDOR** só enxerga clientes vinculados a ele
-- **DISTRIBUIDOR** só enxerga clientes da sua rede
+- **VENDEDOR** enxerga todos os clientes do distribuidor dele — os atendidos
+  por qualquer vendedor da rede e os captados direto pelo distribuidor
+- **DISTRIBUIDOR** enxerga os clientes da própria rede
+
+Cliente sem vínculo nenhum (nem vendedor, nem distribuidor) não aparece no POS.
+Consultar o cliente não muda o vínculo dele: a comissão continua saindo do
+token de quem lança a venda.
 
 Se o cliente não existir, a API retorna \`encontrado: false\` para o terminal
 seguir com preenchimento manual.
