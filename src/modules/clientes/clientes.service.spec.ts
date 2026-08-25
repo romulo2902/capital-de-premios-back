@@ -25,7 +25,10 @@ describe('ClientesService', () => {
   };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    // `resetAllMocks` (e não `clearAllMocks`) porque este último preserva as
+    // implementações de `mockResolvedValue`, fazendo um teste herdar o mock do
+    // anterior e passar por ordenação em vez de por asserção.
+    jest.resetAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -685,6 +688,10 @@ describe('ClientesService', () => {
     it('VENDEDOR ainda atualiza dados do proprio cliente', async () => {
       mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
       mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-1' });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-logado',
+        distribuidorId: 'distribuidor-A',
+      });
 
       await service.update('cliente-1', { nome: 'Novo Nome' }, vendedorLogado);
 
@@ -695,6 +702,12 @@ describe('ClientesService', () => {
       mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
       mockPrisma.distribuidor.findUnique.mockResolvedValue({
         id: 'distribuidor-B',
+      });
+      // O cliente tem vendedor: a decisão precisa da rede dele para saber se
+      // o vendedor cede ao distribuidor informado.
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-logado',
+        distribuidorId: 'distribuidor-A',
       });
       mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-1' });
 

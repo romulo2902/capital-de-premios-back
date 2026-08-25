@@ -7,8 +7,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  garantirVendedorDaRedeDoDistribuidor,
   normalizarIdPreservandoAusencia,
   resolverVinculoCliente,
+  resolverVinculoClienteNaAtualizacao,
+  vendedorFinalDaAtualizacao,
 } from '../../common/utils/vinculo-cliente.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
@@ -189,28 +192,30 @@ export class ClientesService {
     vendedorId: string | null | undefined,
     distribuidorId: string | null | undefined,
   ): Promise<VendedorDoVinculo | null> {
-    let vendedor: VendedorDoVinculo | null = null;
+    // As duas checagens são independentes — não faz sentido serializá-las.
+    const [vendedor, distribuidor] = await Promise.all([
+      vendedorId
+        ? this.prisma.vendedor.findUnique({
+            where: { id: vendedorId },
+            select: { id: true, distribuidorId: true },
+          })
+        : Promise.resolve(null),
+      distribuidorId
+        ? this.prisma.distribuidor.findUnique({
+            where: { id: distribuidorId },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+    ]);
 
-    if (vendedorId) {
-      vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: vendedorId },
-        select: { id: true, distribuidorId: true },
-      });
-      if (!vendedor) {
-        throw new NotFoundException('Vendedor não encontrado');
-      }
-      // Não valida coerência com o distribuidor informado: o valor explícito
-      // vence (ver resolverVinculoCliente).
+    if (vendedorId && !vendedor) {
+      throw new NotFoundException('Vendedor não encontrado');
     }
+    // Não valida coerência entre os dois: o valor explícito vence
+    // (ver resolverVinculoCliente).
 
-    if (distribuidorId) {
-      const distribuidor = await this.prisma.distribuidor.findUnique({
-        where: { id: distribuidorId },
-        select: { id: true },
-      });
-      if (!distribuidor) {
-        throw new NotFoundException('Distribuidor não encontrado');
-      }
+    if (distribuidorId && !distribuidor) {
+      throw new NotFoundException('Distribuidor não encontrado');
     }
 
     return vendedor;
@@ -261,6 +266,14 @@ export class ClientesService {
         );
       }
 
+      // A linha do vendedor logado só é necessária para comparar redes, ou
+      // na criação, que usa o retorno para montar o vínculo. Buscá-la sempre
+      // fazia um PATCH de `nome`/`telefone` depender de um lookup alheio ao
+      // pedido — e falhar com 404 se ele não resolvesse.
+      if (contexto === 'atualizacao' && !distribuidorInformado) {
+        return null;
+      }
+
       const vendedorLogado =
         vendedor ??
         (await this.prisma.vendedor.findUnique({
@@ -308,11 +321,7 @@ export class ClientesService {
         );
       }
 
-      if (vendedor && vendedor.distribuidorId !== user.distribuidorId) {
-        throw new ForbiddenException(
-          'Vendedor não pertence ao distribuidor autenticado',
-        );
-      }
+      garantirVendedorDaRedeDoDistribuidor(vendedor, user);
     }
 
     return null;
@@ -617,14 +626,10 @@ export class ClientesService {
     }
 
     if (vendedorId !== undefined || distribuidorId !== undefined) {
-      // Regra única desta função: só conta como explícito o que chegou NESTA
-      // requisição. O que vem do cadastro é contexto, não escolha do chamador.
-      const vendedorExplicito = vendedorId !== undefined;
-      const distribuidorExplicito = distribuidorId !== undefined;
-
-      const finalVendedorId = vendedorExplicito
-        ? vendedorId
-        : clienteAtual.vendedorId;
+      const finalVendedorId = vendedorFinalDaAtualizacao(
+        vendedorId,
+        clienteAtual.vendedorId,
+      );
 
       let vendedorFinal: VendedorDoVinculo | null = null;
 
@@ -643,42 +648,18 @@ export class ClientesService {
         }
       }
 
-      // Um distribuidor explícito de outra rede invalida o vendedor que estava
-      // no cadastro: esse vendedor não foi escolhido nesta requisição, então é
-      // ele que cede. Sem isso o par (vendedor da rede A, distribuidor B) era
-      // gravado — incoerência que ninguém pediu e que a CHECK não recusa.
-      //
-      // Só vale quando a rede está de fato MUDANDO. Reenviar o distribuidor
-      // que o cliente já tem não é um pedido de mover nada, e ceder ali
-      // apagaria o vendedor num PATCH que não alterou coisa alguma — o que
-      // acontece em cadastros cujo par já é cruzado, estado que a regra do
-      // valor explícito permite criar.
-      const distribuidorMudou = distribuidorId !== clienteAtual.distribuidorId;
-
-      const vendedorCedeParaDistribuidorExplicito =
-        !vendedorExplicito &&
-        distribuidorExplicito &&
-        Boolean(distribuidorId) &&
-        distribuidorMudou &&
-        Boolean(vendedorFinal) &&
-        vendedorFinal?.distribuidorId !== distribuidorId;
-
-      const vinculo = resolverVinculoCliente({
-        vendedorId: vendedorCedeParaDistribuidorExplicito
-          ? null
-          : finalVendedorId,
-        // Distribuidor não informado: deriva do vendedor quando há um; sem
-        // vendedor não há de onde derivar, então preserva-se o do cadastro.
-        distribuidorId: distribuidorExplicito
-          ? distribuidorId
-          : finalVendedorId
-            ? null
-            : clienteAtual.distribuidorId,
+      // A decisão em si é pura e vive no util, com tabela-verdade própria —
+      // este bloco só faz a leitura que ela precisa.
+      const vinculo = resolverVinculoClienteNaAtualizacao({
+        vendedorInformado: vendedorId,
+        distribuidorInformado: distribuidorId,
+        vendedorAtual: clienteAtual.vendedorId,
+        distribuidorAtual: clienteAtual.distribuidorId,
         distribuidorDoVendedor: vendedorFinal?.distribuidorId,
       });
 
-      data.vendedorId = vinculo?.vendedorId ?? null;
-      data.distribuidorId = vinculo?.distribuidorId ?? null;
+      data.vendedorId = vinculo.vendedorId;
+      data.distribuidorId = vinculo.distribuidorId;
     }
 
     return this.prisma.cliente.update({

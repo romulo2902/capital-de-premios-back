@@ -2,7 +2,6 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -30,7 +29,10 @@ import {
   parseEValidarDataNascimento,
   validarMaioridade,
 } from '../../../common/utils/data-nascimento.util';
-import { resolverVinculoCliente } from '../../../common/utils/vinculo-cliente.util';
+import {
+  garantirVendedorDaRedeDoDistribuidor,
+  resolverVinculoDaCompra,
+} from '../../../common/utils/vinculo-cliente.util';
 
 type PrismaTransactionClient = Prisma.TransactionClient;
 
@@ -133,6 +135,7 @@ export class VendasSenaService {
     // prática isso preserva o par que o ADMIN informou de propósito — sem ele,
     // um seller_id de distribuidor zerava o vendedorId do ADMIN e a comissão
     // do vendedor sumia em silêncio.
+    const distribuidorInformadoPeloChamador = Boolean(dto.distribuidorId);
     let distribuidorDoVendedor: string | undefined;
 
     if (dto.seller_id) {
@@ -197,18 +200,16 @@ export class VendasSenaService {
 
       // Um DISTRIBUIDOR pode lançar venda para um vendedor da própria rede,
       // mas não para o de outra — senão escolheria a quem creditar a comissão.
-      if (
-        user?.perfil === 'DISTRIBUIDOR' &&
-        distribuidorDoVendedor !== user.distribuidorId
-      ) {
-        throw new ForbiddenException(
-          'Vendedor não pertence ao distribuidor autenticado',
-        );
-      }
+      garantirVendedorDaRedeDoDistribuidor(
+        { distribuidorId: distribuidorDoVendedor },
+        user,
+      );
 
       if (!dto.distribuidorId) dto.distribuidorId = distribuidorDoVendedor;
     }
-    if (dto.distribuidorId) {
+    // Só confere existência quando o id veio do chamador: derivado do vendedor
+    // (ou do seller_id já resolvido), ele é uma FK que o banco garante.
+    if (dto.distribuidorId && distribuidorInformadoPeloChamador) {
       const dist = await this.prisma.distribuidor.findUnique({
         where: { id: dto.distribuidorId },
       });
@@ -964,34 +965,17 @@ export class VendasSenaService {
     /** Evita reconsultar o vendedor quando o chamador já o carregou. */
     distribuidorDoVendedorConhecido?: string,
   ): Promise<RelacionamentoClienteMaisRecente> {
-    let distribuidorDoVendedor: string | null =
-      distribuidorDoVendedorConhecido ?? null;
-
-    if (vendedorId && !distribuidorDoVendedor) {
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: vendedorId },
-        select: { distribuidorId: true },
-      });
-
-      // `create` já valida o vendedor na etapa 4, antes de chegar aqui. O 404
-      // permanece porque este método também é alcançado por caminhos que não
-      // passam por aquela validação; sem ele o par (vendedor, null) seria
-      // gravado e a CHECK do banco devolveria erro de constraint.
-      if (!vendedor) {
-        throw new NotFoundException('Vendedor não encontrado');
-      }
-
-      distribuidorDoVendedor = vendedor.distribuidorId;
-    }
-
-    // `null` = nada informado; aqui significa preservar o vínculo atual do
-    // cliente, então devolvemos um objeto vazio.
-    return (
-      resolverVinculoCliente({
-        vendedorId,
-        distribuidorId,
-        distribuidorDoVendedor,
-      }) ?? {}
+    return resolverVinculoDaCompra(
+      async (id) => {
+        const vendedor = await this.prisma.vendedor.findUnique({
+          where: { id },
+          select: { distribuidorId: true },
+        });
+        return vendedor?.distribuidorId ?? null;
+      },
+      vendedorId,
+      distribuidorId,
+      distribuidorDoVendedorConhecido,
     );
   }
 

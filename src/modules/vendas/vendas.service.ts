@@ -52,9 +52,11 @@ import {
   parseEValidarDataNascimento,
   validarMaioridade,
 } from '../../common/utils/data-nascimento.util';
-import { resolverVinculoCliente } from '../../common/utils/vinculo-cliente.util';
+import {
+  garantirVendedorDaRedeDoDistribuidor,
+  resolverVinculoDaCompra,
+} from '../../common/utils/vinculo-cliente.util';
 import { EmailService } from '../../common/email/email.service';
-
 
 type ComboVenda = {
   id: string;
@@ -148,7 +150,14 @@ export class VendasService {
         dataEncerramento: true,
         valorCartela: true,
         combos: {
-          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true },
+          select: {
+            id: true,
+            origemParticipacao: true,
+            tipoCartela: true,
+            preco: true,
+            rangeInicio: true,
+            rangeFinal: true,
+          },
         },
       },
     });
@@ -196,6 +205,7 @@ export class VendasService {
     //
     // Roda ANTES de resolver o cliente: a resolução grava o vínculo comercial
     // no cadastro, e um vendedor recusado aqui não pode deixar rastro lá.
+    const distribuidorInformadoPeloChamador = Boolean(dto.distribuidorId);
     let distribuidorDoVendedor: string | undefined;
 
     if (dto.vendedorId) {
@@ -211,21 +221,16 @@ export class VendasService {
 
       // Um DISTRIBUIDOR pode lançar venda para um vendedor da própria rede,
       // mas não para o de outra — senão escolheria a quem creditar a comissão.
-      if (
-        user?.perfil === 'DISTRIBUIDOR' &&
-        vendedor.distribuidorId !== user.distribuidorId
-      ) {
-        throw new ForbiddenException(
-          'Vendedor não pertence ao distribuidor autenticado',
-        );
-      }
+      garantirVendedorDaRedeDoDistribuidor(vendedor, user);
 
       if (!dto.distribuidorId) {
         dto.distribuidorId = vendedor.distribuidorId;
       }
     }
 
-    if (dto.distribuidorId) {
+    // Só confere existência quando o id veio do chamador: derivado do vendedor,
+    // ele é uma FK NOT NULL que o banco já garante.
+    if (dto.distribuidorId && distribuidorInformadoPeloChamador) {
       const distribuidor = await this.prisma.distribuidor.findUnique({
         where: { id: dto.distribuidorId },
       });
@@ -372,73 +377,74 @@ export class VendasService {
 
     if (!options?.skipGateway) {
       try {
-      const gateway = this.paymentGatewayFactory.getGateway(
-        tipoPagamentoResolvido,
-      );
-      const cobranca = await gateway.criarCobranca({
-        vendaId: venda.id,
-        valorCentavos: Math.round(total * 100),
-        quantidadeItens: quantidadeCartelasSolicitada,
-        valorUnitarioCentavos: Math.round(valorCartela * 100),
-        descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
-        cpfPagador: dadosClientePagamento.cpf,
-        nomePagador: dadosClientePagamento.nome,
-        emailPagador: dadosClientePagamento.email,
-        telefonePagador: dadosClientePagamento.telefone,
-        expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
-      });
+        const gateway = this.paymentGatewayFactory.getGateway(
+          tipoPagamentoResolvido,
+        );
+        const cobranca = await gateway.criarCobranca({
+          vendaId: venda.id,
+          valorCentavos: Math.round(total * 100),
+          quantidadeItens: quantidadeCartelasSolicitada,
+          valorUnitarioCentavos: Math.round(valorCartela * 100),
+          descricao: `Capital de Prêmios — Edição ${edicao.numero} — ${quantidadeCartelasCompra} cartela(s)`,
+          cpfPagador: dadosClientePagamento.cpf,
+          nomePagador: dadosClientePagamento.nome,
+          emailPagador: dadosClientePagamento.email,
+          telefonePagador: dadosClientePagamento.telefone,
+          expiracaoSegundos: PIX_EXPIRACAO_SEGUNDOS,
+        });
 
-      // Atualizar venda com dados do gateway
-      await this.prisma.venda.update({
-        where: { id: venda.id },
-        data: {
-          gatewayId: cobranca.gatewayId,
-          gatewayPayload: {
-            ...((cobranca.payload as Record<string, unknown>) ?? {}),
-            ...(dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0
-              ? {
-                  combosSelecionados: dto.cartelasSelecionadas.map(
-                    (numero) => ({ numeroBase: numero }),
-                  ),
-                }
-              : {}),
-          } as Prisma.InputJsonValue,
-        },
-      });
-
-      dadosPagamento = {
-        pixCopiaECola: cobranca.pixCopiaECola,
-        qrCodeBase64: cobranca.qrCodeBase64,
-        urlPagamento: cobranca.urlPagamento,
-      };
-
-      this.logger.log(
-        `Cobrança criada no gateway: gatewayId=${cobranca.gatewayId}`,
-      );
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `Erro ao criar cobrança no gateway para venda ${venda.id}: ${errorMessage}`,
-      );
-
-      if (options?.requireGateway) {
+        // Atualizar venda com dados do gateway
         await this.prisma.venda.update({
           where: { id: venda.id },
           data: {
-            status: StatusVenda.RECUSADO,
+            gatewayId: cobranca.gatewayId,
             gatewayPayload: {
-              erroPagamento: errorMessage,
+              ...(cobranca.payload ?? {}),
+              ...(dto.cartelasSelecionadas &&
+              dto.cartelasSelecionadas.length > 0
+                ? {
+                    combosSelecionados: dto.cartelasSelecionadas.map(
+                      (numero) => ({ numeroBase: numero }),
+                    ),
+                  }
+                : {}),
             } as Prisma.InputJsonValue,
           },
         });
-        throw new BadGatewayException(
-          'Não foi possível processar o pagamento. Tente novamente.',
-        );
-      }
 
-      // Venda fica como PENDENTE mesmo sem cobrança no gateway
-      // O admin pode reprocessar ou cancelar manualmente
+        dadosPagamento = {
+          pixCopiaECola: cobranca.pixCopiaECola,
+          qrCodeBase64: cobranca.qrCodeBase64,
+          urlPagamento: cobranca.urlPagamento,
+        };
+
+        this.logger.log(
+          `Cobrança criada no gateway: gatewayId=${cobranca.gatewayId}`,
+        );
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Erro ao criar cobrança no gateway para venda ${venda.id}: ${errorMessage}`,
+        );
+
+        if (options?.requireGateway) {
+          await this.prisma.venda.update({
+            where: { id: venda.id },
+            data: {
+              status: StatusVenda.RECUSADO,
+              gatewayPayload: {
+                erroPagamento: errorMessage,
+              } as Prisma.InputJsonValue,
+            },
+          });
+          throw new BadGatewayException(
+            'Não foi possível processar o pagamento. Tente novamente.',
+          );
+        }
+
+        // Venda fica como PENDENTE mesmo sem cobrança no gateway
+        // O admin pode reprocessar ou cancelar manualmente
       }
     }
 
@@ -485,7 +491,15 @@ export class VendasService {
         dataEncerramento: true,
         valorCartela: true,
         combos: {
-          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true, intervalo: true },
+          select: {
+            id: true,
+            origemParticipacao: true,
+            tipoCartela: true,
+            preco: true,
+            rangeInicio: true,
+            rangeFinal: true,
+            intervalo: true,
+          },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
         },
       },
@@ -532,7 +546,9 @@ export class VendasService {
                 ? 'UNITARIO'
                 : 'COMBO',
             quantidadeCartelas: 0,
-            valorUnitarioCartela: this.formatarValorMonetario(edicao.valorCartela),
+            valorUnitarioCartela: this.formatarValorMonetario(
+              edicao.valorCartela,
+            ),
             valorCombo: null,
             preco: null,
             passoEntreCartelas: '0',
@@ -592,7 +608,10 @@ export class VendasService {
     const primeiroCombo = combos[0];
     const comboAtual =
       primeiroCombo && primeiroCombo.numeroBase
-        ? { numeroBase: primeiroCombo.numeroBase, bilhetes: primeiroCombo.bilhetes }
+        ? {
+            numeroBase: primeiroCombo.numeroBase,
+            bilhetes: primeiroCombo.bilhetes,
+          }
         : null;
 
     return {
@@ -790,12 +809,7 @@ export class VendasService {
 
   // ─── FIND BY CLIENTE CPF ──────────────────────────────
 
-  async findByCliente(
-    cpf: string,
-    page = 1,
-    limit = 20,
-    user?: RequestUser,
-  ) {
+  async findByCliente(cpf: string, page = 1, limit = 20, user?: RequestUser) {
     const cpfLimpo = cpf.replace(/\D/g, '');
     const pagination = normalizePagination(page, limit);
 
@@ -1285,7 +1299,7 @@ export class VendasService {
       return {
         ...registro,
         distribuidor: distribuidorId
-          ? distribuidoresPorId.get(distribuidorId) ?? null
+          ? (distribuidoresPorId.get(distribuidorId) ?? null)
           : null,
       } as T;
     });
@@ -1326,7 +1340,10 @@ export class VendasService {
         confirmadoEm:
           cobranca.paidAt?.toISOString() ?? new Date().toISOString(),
       });
-      await this.registrarSucessoReconciliacaoPos(venda.id, venda.gatewayPayload);
+      await this.registrarSucessoReconciliacaoPos(
+        venda.id,
+        venda.gatewayPayload,
+      );
 
       const vendaAtualizada = await this.prisma.venda.findUnique({
         where: { id: venda.id },
@@ -1382,7 +1399,9 @@ export class VendasService {
     const mensagem = error instanceof Error ? error.message : String(error);
     const cooldownSegundos = this.obterCooldownReconciliacaoPos(mensagem);
     const agora = new Date();
-    const proximaTentativa = new Date(agora.getTime() + cooldownSegundos * 1000);
+    const proximaTentativa = new Date(
+      agora.getTime() + cooldownSegundos * 1000,
+    );
 
     await this.prisma.venda.update({
       where: { id: vendaId },
@@ -1738,10 +1757,7 @@ export class VendasService {
   }
 
   private resolverCriadoPorId(user?: RequestUser): string | null {
-    if (
-      user &&
-      ['ADMIN', 'DISTRIBUIDOR', 'VENDEDOR'].includes(user.perfil)
-    ) {
+    if (user && ['ADMIN', 'DISTRIBUIDOR', 'VENDEDOR'].includes(user.perfil)) {
       return user.id;
     }
 
@@ -1908,34 +1924,17 @@ export class VendasService {
     /** Evita reconsultar o vendedor quando o chamador já o carregou. */
     distribuidorDoVendedorConhecido?: string,
   ): Promise<RelacionamentoClienteMaisRecente> {
-    let distribuidorDoVendedor: string | null =
-      distribuidorDoVendedorConhecido ?? null;
-
-    if (vendedorId && !distribuidorDoVendedor) {
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: vendedorId },
-        select: { distribuidorId: true },
-      });
-
-      // `create` já valida o vendedor antes de chegar aqui, mas este método
-      // também atende a loja pública (LojaPublicaService), que não passa por
-      // aquela validação. Sem o 404 o par (vendedor, null) seria gravado e a
-      // CHECK do banco devolveria erro de constraint no lugar.
-      if (!vendedor) {
-        throw new NotFoundException('Vendedor não encontrado');
-      }
-
-      distribuidorDoVendedor = vendedor.distribuidorId;
-    }
-
-    // `null` = nada informado; neste contexto significa preservar o vínculo
-    // atual do cliente, então devolvemos um objeto vazio.
-    return (
-      resolverVinculoCliente({
-        vendedorId,
-        distribuidorId,
-        distribuidorDoVendedor,
-      }) ?? {}
+    return resolverVinculoDaCompra(
+      async (id) => {
+        const vendedor = await this.prisma.vendedor.findUnique({
+          where: { id },
+          select: { distribuidorId: true },
+        });
+        return vendedor?.distribuidorId ?? null;
+      },
+      vendedorId,
+      distribuidorId,
+      distribuidorDoVendedorConhecido,
     );
   }
 
@@ -1972,7 +1971,15 @@ export class VendasService {
       where: { id: venda.edicaoId },
       select: {
         combos: {
-          select: { id: true, origemParticipacao: true, tipoCartela: true, preco: true, rangeInicio: true, rangeFinal: true, intervalo: true },
+          select: {
+            id: true,
+            origemParticipacao: true,
+            tipoCartela: true,
+            preco: true,
+            rangeInicio: true,
+            rangeFinal: true,
+            intervalo: true,
+          },
           orderBy: [{ origemParticipacao: 'asc' }, { tipoCartela: 'asc' }],
         },
       },
@@ -2355,8 +2362,11 @@ export class VendasService {
     origemParticipacao: OrigemParticipacao,
     tipoCartela?: TipoCartela,
   ): ConfiguracaoVendaResolvida {
-    const origemEfetiva = this.resolverOrigemDosRangesParaCombo(origemParticipacao);
-    const combosDaOrigem = combos.filter((c) => c.origemParticipacao === origemEfetiva);
+    const origemEfetiva =
+      this.resolverOrigemDosRangesParaCombo(origemParticipacao);
+    const combosDaOrigem = combos.filter(
+      (c) => c.origemParticipacao === origemEfetiva,
+    );
 
     if (combosDaOrigem.length === 0) {
       throw new BadRequestException(
@@ -2366,7 +2376,9 @@ export class VendasService {
 
     let comboSelecionado: ComboVenda | undefined;
     if (tipoCartela) {
-      comboSelecionado = combosDaOrigem.find((c) => c.tipoCartela === tipoCartela);
+      comboSelecionado = combosDaOrigem.find(
+        (c) => c.tipoCartela === tipoCartela,
+      );
       if (!comboSelecionado) {
         throw new BadRequestException(
           `Tipo de cartela solicitado não está disponível para a origem ${origemParticipacao}`,
@@ -2382,7 +2394,9 @@ export class VendasService {
       combo: comboSelecionado,
       tipoCartelaSelecionada: comboSelecionado.tipoCartela,
       precoCombo: comboSelecionado.preco,
-      quantidadeCartelas: this.obterQuantidadeCartelasDaVenda(comboSelecionado.tipoCartela),
+      quantidadeCartelas: this.obterQuantidadeCartelasDaVenda(
+        comboSelecionado.tipoCartela,
+      ),
     };
   }
 

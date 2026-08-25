@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   ForbiddenException,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 
 /**
@@ -81,10 +83,10 @@ export function resolverVinculoCliente({
 /**
  * Trata string vazia como ausência de valor, colapsando para `null`.
  *
- * Use `normalizarIdPreservandoAusencia` quando for preciso distinguir "campo
- * não veio" (`undefined`) de "campo veio vazio" (`null`).
+ * Interno: quem precisa distinguir "campo não veio" (`undefined`) de "campo
+ * veio vazio" (`null`) usa `normalizarIdPreservandoAusencia`, que é exportada.
  */
-export function normalizarId(value: string | null | undefined): string | null {
+function normalizarId(value: string | null | undefined): string | null {
   return normalizarIdPreservandoAusencia(value) ?? null;
 }
 
@@ -163,4 +165,173 @@ export function aplicarVinculoDoToken(
   }
 
   // ADMIN: vínculo livre.
+}
+
+/** Estado do cadastro mais o que chegou no payload de atualização. */
+export interface EntradaVinculoAtualizacao {
+  /** `undefined` = campo ausente no payload; `null` = presente e vazio. */
+  vendedorInformado: string | null | undefined;
+  distribuidorInformado: string | null | undefined;
+  vendedorAtual: string | null;
+  distribuidorAtual: string | null;
+  /** `distribuidorId` do vendedor final, já lido do banco pelo chamador. */
+  distribuidorDoVendedor?: string | null;
+}
+
+/**
+ * Qual vendedor vale ao final da atualização: o que veio no payload, ou o que
+ * já estava no cadastro quando o campo não foi informado.
+ *
+ * Exposta porque o chamador precisa dela ANTES de decidir o vínculo — é por
+ * este id que ele carrega o vendedor para obter `distribuidorDoVendedor`.
+ */
+export function vendedorFinalDaAtualizacao(
+  vendedorInformado: string | null | undefined,
+  vendedorAtual: string | null,
+): string | null {
+  return vendedorInformado !== undefined
+    ? normalizarId(vendedorInformado)
+    : vendedorAtual;
+}
+
+/**
+ * Decide o vínculo de uma ATUALIZAÇÃO de cliente.
+ *
+ * Regra única: só conta como explícito o que chegou nesta requisição. O que
+ * vem do cadastro é contexto, não escolha do chamador — e é isso que separa
+ * "mover o cliente de rede" de "reafirmar a rede atual".
+ *
+ * Casos:
+ *   - vendedor informado  → ele vence, e o distribuidor sai dele quando não
+ *     for informado (a regra do valor explícito).
+ *   - só distribuidor informado, mudando de rede → o vendedor do cadastro não
+ *     foi escolhido nesta requisição e é ele que cede.
+ *   - só distribuidor informado, igual ao atual → nada muda; ceder aqui
+ *     apagaria o vendedor num PATCH que não alterou coisa alguma.
+ *   - distribuidor informado como vazio, com vendedor no cliente → recusa. Um
+ *     vendedor implica seu distribuidor (CHECK no banco), então honrar o
+ *     pedido exigiria apagar o `vendedorId`, que o chamador não mencionou.
+ */
+export function resolverVinculoClienteNaAtualizacao({
+  vendedorInformado,
+  distribuidorInformado,
+  vendedorAtual,
+  distribuidorAtual,
+  distribuidorDoVendedor,
+}: EntradaVinculoAtualizacao): VinculoCliente {
+  const vendedorExplicito = vendedorInformado !== undefined;
+  const distribuidorExplicito = distribuidorInformado !== undefined;
+
+  const vendedorFinal = vendedorFinalDaAtualizacao(
+    vendedorInformado,
+    vendedorAtual,
+  );
+  const distribuidor = normalizarId(distribuidorInformado);
+
+  // Só recusa quando o vendedor NÃO foi mencionado nesta requisição: aí
+  // honrar o pedido exigiria apagar um campo que o chamador não citou. Quando
+  // os dois vêm juntos (`vendedorId: V, distribuidorId: ''`), o vazio é um
+  // pedido de derivação, não de remoção.
+  if (
+    distribuidorExplicito &&
+    !distribuidor &&
+    !vendedorExplicito &&
+    vendedorFinal
+  ) {
+    throw new BadRequestException(
+      'Não é possível remover o distribuidor de um cliente que tem vendedor. ' +
+        'Envie `vendedorId` vazio na mesma requisição para desvincular os dois.',
+    );
+  }
+
+  // O vendedor do cadastro cede ao distribuidor explícito só quando a rede
+  // está de fato mudando e ele é de outra rede.
+  const vendedorCede =
+    !vendedorExplicito &&
+    distribuidorExplicito &&
+    Boolean(distribuidor) &&
+    distribuidor !== distribuidorAtual &&
+    Boolean(vendedorFinal) &&
+    normalizarId(distribuidorDoVendedor) !== distribuidor;
+
+  const vinculo = resolverVinculoCliente({
+    vendedorId: vendedorCede ? null : vendedorFinal,
+    // Distribuidor não informado: deriva do vendedor quando há um; sem
+    // vendedor não há de onde derivar, então preserva-se o do cadastro.
+    distribuidorId: distribuidorExplicito
+      ? distribuidor
+      : vendedorFinal
+        ? null
+        : distribuidorAtual,
+    distribuidorDoVendedor,
+  });
+
+  return vinculo ?? { vendedorId: null, distribuidorId: null };
+}
+
+/**
+ * Recusa um vendedor que não pertence à rede do distribuidor autenticado.
+ *
+ * Só age para o perfil DISTRIBUIDOR: ADMIN informa o vínculo livremente e
+ * VENDEDOR já tem o seu forçado pelo token.
+ */
+export function garantirVendedorDaRedeDoDistribuidor(
+  vendedor: { distribuidorId: string } | null | undefined,
+  user: UsuarioDoVinculo | undefined,
+): void {
+  if (!vendedor || user?.perfil !== 'DISTRIBUIDOR') {
+    return;
+  }
+
+  if (vendedor.distribuidorId !== user.distribuidorId) {
+    throw new ForbiddenException(
+      'Vendedor não pertence ao distribuidor autenticado',
+    );
+  }
+}
+
+/** Vínculo parcial: `{}` significa "nada informado, preserve o atual". */
+export type VinculoClienteParcial = Partial<VinculoCliente>;
+
+/**
+ * Decide o vínculo a gravar no cadastro do cliente durante uma compra.
+ *
+ * Recebe a leitura como callback em vez do Prisma: mantém o util sem
+ * dependência de infra e deixa os dois produtos (Capital Prêmios e Capital
+ * Sena) compartilharem a mesma regra, em vez de manterem cópias em lockstep.
+ *
+ * `distribuidorDoVendedorConhecido` evita a consulta quando o chamador já
+ * carregou o vendedor — a validação continua valendo para quem não carregou.
+ */
+export async function resolverVinculoDaCompra(
+  buscarDistribuidorDoVendedor: (vendedorId: string) => Promise<string | null>,
+  vendedorId?: string,
+  distribuidorId?: string,
+  distribuidorDoVendedorConhecido?: string,
+): Promise<VinculoClienteParcial> {
+  let distribuidorDoVendedor: string | null =
+    distribuidorDoVendedorConhecido ?? null;
+
+  if (vendedorId && !distribuidorDoVendedor) {
+    // Os `create` dos services validam o vendedor antes de chegar aqui, mas
+    // este caminho também é alcançado por fluxos que não passam por aquela
+    // validação (a loja pública, por exemplo). Sem o 404 o par
+    // (vendedor, null) seria gravado e a CHECK do banco devolveria erro de
+    // constraint no lugar de uma mensagem útil.
+    distribuidorDoVendedor = await buscarDistribuidorDoVendedor(vendedorId);
+
+    if (!distribuidorDoVendedor) {
+      throw new NotFoundException('Vendedor não encontrado');
+    }
+  }
+
+  // `null` = nada informado; aqui significa preservar o vínculo atual do
+  // cliente, então devolvemos um objeto vazio.
+  return (
+    resolverVinculoCliente({
+      vendedorId,
+      distribuidorId,
+      distribuidorDoVendedor,
+    }) ?? {}
+  );
 }

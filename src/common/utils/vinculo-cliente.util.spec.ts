@@ -1,10 +1,17 @@
 import {
+  BadRequestException,
   ForbiddenException,
   InternalServerErrorException,
 } from '@nestjs/common';
 import {
   aplicarVinculoDoToken,
+  garantirVendedorDaRedeDoDistribuidor,
   resolverVinculoCliente,
+  resolverVinculoClienteNaAtualizacao,
+} from './vinculo-cliente.util';
+import type {
+  EntradaVinculoAtualizacao,
+  VinculoCliente,
 } from './vinculo-cliente.util';
 
 describe('resolverVinculoCliente', () => {
@@ -226,5 +233,200 @@ describe('aplicarVinculoDoToken', () => {
     expect(() =>
       aplicarVinculoDoToken(dto(), { perfil: 'DISTRIBUIDOR' }),
     ).toThrow(ForbiddenException);
+  });
+});
+
+describe('resolverVinculoClienteNaAtualizacao', () => {
+  const V = 'vendedor-rede-A';
+  const A = 'distribuidor-A';
+  const B = 'distribuidor-B';
+
+  // Tabela-verdade exaustiva: campo ausente (undefined) / vazio (null) / com
+  // valor, cruzado com o estado do cadastro. Cada linha e um caso que ja
+  // apareceu — ou poderia aparecer — numa rodada de revisao.
+  const casos: Array<{
+    nome: string;
+    entrada: EntradaVinculoAtualizacao;
+    esperado: VinculoCliente;
+  }> = [
+    {
+      nome: 'so vendedor informado → vence e deriva a rede dele',
+      entrada: {
+        vendedorInformado: V,
+        distribuidorInformado: undefined,
+        vendedorAtual: null,
+        distribuidorAtual: B,
+        distribuidorDoVendedor: A,
+      },
+      esperado: { vendedorId: V, distribuidorId: A },
+    },
+    {
+      nome: 'vendedor e distribuidor informados → explicito vence nos dois',
+      entrada: {
+        vendedorInformado: V,
+        distribuidorInformado: B,
+        vendedorAtual: null,
+        distribuidorAtual: null,
+        distribuidorDoVendedor: A,
+      },
+      esperado: { vendedorId: V, distribuidorId: B },
+    },
+    {
+      nome: 'vendedor vazio informado → desvincula e preserva a rede',
+      entrada: {
+        vendedorInformado: null,
+        distribuidorInformado: undefined,
+        vendedorAtual: V,
+        distribuidorAtual: A,
+        distribuidorDoVendedor: undefined,
+      },
+      esperado: { vendedorId: null, distribuidorId: A },
+    },
+    {
+      nome: 'vendedor e distribuidor vazios → orfana o cliente',
+      entrada: {
+        vendedorInformado: null,
+        distribuidorInformado: null,
+        vendedorAtual: V,
+        distribuidorAtual: A,
+        distribuidorDoVendedor: undefined,
+      },
+      esperado: { vendedorId: null, distribuidorId: null },
+    },
+    {
+      nome: 'so distribuidor informado, rede MUDA e vendedor e de outra → cede',
+      entrada: {
+        vendedorInformado: undefined,
+        distribuidorInformado: B,
+        vendedorAtual: V,
+        distribuidorAtual: A,
+        distribuidorDoVendedor: A,
+      },
+      esperado: { vendedorId: null, distribuidorId: B },
+    },
+    {
+      nome: 'so distribuidor informado, IGUAL ao atual → idempotente',
+      entrada: {
+        vendedorInformado: undefined,
+        distribuidorInformado: B,
+        vendedorAtual: V,
+        distribuidorAtual: B,
+        distribuidorDoVendedor: A,
+      },
+      esperado: { vendedorId: V, distribuidorId: B },
+    },
+    {
+      nome: 'so distribuidor informado e vendedor ja e da rede → preserva',
+      entrada: {
+        vendedorInformado: undefined,
+        distribuidorInformado: B,
+        vendedorAtual: V,
+        distribuidorAtual: A,
+        distribuidorDoVendedor: B,
+      },
+      esperado: { vendedorId: V, distribuidorId: B },
+    },
+    {
+      nome: 'so distribuidor informado e cliente sem vendedor → troca a rede',
+      entrada: {
+        vendedorInformado: undefined,
+        distribuidorInformado: B,
+        vendedorAtual: null,
+        distribuidorAtual: A,
+        distribuidorDoVendedor: undefined,
+      },
+      esperado: { vendedorId: null, distribuidorId: B },
+    },
+    {
+      nome: 'distribuidor vazio e cliente sem vendedor → orfana',
+      entrada: {
+        vendedorInformado: undefined,
+        distribuidorInformado: null,
+        vendedorAtual: null,
+        distribuidorAtual: A,
+        distribuidorDoVendedor: undefined,
+      },
+      esperado: { vendedorId: null, distribuidorId: null },
+    },
+    {
+      nome: 'vendedor informado com distribuidor vazio → deriva do vendedor',
+      entrada: {
+        vendedorInformado: V,
+        distribuidorInformado: null,
+        vendedorAtual: null,
+        distribuidorAtual: null,
+        distribuidorDoVendedor: A,
+      },
+      esperado: { vendedorId: V, distribuidorId: A },
+    },
+  ];
+
+  it.each(casos)('$nome', ({ entrada, esperado }) => {
+    expect(resolverVinculoClienteNaAtualizacao(entrada)).toEqual(esperado);
+  });
+
+  it('recusa esvaziar o distribuidor de um cliente cujo vendedor veio do cadastro', () => {
+    // Honrar o pedido exigiria apagar o vendedorId, que o chamador nao citou.
+    expect(() =>
+      resolverVinculoClienteNaAtualizacao({
+        vendedorInformado: undefined,
+        distribuidorInformado: null,
+        vendedorAtual: V,
+        distribuidorAtual: A,
+        distribuidorDoVendedor: A,
+      }),
+    ).toThrow(BadRequestException);
+  });
+
+  it('nenhuma saida devolve vendedor sem distribuidor', () => {
+    for (const { entrada } of casos) {
+      const r = resolverVinculoClienteNaAtualizacao(entrada);
+      if (r.vendedorId) {
+        expect(r.distribuidorId).not.toBeNull();
+      }
+    }
+  });
+});
+
+describe('garantirVendedorDaRedeDoDistribuidor', () => {
+  it('recusa vendedor de outra rede para DISTRIBUIDOR', () => {
+    expect(() =>
+      garantirVendedorDaRedeDoDistribuidor(
+        { distribuidorId: 'outra' },
+        {
+          perfil: 'DISTRIBUIDOR',
+          distribuidorId: 'minha',
+        },
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('aceita vendedor da propria rede', () => {
+    expect(() =>
+      garantirVendedorDaRedeDoDistribuidor(
+        { distribuidorId: 'minha' },
+        {
+          perfil: 'DISTRIBUIDOR',
+          distribuidorId: 'minha',
+        },
+      ),
+    ).not.toThrow();
+  });
+
+  it('nao age para ADMIN nem sem vendedor', () => {
+    expect(() =>
+      garantirVendedorDaRedeDoDistribuidor(
+        { distribuidorId: 'outra' },
+        {
+          perfil: 'ADMIN',
+        },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      garantirVendedorDaRedeDoDistribuidor(null, {
+        perfil: 'DISTRIBUIDOR',
+        distribuidorId: 'minha',
+      }),
+    ).not.toThrow();
   });
 });
