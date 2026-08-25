@@ -8,6 +8,7 @@ import {
   garantirVendedorDaRedeDoDistribuidor,
   resolverVinculoCliente,
   resolverVinculoClienteNaAtualizacao,
+  resolverVinculoDaCompra,
 } from './vinculo-cliente.util';
 import type {
   EntradaVinculoAtualizacao,
@@ -278,7 +279,7 @@ describe('resolverVinculoClienteNaAtualizacao', () => {
         distribuidorInformado: undefined,
         vendedorAtual: V,
         distribuidorAtual: A,
-        distribuidorDoVendedor: undefined,
+        distribuidorDoVendedor: null,
       },
       esperado: { vendedorId: null, distribuidorId: A },
     },
@@ -289,7 +290,7 @@ describe('resolverVinculoClienteNaAtualizacao', () => {
         distribuidorInformado: null,
         vendedorAtual: V,
         distribuidorAtual: A,
-        distribuidorDoVendedor: undefined,
+        distribuidorDoVendedor: null,
       },
       esperado: { vendedorId: null, distribuidorId: null },
     },
@@ -333,7 +334,7 @@ describe('resolverVinculoClienteNaAtualizacao', () => {
         distribuidorInformado: B,
         vendedorAtual: null,
         distribuidorAtual: A,
-        distribuidorDoVendedor: undefined,
+        distribuidorDoVendedor: null,
       },
       esperado: { vendedorId: null, distribuidorId: B },
     },
@@ -344,7 +345,7 @@ describe('resolverVinculoClienteNaAtualizacao', () => {
         distribuidorInformado: null,
         vendedorAtual: null,
         distribuidorAtual: A,
-        distribuidorDoVendedor: undefined,
+        distribuidorDoVendedor: null,
       },
       esperado: { vendedorId: null, distribuidorId: null },
     },
@@ -385,6 +386,35 @@ describe('resolverVinculoClienteNaAtualizacao', () => {
         expect(r.distribuidorId).not.toBeNull();
       }
     }
+  });
+
+  // ─── REGRESSAO: omitir distribuidorDoVendedor apagava o vendedor calado ──
+  // O TypeScript agora obriga o campo (string | null, sem undefined). Este
+  // teste cobre quem contorna o tipo — o guard em runtime tem de barrar.
+  it('recusa silenciar: vendedor final sem distribuidorDoVendedor lanca em vez de desvincular', () => {
+    expect(() =>
+      resolverVinculoClienteNaAtualizacao({
+        vendedorInformado: undefined,
+        distribuidorInformado: B,
+        vendedorAtual: V,
+        distribuidorAtual: A,
+        // Contorna o tipo de propósito: simula quem esquece o campo.
+      } as EntradaVinculoAtualizacao),
+    ).toThrow(InternalServerErrorException);
+  });
+
+  it('mesmo caso com distribuidorDoVendedor correto NAO lanca e cede como esperado', () => {
+    // Prova que o guard acima não é largo demais: com o campo presente, o
+    // caso "rede muda de verdade" segue funcionando.
+    expect(
+      resolverVinculoClienteNaAtualizacao({
+        vendedorInformado: undefined,
+        distribuidorInformado: B,
+        vendedorAtual: V,
+        distribuidorAtual: A,
+        distribuidorDoVendedor: A,
+      }),
+    ).toEqual({ vendedorId: null, distribuidorId: B });
   });
 });
 
@@ -428,5 +458,63 @@ describe('garantirVendedorDaRedeDoDistribuidor', () => {
         distribuidorId: 'minha',
       }),
     ).not.toThrow();
+  });
+});
+
+describe('resolverVinculoDaCompra', () => {
+  const V = 'vendedor-1';
+  const D = 'distribuidor-1';
+
+  it('nada informado → objeto vazio, chamador nao consulta o vendedor', async () => {
+    const buscar = jest.fn();
+
+    const vinculo = await resolverVinculoDaCompra(buscar);
+
+    expect(vinculo).toEqual({});
+    expect(buscar).not.toHaveBeenCalled();
+  });
+
+  it('so vendedor informado → busca a rede dele e deriva', async () => {
+    const buscar = jest.fn().mockResolvedValue(D);
+
+    const vinculo = await resolverVinculoDaCompra(buscar, V);
+
+    expect(vinculo).toEqual({ vendedorId: V, distribuidorId: D });
+    expect(buscar).toHaveBeenCalledWith(V);
+  });
+
+  it('distribuidorDoVendedorConhecido informado → pula a consulta', async () => {
+    const buscar = jest.fn();
+
+    const vinculo = await resolverVinculoDaCompra(buscar, V, undefined, D);
+
+    expect(vinculo).toEqual({ vendedorId: V, distribuidorId: D });
+    expect(buscar).not.toHaveBeenCalled();
+  });
+
+  it('vendedor informado e distribuidor explicito → explicito vence', async () => {
+    const buscar = jest.fn().mockResolvedValue(D);
+    const outro = 'distribuidor-2';
+
+    const vinculo = await resolverVinculoDaCompra(buscar, V, outro);
+
+    expect(vinculo).toEqual({ vendedorId: V, distribuidorId: outro });
+  });
+
+  it('vendedor nao encontrado pelo callback → 404, nao grava par incoerente', async () => {
+    const buscar = jest.fn().mockResolvedValue(null);
+
+    await expect(resolverVinculoDaCompra(buscar, V)).rejects.toThrow(
+      'Vendedor não encontrado',
+    );
+  });
+
+  it('so distribuidor informado → vincula sem vendedor, sem consultar', async () => {
+    const buscar = jest.fn();
+
+    const vinculo = await resolverVinculoDaCompra(buscar, undefined, D);
+
+    expect(vinculo).toEqual({ vendedorId: null, distribuidorId: D });
+    expect(buscar).not.toHaveBeenCalled();
   });
 });

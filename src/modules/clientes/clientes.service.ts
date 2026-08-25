@@ -655,7 +655,7 @@ export class ClientesService {
         distribuidorInformado: distribuidorId,
         vendedorAtual: clienteAtual.vendedorId,
         distribuidorAtual: clienteAtual.distribuidorId,
-        distribuidorDoVendedor: vendedorFinal?.distribuidorId,
+        distribuidorDoVendedor: vendedorFinal?.distribuidorId ?? null,
       });
 
       data.vendedorId = vinculo.vendedorId;

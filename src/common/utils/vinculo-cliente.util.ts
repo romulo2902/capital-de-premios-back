@@ -174,8 +174,16 @@ export interface EntradaVinculoAtualizacao {
   distribuidorInformado: string | null | undefined;
   vendedorAtual: string | null;
   distribuidorAtual: string | null;
-  /** `distribuidorId` do vendedor final, já lido do banco pelo chamador. */
-  distribuidorDoVendedor?: string | null;
+  /**
+   * `distribuidorId` do vendedor final (o que vale ao término da atualização
+   * — ver `vendedorFinalDaAtualizacao`), já lido do banco pelo chamador.
+   *
+   * Obrigatório mesmo quando não há vendedor final (nesse caso, `null`):
+   * torna impossível esquecer o campo e ele acabar como `undefined`, que esta
+   * função não sabe distinguir de "o vendedor é de outra rede" — a omissão
+   * silenciosa desvincularia o vendedor num PATCH que não pediu isso.
+   */
+  distribuidorDoVendedor: string | null;
 }
 
 /**
@@ -227,6 +235,19 @@ export function resolverVinculoClienteNaAtualizacao({
     vendedorAtual,
   );
   const distribuidor = normalizarId(distribuidorInformado);
+  const distribuidorDoVendedorNormalizado = normalizarId(
+    distribuidorDoVendedor,
+  );
+
+  // Guarda de contrato: com vendedor final presente, `distribuidorDoVendedor`
+  // não pode ser `null` — o TypeScript já obriga a passá-lo, isto cobre quem
+  // contornar o tipo. Sem essa checagem, `vendedorCede` abaixo trataria "não
+  // sei a rede dele" como "a rede é outra" e desvincularia o vendedor calado.
+  if (vendedorFinal && !distribuidorDoVendedorNormalizado) {
+    throw new InternalServerErrorException(
+      'distribuidorDoVendedor não informado para um vendedor final presente',
+    );
+  }
 
   // Só recusa quando o vendedor NÃO foi mencionado nesta requisição: aí
   // honrar o pedido exigiria apagar um campo que o chamador não citou. Quando
@@ -252,7 +273,7 @@ export function resolverVinculoClienteNaAtualizacao({
     Boolean(distribuidor) &&
     distribuidor !== distribuidorAtual &&
     Boolean(vendedorFinal) &&
-    normalizarId(distribuidorDoVendedor) !== distribuidor;
+    distribuidorDoVendedorNormalizado !== distribuidor;
 
   const vinculo = resolverVinculoCliente({
     vendedorId: vendedorCede ? null : vendedorFinal,
