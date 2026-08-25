@@ -130,7 +130,9 @@ async function main(): Promise<void> {
 
   // 4. Clientes
   const clientes = [
-    { cpf: '11111111111', nome: 'Carlos Cliente', telefone: '(11) 97000-0001', cidade: 'São Paulo', estado: 'SP', vendedorId: vendedor1.id },
+    // Cliente com vendedor precisa carregar o distribuidor dele: a constraint
+    // Cliente_vinculo_coerente recusa o par (vendedor, null).
+    { cpf: '11111111111', nome: 'Carlos Cliente', telefone: '(11) 97000-0001', cidade: 'São Paulo', estado: 'SP', vendedorId: vendedor1.id, distribuidorId: distribuidor.id },
     { cpf: '22222222222', nome: 'Ana Cliente', telefone: '(21) 97000-0002', cidade: 'Rio de Janeiro', estado: 'RJ', vendedorId: null },
     { cpf: '33333333333', nome: 'Pedro Cliente', telefone: '(31) 97000-0003', cidade: 'Belo Horizonte', estado: 'MG', vendedorId: null },
   ];

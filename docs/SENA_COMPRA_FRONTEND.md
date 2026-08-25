@@ -40,10 +40,15 @@ Você nunca envia o 7º número — ele aparece só na resposta (campo `setimoNu
   dataNascimento: string;       // "YYYY-MM-DD"
   email?: string;
 
-  // ── Origem da venda (qualquer um, opcional) ─────
+  // ── Origem da venda ─────────────────────────────
+  // Na loja pública (POST /capital-sena/comprar) o vínculo comercial vem
+  // EXCLUSIVAMENTE de seller_id. Enviar vendedorId/distribuidorId no corpo
+  // não tem efeito: a rota descarta os dois, e a venda ficaria sem comissão.
+  seller_id?: string;           // UUID — recebido pela URL da loja (?seller_id=…)
+
+  // Apenas nas rotas autenticadas (/admin/capital-sena/vendas) e só para ADMIN:
   vendedorId?: string;          // UUID
   distribuidorId?: string;      // UUID
-  seller_id?: string;           // UUID — recebido pela URL da loja (?seller_id=…)
 
   // ── Cartelas: ESCOLHA UM dos 3 modos abaixo ─────
 

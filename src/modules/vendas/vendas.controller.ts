@@ -27,6 +27,7 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { ListarCombosAdminDto } from './dto/listar-combos-admin.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
+import { aplicarVinculoDoToken } from '../../common/utils/vinculo-cliente.util';
 
 /**
  * CRUD de Vendas — Painel Administrativo
@@ -54,13 +55,14 @@ export class VendasController {
   @ApiOperation({
     summary:
       'Criar venda (ADMIN manual sem gateway; DISTRIBUIDOR/VENDEDOR com pagamento)',
+    description:
+      'O vínculo comercial vem do token, não do corpo. VENDEDOR: `vendedorId` é ' +
+      'forçado ao do token e `distribuidorId` do corpo é ignorado. DISTRIBUIDOR: ' +
+      '`distribuidorId` é forçado ao do token e `vendedorId` só é aceito se o ' +
+      'vendedor pertencer à sua rede (senão 403). ADMIN informa os dois livremente.',
   })
   create(@Body() dto: CreateVendaDto, @CurrentUser() user: RequestUser) {
-    if (user.perfil === 'VENDEDOR' && user.vendedorId) {
-      dto.vendedorId = user.vendedorId;
-    } else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
-      dto.distribuidorId = user.distribuidorId;
-    }
+    aplicarVinculoDoToken(dto, user);
     return this.vendasService.create(dto, user);
   }
 
@@ -102,11 +104,13 @@ export class VendasController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
-  findAll(
-    @Query() filtros: FiltroVendasDto,
-    @CurrentUser() user: RequestUser,
-  ) {
-    return this.vendasService.findAll(filtros.page, filtros.limit, filtros, user);
+  findAll(@Query() filtros: FiltroVendasDto, @CurrentUser() user: RequestUser) {
+    return this.vendasService.findAll(
+      filtros.page,
+      filtros.limit,
+      filtros,
+      user,
+    );
   }
 
   @Get('cliente/:cpf')

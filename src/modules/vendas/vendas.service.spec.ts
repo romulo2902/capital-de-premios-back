@@ -2018,4 +2018,152 @@ describe('VendasService', () => {
       ).not.toThrow();
     });
   });
+  // ─── CHARACTERIZATION: derivacao do vinculo cliente ──────────────────
+  // Trava o comportamento ATUAL de resolverRelacionamentoMaisRecenteDoCliente
+  // antes de centralizar a regra num helper unico. O caminho de vendas hoje
+  // NAO valida coerencia entre vendedor e distribuidor informados, enquanto
+  // ClientesService lanca ConflictException no mesmo cenario.
+  describe('buscarClientePorIdParaCompra — vinculo do cliente (legado)', () => {
+    const clienteSelecionado = {
+      id: 'cliente-1',
+      cpf: '12345678901',
+      nome: 'Fulano',
+      telefone: '64999999999',
+      email: 'fulano@email.com',
+      dataNascimento: null,
+    };
+
+    beforeEach(() => {
+      mockPrisma.cliente.findUnique.mockResolvedValue(clienteSelecionado);
+      mockPrisma.cliente.update.mockResolvedValue(clienteSelecionado);
+    });
+
+    it('deriva o distribuidor a partir do vendedor quando nao informado', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        distribuidorId: 'distribuidor-do-vendedor',
+      });
+
+      await service.buscarClientePorIdParaCompra('cliente-1', 'vendedor-1');
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'cliente-1' },
+          data: {
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-do-vendedor',
+          },
+        }),
+      );
+    });
+
+    it('EXPLICITO VENCE: usa o distribuidor informado mesmo divergindo do vendedor', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        distribuidorId: 'distribuidor-real',
+      });
+
+      await service.buscarClientePorIdParaCompra(
+        'cliente-1',
+        'vendedor-1',
+        'distribuidor-informado',
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-informado',
+          },
+        }),
+      );
+    });
+
+    it('rejeita vendedor inexistente antes de gravar o vinculo', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.buscarClientePorIdParaCompra('cliente-1', 'vendedor-fantasma'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('mantem o vinculo anterior quando nao ha vendedor nem distribuidor', async () => {
+      await service.buscarClientePorIdParaCompra('cliente-1');
+
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('vincula apenas o distribuidor quando nao ha vendedor', async () => {
+      await service.buscarClientePorIdParaCompra(
+        'cliente-1',
+        undefined,
+        'distribuidor-1',
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { vendedorId: null, distribuidorId: 'distribuidor-1' },
+        }),
+      );
+    });
+  });
+
+  // ─── Posse do vendedor pelo distribuidor ─────────────────────────────
+  // O DISTRIBUIDOR pode lancar venda para um vendedor da propria rede — o
+  // controller preserva o vendedorId do corpo e a posse e validada aqui.
+  describe('create — vendedor informado por um DISTRIBUIDOR', () => {
+    const distribuidorLogado = {
+      id: 'usuario-dist',
+      email: 'dist@test.com',
+      cpf: '12345678900',
+      perfil: 'DISTRIBUIDOR',
+      status: 'ATIVO',
+      distribuidorId: 'distribuidor-logado',
+    } as const;
+
+    const dto = {
+      edicaoId: 'edicao-1',
+      clienteId: 'cliente-1',
+      quantidadeCartelas: 1,
+      tipoPagamento: TipoPagamento.PIX,
+      vendedorId: 'vendedor-de-outra-rede',
+    } as unknown as Parameters<typeof service.create>[0];
+
+    beforeEach(() => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-1',
+        numero: '001',
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01'),
+        valorCartela: new Prisma.Decimal(10),
+        qtdNumerosCartela: 6,
+        manutencaoAtiva: false,
+        combos: [
+          {
+            id: 'combo-1',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1999999),
+            preco: new Prisma.Decimal('10.00'),
+            intervalo: BigInt(1),
+          },
+        ],
+      });
+    });
+
+    it('rejeita vendedor de outra rede antes de tocar no cliente', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-de-outra-rede',
+        distribuidorId: 'outro-distribuidor',
+      });
+
+      await expect(service.create(dto, distribuidorLogado)).rejects.toThrow(
+        'Vendedor não pertence ao distribuidor autenticado',
+      );
+
+      // O vinculo do cliente nao pode ter sido gravado por uma venda recusada.
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+  });
 });

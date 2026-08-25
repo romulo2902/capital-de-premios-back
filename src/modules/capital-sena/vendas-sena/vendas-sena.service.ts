@@ -29,6 +29,10 @@ import {
   parseEValidarDataNascimento,
   validarMaioridade,
 } from '../../../common/utils/data-nascimento.util';
+import {
+  garantirVendedorDaRedeDoDistribuidor,
+  resolverVinculoDaCompra,
+} from '../../../common/utils/vinculo-cliente.util';
 
 type PrismaTransactionClient = Prisma.TransactionClient;
 
@@ -122,9 +126,34 @@ export class VendasSenaService {
       );
     }
 
-    const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
-    dto.vendedorId = sellerOrigem.vendedorId ?? dto.vendedorId;
-    dto.distribuidorId = sellerOrigem.distribuidorId ?? dto.distribuidorId;
+    // Um `seller_id` resolvido substitui o PAR inteiro, nunca campo a campo:
+    // com `??` por campo, um link de distribuidor (que resolve vendedorId nulo
+    // por definição) deixava passar o vendedorId do corpo, misturando redes.
+    //
+    // Só age quando não veio vínculo explícito. Os controllers já limpam esses
+    // campos para VENDEDOR, DISTRIBUIDOR e para a loja pública, então na
+    // prática isso preserva o par que o ADMIN informou de propósito — sem ele,
+    // um seller_id de distribuidor zerava o vendedorId do ADMIN e a comissão
+    // do vendedor sumia em silêncio.
+    const distribuidorInformadoPeloChamador = Boolean(dto.distribuidorId);
+    let distribuidorDoVendedor: string | undefined;
+
+    if (dto.seller_id) {
+      // Resolvido sempre que vier, mesmo quando não for usado: assim um
+      // `seller_id` inexistente continua falhando com 404 em vez de ser
+      // descartado em silêncio.
+      const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
+
+      if (!dto.vendedorId && !dto.distribuidorId) {
+        dto.vendedorId = sellerOrigem.vendedorId ?? undefined;
+        dto.distribuidorId = sellerOrigem.distribuidorId ?? undefined;
+        // O seller já foi resolvido contra o banco: a etapa 4 não precisa
+        // reconsultar o mesmo vendedor.
+        distribuidorDoVendedor = sellerOrigem.vendedorId
+          ? (sellerOrigem.distribuidorId ?? undefined)
+          : undefined;
+      }
+    }
 
     // 2. Resolver combo (define quantidade esperada quando há combo)
     let comboSenaId: string | null = null;
@@ -152,31 +181,52 @@ export class VendasSenaService {
       );
     }
 
-    // 4. Buscar cliente por ID ou criar/resolver pelo CPF legado
-    const cliente = dto.clienteId
-      ? await this.buscarClientePorIdParaCompra(
-          dto.clienteId,
-          dto.vendedorId,
-          dto.distribuidorId,
-        )
-      : await this.buscarOuCriarClientePorDto(dto);
-    const dadosClientePagamento =
-      this.validarDadosClienteParaPagamento(cliente);
-
-    // 5. Validar vendedor / distribuidor
+    // 4. Validar vendedor / distribuidor
+    //
+    // Roda ANTES de resolver o cliente: a resolução grava o vínculo comercial
+    // no cadastro, e um vendedor recusado aqui não pode deixar rastro lá.
     if (dto.vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: dto.vendedorId },
-      });
-      if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
-      if (!dto.distribuidorId) dto.distribuidorId = vendedor.distribuidorId;
+      // A consulta é pulada quando o `seller_id` já resolveu este vendedor
+      // contra o banco — as validações abaixo continuam valendo.
+      if (!distribuidorDoVendedor) {
+        const vendedor = await this.prisma.vendedor.findUnique({
+          where: { id: dto.vendedorId },
+          select: { id: true, distribuidorId: true },
+        });
+        if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
+
+        distribuidorDoVendedor = vendedor.distribuidorId;
+      }
+
+      // Um DISTRIBUIDOR pode lançar venda para um vendedor da própria rede,
+      // mas não para o de outra — senão escolheria a quem creditar a comissão.
+      garantirVendedorDaRedeDoDistribuidor(
+        { distribuidorId: distribuidorDoVendedor },
+        user,
+      );
+
+      if (!dto.distribuidorId) dto.distribuidorId = distribuidorDoVendedor;
     }
-    if (dto.distribuidorId) {
+    // Só confere existência quando o id veio do chamador: derivado do vendedor
+    // (ou do seller_id já resolvido), ele é uma FK que o banco garante.
+    if (dto.distribuidorId && distribuidorInformadoPeloChamador) {
       const dist = await this.prisma.distribuidor.findUnique({
         where: { id: dto.distribuidorId },
       });
       if (!dist) throw new NotFoundException('Distribuidor não encontrado');
     }
+
+    // 5. Buscar cliente por ID ou criar/resolver pelo CPF legado
+    const cliente = dto.clienteId
+      ? await this.buscarClientePorIdParaCompra(
+          dto.clienteId,
+          dto.vendedorId,
+          dto.distribuidorId,
+          distribuidorDoVendedor,
+        )
+      : await this.buscarOuCriarClientePorDto(dto, distribuidorDoVendedor);
+    const dadosClientePagamento =
+      this.validarDadosClienteParaPagamento(cliente);
 
     // 6. Resolucionar vendedor do usuário logado
     const vendedorId =
@@ -297,7 +347,7 @@ export class VendasSenaService {
           data: {
             gatewayId: cobranca.gatewayId,
             gatewayPayload: {
-              ...((cobranca.payload as Record<string, unknown>) ?? {}),
+              ...(cobranca.payload ?? {}),
               modoSelecao: dto.modoSelecao,
               numeros: this.toNumerosGatewayPayload(cartelas),
             } as unknown as Prisma.InputJsonValue,
@@ -760,6 +810,7 @@ export class VendasSenaService {
 
   private async buscarOuCriarClientePorDto(
     dto: CreateVendaSenaDto,
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<ClienteSenaCompra> {
     // Mesmos obrigatórios do Capital Prêmios (LojaPublicaService): CPF, nome e
     // telefone. E-mail e data de nascimento são opcionais.
@@ -777,6 +828,7 @@ export class VendasSenaService {
       dto.email,
       dto.vendedorId,
       dto.distribuidorId,
+      distribuidorDoVendedorConhecido,
     );
   }
 
@@ -784,11 +836,13 @@ export class VendasSenaService {
     clienteId: string,
     vendedorId?: string,
     distribuidorId?: string,
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<ClienteSenaCompra> {
     const relacionamentoMaisRecente =
       await this.resolverRelacionamentoMaisRecenteDoCliente(
         vendedorId,
         distribuidorId,
+        distribuidorDoVendedorConhecido,
       );
 
     const cliente = await this.prisma.cliente.findUnique({
@@ -854,6 +908,7 @@ export class VendasSenaService {
     email?: string,
     vendedorId?: string,
     distribuidorId?: string,
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<ClienteSenaCompra> {
     const dataNascimento = dataNascimentoInput
       ? parseEValidarDataNascimento(dataNascimentoInput)
@@ -862,6 +917,7 @@ export class VendasSenaService {
       await this.resolverRelacionamentoMaisRecenteDoCliente(
         vendedorId,
         distribuidorId,
+        distribuidorDoVendedorConhecido,
       );
     const existente = await this.prisma.cliente.findUnique({ where: { cpf } });
 
@@ -906,27 +962,21 @@ export class VendasSenaService {
   private async resolverRelacionamentoMaisRecenteDoCliente(
     vendedorId?: string,
     distribuidorId?: string,
+    /** Evita reconsultar o vendedor quando o chamador já o carregou. */
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<RelacionamentoClienteMaisRecente> {
-    if (vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: vendedorId },
-        select: { distribuidorId: true },
-      });
-
-      return {
-        vendedorId,
-        distribuidorId: distribuidorId ?? vendedor?.distribuidorId ?? null,
-      };
-    }
-
-    if (distribuidorId) {
-      return {
-        vendedorId: null,
-        distribuidorId,
-      };
-    }
-
-    return {};
+    return resolverVinculoDaCompra(
+      async (id) => {
+        const vendedor = await this.prisma.vendedor.findUnique({
+          where: { id },
+          select: { distribuidorId: true },
+        });
+        return vendedor?.distribuidorId ?? null;
+      },
+      vendedorId,
+      distribuidorId,
+      distribuidorDoVendedorConhecido,
+    );
   }
 
   private resolverTipoPagamento(
