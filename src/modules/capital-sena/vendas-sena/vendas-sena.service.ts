@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -153,7 +154,37 @@ export class VendasSenaService {
       );
     }
 
-    // 4. Buscar cliente por ID ou criar/resolver pelo CPF legado
+    // 4. Validar vendedor / distribuidor
+    //
+    // Roda ANTES de resolver o cliente: a resolução grava o vínculo comercial
+    // no cadastro, e um vendedor recusado aqui não pode deixar rastro lá.
+    if (dto.vendedorId) {
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { id: dto.vendedorId },
+      });
+      if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
+
+      // Um DISTRIBUIDOR pode lançar venda para um vendedor da própria rede,
+      // mas não para o de outra — senão escolheria a quem creditar a comissão.
+      if (
+        user?.perfil === 'DISTRIBUIDOR' &&
+        vendedor.distribuidorId !== user.distribuidorId
+      ) {
+        throw new ForbiddenException(
+          'Vendedor não pertence ao distribuidor autenticado',
+        );
+      }
+
+      if (!dto.distribuidorId) dto.distribuidorId = vendedor.distribuidorId;
+    }
+    if (dto.distribuidorId) {
+      const dist = await this.prisma.distribuidor.findUnique({
+        where: { id: dto.distribuidorId },
+      });
+      if (!dist) throw new NotFoundException('Distribuidor não encontrado');
+    }
+
+    // 5. Buscar cliente por ID ou criar/resolver pelo CPF legado
     const cliente = dto.clienteId
       ? await this.buscarClientePorIdParaCompra(
           dto.clienteId,
@@ -163,21 +194,6 @@ export class VendasSenaService {
       : await this.buscarOuCriarClientePorDto(dto);
     const dadosClientePagamento =
       this.validarDadosClienteParaPagamento(cliente);
-
-    // 5. Validar vendedor / distribuidor
-    if (dto.vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({
-        where: { id: dto.vendedorId },
-      });
-      if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
-      if (!dto.distribuidorId) dto.distribuidorId = vendedor.distribuidorId;
-    }
-    if (dto.distribuidorId) {
-      const dist = await this.prisma.distribuidor.findUnique({
-        where: { id: dto.distribuidorId },
-      });
-      if (!dist) throw new NotFoundException('Distribuidor não encontrado');
-    }
 
     // 6. Resolucionar vendedor do usuário logado
     const vendedorId =

@@ -2107,4 +2107,63 @@ describe('VendasService', () => {
       );
     });
   });
+
+  // ─── Posse do vendedor pelo distribuidor ─────────────────────────────
+  // O DISTRIBUIDOR pode lancar venda para um vendedor da propria rede — o
+  // controller preserva o vendedorId do corpo e a posse e validada aqui.
+  describe('create — vendedor informado por um DISTRIBUIDOR', () => {
+    const distribuidorLogado = {
+      id: 'usuario-dist',
+      email: 'dist@test.com',
+      cpf: '12345678900',
+      perfil: 'DISTRIBUIDOR',
+      status: 'ATIVO',
+      distribuidorId: 'distribuidor-logado',
+    } as const;
+
+    const dto = {
+      edicaoId: 'edicao-1',
+      clienteId: 'cliente-1',
+      quantidadeCartelas: 1,
+      tipoPagamento: TipoPagamento.PIX,
+      vendedorId: 'vendedor-de-outra-rede',
+    } as unknown as Parameters<typeof service.create>[0];
+
+    beforeEach(() => {
+      mockPrisma.edicao.findUnique.mockResolvedValue({
+        id: 'edicao-1',
+        numero: '001',
+        status: StatusEdicao.ATIVA,
+        dataEncerramento: new Date('2099-01-01'),
+        valorCartela: new Prisma.Decimal(10),
+        qtdNumerosCartela: 6,
+        manutencaoAtiva: false,
+        combos: [
+          {
+            id: 'combo-1',
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: TipoCartela.UMA_CHANCE,
+            rangeInicio: BigInt(1000000),
+            rangeFinal: BigInt(1999999),
+            preco: new Prisma.Decimal('10.00'),
+            intervalo: BigInt(1),
+          },
+        ],
+      });
+    });
+
+    it('rejeita vendedor de outra rede antes de tocar no cliente', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-de-outra-rede',
+        distribuidorId: 'outro-distribuidor',
+      });
+
+      await expect(service.create(dto, distribuidorLogado)).rejects.toThrow(
+        'Vendedor não pertence ao distribuidor autenticado',
+      );
+
+      // O vinculo do cliente nao pode ter sido gravado por uma venda recusada.
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+  });
 });

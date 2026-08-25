@@ -192,24 +192,27 @@ export class VendasService {
       tipoCartelaSolicitada,
     );
 
-    // 2. Buscar cliente por ID ou criar/resolver pelo CPF legado
-    const cliente = dto.clienteId
-      ? await this.buscarClientePorIdParaCompra(
-          dto.clienteId,
-          dto.vendedorId,
-          dto.distribuidorId,
-        )
-      : await this.buscarOuCriarClientePorDto(dto);
-    const dadosClientePagamento =
-      this.validarDadosClienteParaPagamento(cliente);
-
-    // 3. Validar vendedor e distribuidor se informados
+    // 2. Validar vendedor e distribuidor se informados
+    //
+    // Roda ANTES de resolver o cliente: a resolução grava o vínculo comercial
+    // no cadastro, e um vendedor recusado aqui não pode deixar rastro lá.
     if (dto.vendedorId) {
       const vendedor = await this.prisma.vendedor.findUnique({
         where: { id: dto.vendedorId },
       });
       if (!vendedor) {
         throw new NotFoundException('Vendedor não encontrado');
+      }
+
+      // Um DISTRIBUIDOR pode lançar venda para um vendedor da própria rede,
+      // mas não para o de outra — senão escolheria a quem creditar a comissão.
+      if (
+        user?.perfil === 'DISTRIBUIDOR' &&
+        vendedor.distribuidorId !== user.distribuidorId
+      ) {
+        throw new ForbiddenException(
+          'Vendedor não pertence ao distribuidor autenticado',
+        );
       }
 
       if (!dto.distribuidorId) {
@@ -225,6 +228,17 @@ export class VendasService {
         throw new NotFoundException('Distribuidor não encontrado');
       }
     }
+
+    // 3. Buscar cliente por ID ou criar/resolver pelo CPF legado
+    const cliente = dto.clienteId
+      ? await this.buscarClientePorIdParaCompra(
+          dto.clienteId,
+          dto.vendedorId,
+          dto.distribuidorId,
+        )
+      : await this.buscarOuCriarClientePorDto(dto);
+    const dadosClientePagamento =
+      this.validarDadosClienteParaPagamento(cliente);
 
     if (dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0) {
       if (dto.comboId) {

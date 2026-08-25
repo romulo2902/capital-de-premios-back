@@ -70,9 +70,11 @@ describe('VendasController — vínculo comercial', () => {
     expect(dtoRecebidoPeloService?.vendedorId).toBe('vendedor-logado');
   });
 
-  it('DISTRIBUIDOR: ignora vendedorId do corpo e usa o distribuidor do token', async () => {
+  it('DISTRIBUIDOR: usa o distribuidor do token e preserva o vendedor do corpo', async () => {
+    // O distribuidor pode lancar venda para um vendedor da propria rede, entao
+    // o vendedorId sobrevive ao controller. Quem valida a posse e o service.
     await controller.create(
-      { ...dtoBase, vendedorId: 'vendedor-de-outra-rede' },
+      { ...dtoBase, vendedorId: 'vendedor-da-rede' },
       usuario({
         perfil: 'DISTRIBUIDOR',
         distribuidorId: 'distribuidor-logado',
@@ -81,7 +83,7 @@ describe('VendasController — vínculo comercial', () => {
 
     const enviado = dtoRecebidoPeloService;
     expect(enviado?.distribuidorId).toBe('distribuidor-logado');
-    expect(enviado?.vendedorId).toBeUndefined();
+    expect(enviado?.vendedorId).toBe('vendedor-da-rede');
   });
 
   it('ADMIN: preserva o par informado no corpo', async () => {

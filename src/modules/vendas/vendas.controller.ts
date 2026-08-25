@@ -59,12 +59,14 @@ export class VendasController {
     // O vínculo comercial vem do token, nunca do corpo. Sem limpar o campo
     // oposto, um VENDEDOR poderia informar `distribuidorId` de outra rede e
     // desviar a comissão do distribuidor para ela. Só ADMIN informa livremente.
+    //
+    // O DISTRIBUIDOR mantém o `vendedorId` do corpo, porque pode lançar venda
+    // para um vendedor da própria rede — o service valida essa posse.
     if (user.perfil === 'VENDEDOR' && user.vendedorId) {
       dto.vendedorId = user.vendedorId;
       delete dto.distribuidorId;
     } else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
       dto.distribuidorId = user.distribuidorId;
-      delete dto.vendedorId;
     }
     return this.vendasService.create(dto, user);
   }

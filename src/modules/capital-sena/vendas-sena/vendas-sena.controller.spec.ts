@@ -63,9 +63,11 @@ describe('Vendas Sena — vínculo comercial nos controllers', () => {
       expect(dtoRecebido?.distribuidorId).toBeUndefined();
     });
 
-    it('DISTRIBUIDOR: ignora vendedorId do corpo e usa o distribuidor do token', async () => {
+    it('DISTRIBUIDOR: usa o distribuidor do token e preserva o vendedor do corpo', async () => {
+      // Mesma regra do Capital Premios: o distribuidor pode lancar venda para
+      // um vendedor da propria rede, e o service valida a posse.
       await controller.create(
-        { ...dtoBase, vendedorId: 'vendedor-de-outra-rede' },
+        { ...dtoBase, vendedorId: 'vendedor-da-rede' },
         usuario({
           perfil: 'DISTRIBUIDOR',
           distribuidorId: 'distribuidor-logado',
@@ -73,7 +75,7 @@ describe('Vendas Sena — vínculo comercial nos controllers', () => {
       );
 
       expect(dtoRecebido?.distribuidorId).toBe('distribuidor-logado');
-      expect(dtoRecebido?.vendedorId).toBeUndefined();
+      expect(dtoRecebido?.vendedorId).toBe('vendedor-da-rede');
     });
 
     it('ADMIN: preserva o par informado no corpo', async () => {

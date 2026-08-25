@@ -46,7 +46,8 @@ export class VendasSenaController {
       delete dto.distribuidorId;
     } else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
       dto.distribuidorId = user.distribuidorId;
-      delete dto.vendedorId;
+      // Mantém o vendedorId: o distribuidor pode lançar venda para um vendedor
+      // da própria rede. O service valida a posse.
     }
     return this.vendasSenaService.create(dto, user);
   }
