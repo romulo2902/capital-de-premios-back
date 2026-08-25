@@ -206,6 +206,7 @@ export class ClientesService {
     if (distribuidorId) {
       const distribuidor = await this.prisma.distribuidor.findUnique({
         where: { id: distribuidorId },
+        select: { id: true },
       });
       if (!distribuidor) {
         throw new NotFoundException('Distribuidor não encontrado');
@@ -226,17 +227,18 @@ export class ClientesService {
    */
   private async garantirVinculoPermitido(
     vendedor: VendedorDoVinculo | null,
+    vendedorInformado: string | null | undefined,
     distribuidorInformado: string | null | undefined,
     user?: RequestUser,
-  ): Promise<void> {
+  ): Promise<VendedorDoVinculo | null> {
     if (!user || user.perfil === 'ADMIN') {
-      return;
+      return null;
     }
 
     if (user.perfil === 'VENDEDOR') {
       if (!user.vendedorId) {
         throw new ForbiddenException(
-          'Usuário vendedor sem vínculo válido para atualizar cliente',
+          'Usuário vendedor sem vínculo válido para vincular cliente',
         );
       }
 
@@ -246,29 +248,42 @@ export class ClientesService {
         );
       }
 
-      if (distribuidorInformado) {
-        const vendedorLogado =
-          vendedor?.id === user.vendedorId
-            ? vendedor
-            : await this.prisma.vendedor.findUnique({
-                where: { id: user.vendedorId },
-                select: { id: true, distribuidorId: true },
-              });
-
-        if (distribuidorInformado !== vendedorLogado?.distribuidorId) {
-          throw new ForbiddenException(
-            'Vendedor só pode vincular cliente ao seu distribuidor',
-          );
-        }
+      // `null` explícito desvincula. Para o vendedor isso significa perder o
+      // cliente de vez: sem `vendedorId` ele sai do escopo de leitura dele e
+      // não há como desfazer.
+      if (vendedorInformado === null) {
+        throw new ForbiddenException(
+          'Vendedor não pode desvincular cliente de si mesmo',
+        );
       }
 
-      return;
+      const vendedorLogado =
+        vendedor ??
+        (await this.prisma.vendedor.findUnique({
+          where: { id: user.vendedorId },
+          select: { id: true, distribuidorId: true },
+        }));
+
+      if (!vendedorLogado) {
+        throw new NotFoundException('Vendedor não encontrado');
+      }
+
+      if (
+        distribuidorInformado &&
+        distribuidorInformado !== vendedorLogado.distribuidorId
+      ) {
+        throw new ForbiddenException(
+          'Vendedor só pode vincular cliente ao seu distribuidor',
+        );
+      }
+
+      return vendedorLogado;
     }
 
     if (user.perfil === 'DISTRIBUIDOR') {
       if (!user.distribuidorId) {
         throw new ForbiddenException(
-          'Usuário distribuidor sem vínculo válido para atualizar cliente',
+          'Usuário distribuidor sem vínculo válido para vincular cliente',
         );
       }
 
@@ -281,12 +296,22 @@ export class ClientesService {
         );
       }
 
+      // Desvincular o distribuidor tiraria o cliente do escopo dele. Já
+      // desvincular só o vendedor é legítimo: o cliente continua na rede.
+      if (distribuidorInformado === null) {
+        throw new ForbiddenException(
+          'Distribuidor não pode desvincular cliente da própria rede',
+        );
+      }
+
       if (vendedor && vendedor.distribuidorId !== user.distribuidorId) {
         throw new ForbiddenException(
           'Vendedor não pertence ao distribuidor autenticado',
         );
       }
     }
+
+    return null;
   }
 
   private async resolverRelacionamentosParaCriacao(
@@ -305,63 +330,27 @@ export class ClientesService {
       distribuidorId,
     );
 
-    // Divergência entre vendedor e distribuidor informados não é erro: o valor
-    // explícito vence (ver resolverVinculoCliente). Para VENDEDOR e
-    // DISTRIBUIDOR isso é irrelevante — os guards abaixo já obrigam o vínculo
-    // a ser o do próprio usuário, então só ADMIN chega a informar um par livre.
-    if (user.perfil === 'VENDEDOR') {
-      if (!user.vendedorId) {
-        throw new ForbiddenException(
-          'Usuário vendedor sem vínculo válido para cadastrar cliente',
-        );
-      }
+    // Guard único, compartilhado com a atualização: as regras de rede por
+    // perfil são as mesmas, e mantê-las em duas cópias já tinha produzido
+    // divergência (403 aqui, 404 lá, para o mesmo estado).
+    const vendedorLogado = await this.garantirVinculoPermitido(
+      vendedor,
+      vendedorId,
+      distribuidorId,
+      user,
+    );
 
-      const vendedorLogado = await this.prisma.vendedor.findUnique({
-        where: { id: user.vendedorId },
-        select: { id: true, distribuidorId: true },
-      });
-
-      if (!vendedorLogado) {
-        throw new NotFoundException('Vendedor não encontrado');
-      }
-
-      if (vendedor && vendedor.id !== vendedorLogado.id) {
-        throw new ForbiddenException(
-          'Vendedor só pode cadastrar cliente para si mesmo',
-        );
-      }
-
-      if (distribuidorId && distribuidorId !== vendedorLogado.distribuidorId) {
-        throw new ForbiddenException(
-          'Vendedor só pode cadastrar cliente para seu distribuidor',
-        );
-      }
-
+    // VENDEDOR: o vínculo é sempre o próprio, independente do que foi enviado.
+    if (vendedorLogado) {
       return {
         vendedorId: vendedorLogado.id,
         distribuidorId: vendedorLogado.distribuidorId,
       };
     }
 
-    if (user.perfil === 'DISTRIBUIDOR') {
-      if (!user.distribuidorId) {
-        throw new ForbiddenException(
-          'Usuário distribuidor sem vínculo válido para cadastrar cliente',
-        );
-      }
-
-      if (distribuidorId && distribuidorId !== user.distribuidorId) {
-        throw new ForbiddenException(
-          'Distribuidor só pode cadastrar cliente para sua própria rede',
-        );
-      }
-
-      if (vendedor && vendedor.distribuidorId !== user.distribuidorId) {
-        throw new ForbiddenException(
-          'Vendedor não pertence ao distribuidor autenticado',
-        );
-      }
-
+    // DISTRIBUIDOR: a rede é a dele; o vendedor (já validado como da rede) é
+    // opcional.
+    if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
       return {
         vendedorId: vendedor?.id ?? null,
         distribuidorId: user.distribuidorId,
@@ -608,7 +597,12 @@ export class ClientesService {
       distribuidorId,
     );
 
-    await this.garantirVinculoPermitido(vendedorValidado, distribuidorId, user);
+    await this.garantirVinculoPermitido(
+      vendedorValidado,
+      vendedorId,
+      distribuidorId,
+      user,
+    );
 
     const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };
     delete data.codigo;
@@ -617,48 +611,55 @@ export class ClientesService {
     }
 
     if (vendedorId !== undefined || distribuidorId !== undefined) {
-      // Campo ausente no DTO (`undefined`) preserva o valor atual; campo
-      // presente — inclusive `null` — sobrescreve.
-      const finalVendedorId =
-        vendedorId !== undefined ? vendedorId : clienteAtual.vendedorId;
+      // Regra única desta função: só conta como explícito o que chegou NESTA
+      // requisição. O que vem do cadastro é contexto, não escolha do chamador.
+      const vendedorExplicito = vendedorId !== undefined;
+      const distribuidorExplicito = distribuidorId !== undefined;
 
-      // Só conta como explícito o que veio NESTA requisição. O distribuidor
-      // gravado no cliente não é uma escolha do chamador: quando o campo não
-      // vem no DTO e há vendedor, o vínculo é derivado dele — caso contrário
-      // atribuir um vendedor de outra rede deixaria o par incoerente. Sem
-      // vendedor não há de onde derivar, então preserva-se o valor atual.
-      const distribuidorInformado =
-        distribuidorId !== undefined
+      const finalVendedorId = vendedorExplicito
+        ? vendedorId
+        : clienteAtual.vendedorId;
+
+      let vendedorFinal: VendedorDoVinculo | null = null;
+
+      if (finalVendedorId) {
+        // Só reconsulta quando o vínculo veio do cadastro — se veio do DTO, a
+        // validação acima já carregou essa mesma linha.
+        vendedorFinal =
+          vendedorValidado ??
+          (await this.prisma.vendedor.findUnique({
+            where: { id: finalVendedorId },
+            select: { id: true, distribuidorId: true },
+          }));
+
+        if (!vendedorFinal) {
+          throw new NotFoundException('Vendedor não encontrado');
+        }
+      }
+
+      // Um distribuidor explícito de outra rede invalida o vendedor que estava
+      // no cadastro: esse vendedor não foi escolhido nesta requisição, então é
+      // ele que cede. Sem isso o par (vendedor da rede A, distribuidor B) era
+      // gravado — incoerência que ninguém pediu e que a CHECK não recusa.
+      const vendedorCedeParaDistribuidorExplicito =
+        !vendedorExplicito &&
+        distribuidorExplicito &&
+        Boolean(distribuidorId) &&
+        Boolean(vendedorFinal) &&
+        vendedorFinal?.distribuidorId !== distribuidorId;
+
+      const vinculo = resolverVinculoCliente({
+        vendedorId: vendedorCedeParaDistribuidorExplicito
+          ? null
+          : finalVendedorId,
+        // Distribuidor não informado: deriva do vendedor quando há um; sem
+        // vendedor não há de onde derivar, então preserva-se o do cadastro.
+        distribuidorId: distribuidorExplicito
           ? distribuidorId
           : finalVendedorId
             ? null
-            : clienteAtual.distribuidorId;
-
-      let distribuidorDoVendedor: string | null = null;
-
-      if (finalVendedorId) {
-        // Quando o vendedor final é o mesmo que veio no DTO, ele já foi
-        // carregado na validação acima. Só há nova consulta quando o vínculo
-        // vem do cadastro atual do cliente, que a validação não tocou.
-        const vendedor =
-          vendedorValidado?.id === finalVendedorId
-            ? vendedorValidado
-            : await this.prisma.vendedor.findUnique({
-                where: { id: finalVendedorId },
-                select: { id: true, distribuidorId: true },
-              });
-
-        if (!vendedor) {
-          throw new NotFoundException('Vendedor não encontrado');
-        }
-
-        distribuidorDoVendedor = vendedor.distribuidorId;
-      }
-
-      const vinculo = resolverVinculoCliente({
-        vendedorId: finalVendedorId,
-        distribuidorId: distribuidorInformado,
-        distribuidorDoVendedor,
+            : clienteAtual.distribuidorId,
+        distribuidorDoVendedor: vendedorFinal?.distribuidorId,
       });
 
       data.vendedorId = vinculo?.vendedorId ?? null;

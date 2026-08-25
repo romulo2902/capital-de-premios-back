@@ -242,7 +242,7 @@ export class VendasService {
           dto.distribuidorId,
           distribuidorDoVendedor,
         )
-      : await this.buscarOuCriarClientePorDto(dto);
+      : await this.buscarOuCriarClientePorDto(dto, distribuidorDoVendedor);
     const dadosClientePagamento =
       this.validarDadosClienteParaPagamento(cliente);
 
@@ -1755,6 +1755,7 @@ export class VendasService {
 
   private async buscarOuCriarClientePorDto(
     dto: CreateVendaDto,
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<ClienteCompra> {
     if (!dto.cpf || !dto.nome || !dto.telefone) {
       throw new BadRequestException(
@@ -1770,6 +1771,7 @@ export class VendasService {
       dto.email,
       dto.vendedorId,
       dto.distribuidorId,
+      distribuidorDoVendedorConhecido,
     );
   }
 
@@ -1844,6 +1846,7 @@ export class VendasService {
     email?: string,
     vendedorId?: string,
     distribuidorId?: string,
+    distribuidorDoVendedorConhecido?: string,
   ) {
     const dataNascimento = dataNascimentoInput
       ? parseEValidarDataNascimento(dataNascimentoInput)
@@ -1852,6 +1855,7 @@ export class VendasService {
       await this.resolverRelacionamentoMaisRecenteDoCliente(
         vendedorId,
         distribuidorId,
+        distribuidorDoVendedorConhecido,
       );
     const existente = await this.prisma.cliente.findUnique({
       where: { cpf },

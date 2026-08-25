@@ -86,10 +86,17 @@ describe('PosService', () => {
       vendedor,
     );
 
+    // O guard do token remove o campo oposto: para VENDEDOR o distribuidorId
+    // e derivado no service, nunca aceito da entrada.
+    const dtoEnviado = mockVendas.create.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect('distribuidorId' in dtoEnviado).toBe(false);
+
     expect(mockVendas.create).toHaveBeenCalledWith(
       expect.objectContaining({
         vendedorId: 'vend-1',
-        distribuidorId: undefined,
       }),
       vendedor,
       {
@@ -118,7 +125,6 @@ describe('PosService', () => {
       expect.objectContaining({
         tipoPagamento: TipoPagamento.MANUAL,
         vendedorId: 'vend-1',
-        distribuidorId: undefined,
       }),
       vendedor,
       {
@@ -140,7 +146,10 @@ describe('PosService', () => {
       estado: 'SP',
     });
 
-    const result = await service.buscarClientePorCpf('123.456.789-00', vendedor);
+    const result = await service.buscarClientePorCpf(
+      '123.456.789-00',
+      vendedor,
+    );
 
     expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
       where: {
@@ -229,10 +238,9 @@ describe('PosService', () => {
 
     const result = await service.consultarStatusPagamento('venda-1', vendedor);
 
-    expect(mockPaymentGatewayFactory.getGatewayParaConsulta).toHaveBeenCalledWith(
-      TipoPagamento.PIX,
-      undefined,
-    );
+    expect(
+      mockPaymentGatewayFactory.getGatewayParaConsulta,
+    ).toHaveBeenCalledWith(TipoPagamento.PIX, undefined);
     expect(result.data).toMatchObject({
       vendaId: 'venda-1',
       status: StatusVenda.PENDENTE,
@@ -321,9 +329,9 @@ describe('PosService', () => {
       createdAt: new Date(),
     });
 
-    await expect(service.consultarStatusPagamento('venda-1', vendedor)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.consultarStatusPagamento('venda-1', vendedor),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('rejeita consulta de status de venda de outro operador', async () => {
@@ -339,8 +347,8 @@ describe('PosService', () => {
       createdAt: new Date(),
     });
 
-    await expect(service.consultarStatusPagamento('venda-1', vendedor)).rejects.toThrow(
-      ForbiddenException,
-    );
+    await expect(
+      service.consultarStatusPagamento('venda-1', vendedor),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

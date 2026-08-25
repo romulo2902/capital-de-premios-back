@@ -713,4 +713,193 @@ describe('ClientesService', () => {
       expect(mockPrisma.cliente.update).toHaveBeenCalled();
     });
   });
+  // ─── REGRESSAO: par cruzado a partir do vendedor armazenado ──────────
+  describe('update — distribuidor explicito vs vendedor do cadastro', () => {
+    const admin = {
+      id: 'usuario-admin',
+      email: 'admin@test.com',
+      cpf: '12345678900',
+      perfil: 'ADMIN',
+      status: 'ATIVO',
+    } as const;
+
+    it('limpa o vendedor do cadastro quando o distribuidor informado e de outra rede', async () => {
+      // O vendedor V nao foi escolhido nesta requisicao; o distribuidor sim.
+      // Gravar {V, B} criaria um cliente visivel por duas redes ao mesmo tempo.
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+        id: 'cliente-1',
+        nome: 'Cliente',
+        vendedorId: 'vendedor-rede-A',
+        distribuidorId: 'distribuidor-A',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-B',
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-rede-A',
+        distribuidorId: 'distribuidor-A',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.update(
+        'cliente-1',
+        { distribuidorId: 'distribuidor-B' },
+        admin,
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: null,
+            distribuidorId: 'distribuidor-B',
+          }),
+        }),
+      );
+    });
+
+    it('mantem o vendedor do cadastro quando o distribuidor informado e o da rede dele', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+        id: 'cliente-2',
+        nome: 'Cliente',
+        vendedorId: 'vendedor-rede-A',
+        distribuidorId: 'distribuidor-A',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-A',
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-rede-A',
+        distribuidorId: 'distribuidor-A',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-2' });
+
+      await service.update(
+        'cliente-2',
+        { distribuidorId: 'distribuidor-A' },
+        admin,
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: 'vendedor-rede-A',
+            distribuidorId: 'distribuidor-A',
+          }),
+        }),
+      );
+    });
+
+    it('vendedor explicito de outra rede continua vencendo (regra do explicito)', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+        id: 'cliente-3',
+        nome: 'Cliente',
+        vendedorId: null,
+        distribuidorId: 'distribuidor-A',
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-rede-B',
+        distribuidorId: 'distribuidor-B',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-B',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-3' });
+
+      await service.update(
+        'cliente-3',
+        { vendedorId: 'vendedor-rede-B', distribuidorId: 'distribuidor-B' },
+        admin,
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: 'vendedor-rede-B',
+            distribuidorId: 'distribuidor-B',
+          }),
+        }),
+      );
+    });
+  });
+
+  // ─── REGRESSAO: null explicito atravessava o guard ───────────────────
+  describe('update — desvinculacao explicita por perfil', () => {
+    const clienteProprio = {
+      id: 'cliente-1',
+      nome: 'Cliente',
+      vendedorId: 'vendedor-logado',
+      distribuidorId: 'distribuidor-A',
+    };
+
+    it('VENDEDOR nao pode desvincular o cliente de si mesmo', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-logado',
+        distribuidorId: 'distribuidor-A',
+      });
+
+      await expect(
+        service.update(
+          'cliente-1',
+          { vendedorId: null },
+          {
+            id: 'usuario-v',
+            email: 'v@test.com',
+            cpf: '12345678900',
+            perfil: 'VENDEDOR',
+            status: 'ATIVO',
+            vendedorId: 'vendedor-logado',
+          },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('DISTRIBUIDOR nao pode desvincular o cliente da propria rede', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+
+      await expect(
+        service.update(
+          'cliente-1',
+          { distribuidorId: null },
+          {
+            id: 'usuario-d',
+            email: 'd@test.com',
+            cpf: '12345678900',
+            perfil: 'DISTRIBUIDOR',
+            status: 'ATIVO',
+            distribuidorId: 'distribuidor-A',
+          },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('DISTRIBUIDOR pode soltar o vendedor mantendo o cliente na rede', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.update(
+        'cliente-1',
+        { vendedorId: null },
+        {
+          id: 'usuario-d',
+          email: 'd@test.com',
+          cpf: '12345678900',
+          perfil: 'DISTRIBUIDOR',
+          status: 'ATIVO',
+          distribuidorId: 'distribuidor-A',
+        },
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: null,
+            distribuidorId: 'distribuidor-A',
+          }),
+        }),
+      );
+    });
+  });
 });

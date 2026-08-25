@@ -19,6 +19,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
+import { aplicarVinculoDoToken } from '../../common/utils/vinculo-cliente.util';
 import { CreateVendaDto } from '../vendas/dto/create-venda.dto';
 import { CreateVendaSenaDto } from '../capital-sena/vendas-sena/dto/create-venda-sena.dto';
 import type { CreatePosVendaDto } from './dto/create-pos-venda.dto';
@@ -223,9 +224,11 @@ export class PosService {
     const vendaDto: CreateVendaDto = {
       ...dto,
       tipoPagamento: dto.tipoPagamento ?? TipoPagamento.PIX,
-      vendedorId: user.vendedorId,
-      distribuidorId: user.distribuidorId,
     };
+    // Mesma política dos controllers: o vínculo vem do token, e um operador
+    // com perfil de venda mas sem vínculo é recusado em vez de gerar uma venda
+    // sem ninguém a quem creditar.
+    aplicarVinculoDoToken(vendaDto, user);
     const result = await this.vendasService.create(vendaDto, user, {
       origemParticipacao: OrigemParticipacao.POS,
       requireGateway:
@@ -317,9 +320,8 @@ export class PosService {
     const vendaDto: CreateVendaSenaDto = {
       ...dto,
       tipoPagamento: TipoPagamento.PIX,
-      vendedorId: user.vendedorId,
-      distribuidorId: user.distribuidorId,
     };
+    aplicarVinculoDoToken(vendaDto, user);
     return this.vendasSenaService.create(vendaDto, user, {
       origemParticipacao: OrigemParticipacao.POS,
       requireGateway: true,

@@ -80,7 +80,10 @@ export class CreateVendaDto {
   })
   @IsOptional()
   @IsArray({ message: 'cartelasSelecionadas deve ser um array' })
-  @IsString({ each: true, message: 'cada item de cartelasSelecionadas deve ser um texto' })
+  @IsString({
+    each: true,
+    message: 'cada item de cartelasSelecionadas deve ser um texto',
+  })
   cartelasSelecionadas?: string[];
 
   @ApiPropertyOptional({
@@ -113,7 +116,10 @@ export class CreateVendaDto {
   })
   @IsOptional()
   @IsArray({ message: 'combosSelecionados deve ser um array' })
-  @IsString({ each: true, message: 'cada item de combosSelecionados deve ser um texto' })
+  @IsString({
+    each: true,
+    message: 'cada item de combosSelecionados deve ser um texto',
+  })
   combosSelecionados?: string[];
 
   // --- Dados do cliente (auto-cadastro/lookup por CPF, ou referência por clienteId) ---
@@ -180,7 +186,10 @@ export class CreateVendaDto {
 
   @ApiPropertyOptional({
     example: 'uuid-do-vendedor',
-    description: 'ID do vendedor que originou a venda (opcional).',
+    description:
+      'ID do vendedor que originou a venda. Aceito apenas de ADMIN e ' +
+      'DISTRIBUIDOR (neste caso o vendedor precisa ser da própria rede). Para ' +
+      'VENDEDOR o valor é sempre substituído pelo do token.',
   })
   @IsOptional()
   @IsUUID('4', { message: 'vendedorId deve ser um UUID válido' })
@@ -188,7 +197,10 @@ export class CreateVendaDto {
 
   @ApiPropertyOptional({
     example: 'uuid-do-distribuidor',
-    description: 'ID do distribuidor que originou a venda (opcional).',
+    description:
+      'ID do distribuidor que originou a venda. Aceito apenas de ADMIN — para ' +
+      'DISTRIBUIDOR vem do token e para VENDEDOR é ignorado e derivado do ' +
+      'vendedor.',
   })
   @IsOptional()
   @IsUUID('4', { message: 'distribuidorId deve ser um UUID válido' })
