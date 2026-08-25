@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import { ModoSelecaoSena, Prisma, StatusVendaSena } from '@prisma/client';
+import {
+  ModoSelecaoSena,
+  Prisma,
+  StatusEdicaoSena,
+  StatusVendaSena,
+} from '@prisma/client';
 import { VendasSenaService } from './vendas-sena.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
@@ -648,6 +653,39 @@ describe('VendasSenaService', () => {
       await buscarCliente('cliente-1');
 
       expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── REGRESSAO: seller_id invalido precisa continuar falhando ────────
+  describe('create — validacao do seller_id', () => {
+    const servicePublico = () => service as unknown as VendasSenaService;
+
+    beforeEach(() => {
+      mockPrisma.edicaoSena.findUnique.mockResolvedValue({
+        id: 'edicao-1',
+        numero: '001',
+        status: StatusEdicaoSena.ATIVA,
+        dataEncerramento: new Date('2099-01-01'),
+        valorCartela: new Prisma.Decimal(10),
+        combos: [],
+      });
+    });
+
+    it('rejeita seller_id inexistente mesmo quando ha vinculo explicito', async () => {
+      // O vinculo explicito vence, mas isso nao pode fazer o seller_id
+      // invalido passar despercebido.
+      mockPrisma.usuario.findUnique.mockResolvedValue(null);
+      mockPrisma.vendedor.findUnique.mockResolvedValue(null);
+      mockPrisma.distribuidor.findUnique.mockResolvedValue(null);
+
+      await expect(
+        servicePublico().create({
+          edicaoSenaId: 'edicao-1',
+          seller_id: 'seller-inexistente',
+          vendedorId: 'vendedor-1',
+          numeros: [{ numeros: [1, 2, 3, 4, 5, 6], bola_extra: 7 }],
+        } as never),
+      ).rejects.toThrow('Seller não encontrado');
     });
   });
 });

@@ -229,7 +229,11 @@ export class ClientesService {
     vendedor: VendedorDoVinculo | null,
     vendedorInformado: string | null | undefined,
     distribuidorInformado: string | null | undefined,
-    user?: RequestUser,
+    user: RequestUser | undefined,
+    // Desvincular só existe na atualização. Na criação o campo vazio significa
+    // apenas "não informado" — o DTO converte string vazia em `null`, e um
+    // formulário que envia campos em branco não está pedindo desvinculação.
+    contexto: 'criacao' | 'atualizacao',
   ): Promise<VendedorDoVinculo | null> {
     if (!user || user.perfil === 'ADMIN') {
       return null;
@@ -251,7 +255,7 @@ export class ClientesService {
       // `null` explícito desvincula. Para o vendedor isso significa perder o
       // cliente de vez: sem `vendedorId` ele sai do escopo de leitura dele e
       // não há como desfazer.
-      if (vendedorInformado === null) {
+      if (contexto === 'atualizacao' && vendedorInformado === null) {
         throw new ForbiddenException(
           'Vendedor não pode desvincular cliente de si mesmo',
         );
@@ -298,7 +302,7 @@ export class ClientesService {
 
       // Desvincular o distribuidor tiraria o cliente do escopo dele. Já
       // desvincular só o vendedor é legítimo: o cliente continua na rede.
-      if (distribuidorInformado === null) {
+      if (contexto === 'atualizacao' && distribuidorInformado === null) {
         throw new ForbiddenException(
           'Distribuidor não pode desvincular cliente da própria rede',
         );
@@ -338,6 +342,7 @@ export class ClientesService {
       vendedorId,
       distribuidorId,
       user,
+      'criacao',
     );
 
     // VENDEDOR: o vínculo é sempre o próprio, independente do que foi enviado.
@@ -602,6 +607,7 @@ export class ClientesService {
       vendedorId,
       distribuidorId,
       user,
+      'atualizacao',
     );
 
     const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };

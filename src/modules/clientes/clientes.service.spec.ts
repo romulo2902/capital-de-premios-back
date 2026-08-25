@@ -902,4 +902,78 @@ describe('ClientesService', () => {
       );
     });
   });
+
+  // ─── REGRESSAO: guard de update vazou para a criacao ─────────────────
+  // O DTO converte string vazia em null e documenta isso como "remover o
+  // vinculo". Na CRIACAO nao ha vinculo a remover: o campo em branco significa
+  // apenas "nao informado" e o vinculo e forcado ao do proprio usuario.
+  describe('create — vinculo enviado vazio', () => {
+    it('VENDEDOR cria cliente normalmente com vendedorId nulo no payload', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-logado',
+        distribuidorId: 'distribuidor-1',
+      });
+      mockPrisma.cliente.create.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.create(
+        {
+          cpf: '200.074.694-20',
+          nome: 'Cliente Teste',
+          telefone: '(84) 99999-9999',
+          dataNascimento: '1990-01-01',
+          vendedorId: null,
+        },
+        {
+          id: 'usuario-1',
+          email: 'vend@test.com',
+          cpf: '12345678900',
+          perfil: 'VENDEDOR',
+          status: 'ATIVO',
+          vendedorId: 'vendedor-logado',
+        },
+      );
+
+      expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: 'vendedor-logado',
+            distribuidorId: 'distribuidor-1',
+          }),
+        }),
+      );
+    });
+
+    it('DISTRIBUIDOR cria cliente normalmente com distribuidorId nulo no payload', async () => {
+      mockPrisma.cliente.findUnique.mockResolvedValueOnce(null);
+      mockPrisma.cliente.create.mockResolvedValue({ id: 'cliente-2' });
+
+      await service.create(
+        {
+          cpf: '200.074.694-20',
+          nome: 'Cliente Teste',
+          telefone: '(84) 99999-9999',
+          dataNascimento: '1990-01-01',
+          distribuidorId: null,
+        },
+        {
+          id: 'usuario-2',
+          email: 'dist@test.com',
+          cpf: '12345678900',
+          perfil: 'DISTRIBUIDOR',
+          status: 'ATIVO',
+          distribuidorId: 'distribuidor-1',
+        },
+      );
+
+      expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: null,
+            distribuidorId: 'distribuidor-1',
+          }),
+        }),
+      );
+    });
+  });
 });

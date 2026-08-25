@@ -135,15 +135,21 @@ export class VendasSenaService {
     // do vendedor sumia em silêncio.
     let distribuidorDoVendedor: string | undefined;
 
-    if (dto.seller_id && !dto.vendedorId && !dto.distribuidorId) {
+    if (dto.seller_id) {
+      // Resolvido sempre que vier, mesmo quando não for usado: assim um
+      // `seller_id` inexistente continua falhando com 404 em vez de ser
+      // descartado em silêncio.
       const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
-      dto.vendedorId = sellerOrigem.vendedorId ?? undefined;
-      dto.distribuidorId = sellerOrigem.distribuidorId ?? undefined;
-      // O seller já foi resolvido contra o banco: a etapa 4 não precisa
-      // reconsultar o mesmo vendedor.
-      distribuidorDoVendedor = sellerOrigem.vendedorId
-        ? (sellerOrigem.distribuidorId ?? undefined)
-        : undefined;
+
+      if (!dto.vendedorId && !dto.distribuidorId) {
+        dto.vendedorId = sellerOrigem.vendedorId ?? undefined;
+        dto.distribuidorId = sellerOrigem.distribuidorId ?? undefined;
+        // O seller já foi resolvido contra o banco: a etapa 4 não precisa
+        // reconsultar o mesmo vendedor.
+        distribuidorDoVendedor = sellerOrigem.vendedorId
+          ? (sellerOrigem.distribuidorId ?? undefined)
+          : undefined;
+      }
     }
 
     // 2. Resolver combo (define quantidade esperada quando há combo)
@@ -340,7 +346,7 @@ export class VendasSenaService {
           data: {
             gatewayId: cobranca.gatewayId,
             gatewayPayload: {
-              ...((cobranca.payload as Record<string, unknown>) ?? {}),
+              ...(cobranca.payload ?? {}),
               modoSelecao: dto.modoSelecao,
               numeros: this.toNumerosGatewayPayload(cartelas),
             } as unknown as Prisma.InputJsonValue,
