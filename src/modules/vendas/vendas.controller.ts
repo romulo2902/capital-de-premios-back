@@ -109,13 +109,11 @@ export class VendasController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'dataInicio', required: false, type: String })
   @ApiQuery({ name: 'dataFim', required: false, type: String })
-  findAll(@Query() filtros: FiltroVendasDto, @CurrentUser() user: RequestUser) {
-    return this.vendasService.findAll(
-      filtros.page,
-      filtros.limit,
-      filtros,
-      user,
-    );
+  findAll(
+    @Query() filtros: FiltroVendasDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendasService.findAll(filtros.page, filtros.limit, filtros, user);
   }
 
   @Get('cliente/:cpf')

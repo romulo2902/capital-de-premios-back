@@ -19,6 +19,11 @@ import {
 import { parseEValidarDataNascimento } from '../../common/utils/data-nascimento.util';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
+type VendedorDoVinculo = {
+  id: string;
+  distribuidorId: string;
+};
+
 type ClienteMeusDados = {
   id: string;
   nome: string;
@@ -184,12 +189,18 @@ export class ClientesService {
     };
   }
 
+  /**
+   * Valida os relacionamentos informados e devolve o vendedor carregado, para
+   * que o chamador não precise buscá-lo de novo.
+   */
   private async validateRelacionamentos(
     vendedorId: string | null | undefined,
     distribuidorId: string | null | undefined,
-  ): Promise<void> {
+  ): Promise<VendedorDoVinculo | null> {
+    let vendedor: VendedorDoVinculo | null = null;
+
     if (vendedorId) {
-      const vendedor = await this.prisma.vendedor.findUnique({
+      vendedor = await this.prisma.vendedor.findUnique({
         where: { id: vendedorId },
         select: { id: true, distribuidorId: true },
       });
@@ -208,6 +219,8 @@ export class ClientesService {
         throw new NotFoundException('Distribuidor não encontrado');
       }
     }
+
+    return vendedor;
   }
 
   private async resolverRelacionamentosParaCriacao(
@@ -537,7 +550,10 @@ export class ClientesService {
     const vendedorId = this.normalizeRelationId(dto.vendedorId);
     const distribuidorId = this.normalizeRelationId(dto.distribuidorId);
 
-    await this.validateRelacionamentos(vendedorId, distribuidorId);
+    const vendedorValidado = await this.validateRelacionamentos(
+      vendedorId,
+      distribuidorId,
+    );
 
     const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };
     delete data.codigo;
@@ -566,10 +582,16 @@ export class ClientesService {
       let distribuidorDoVendedor: string | null = null;
 
       if (finalVendedorId) {
-        const vendedor = await this.prisma.vendedor.findUnique({
-          where: { id: finalVendedorId },
-          select: { id: true, distribuidorId: true },
-        });
+        // Quando o vendedor final é o mesmo que veio no DTO, ele já foi
+        // carregado na validação acima. Só há nova consulta quando o vínculo
+        // vem do cadastro atual do cliente, que a validação não tocou.
+        const vendedor =
+          vendedorValidado?.id === finalVendedorId
+            ? vendedorValidado
+            : await this.prisma.vendedor.findUnique({
+                where: { id: finalVendedorId },
+                select: { id: true, distribuidorId: true },
+              });
 
         if (!vendedor) {
           throw new NotFoundException('Vendedor não encontrado');
