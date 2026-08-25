@@ -124,8 +124,10 @@ export interface UsuarioDoVinculo {
  * escolhidos pelo cliente da API — exceto por ADMIN, que informa livremente.
  *
  * `seller_id` também é descartado para VENDEDOR e DISTRIBUIDOR: ele é o
- * mecanismo da loja pública e, se aceito aqui, sobrescreveria o vínculo do
- * token no service.
+ * mecanismo da loja pública e não tem por que viajar numa requisição
+ * autenticada, onde o vínculo já vem do token. Hoje o service o ignoraria de
+ * qualquer forma (só usa o `seller_id` quando nenhum vínculo explícito veio),
+ * mas descartá-lo aqui mantém a regra num lugar só.
  */
 export function aplicarVinculoDoToken(
   dto: VinculoNoCorpo,
