@@ -647,10 +647,19 @@ export class ClientesService {
       // no cadastro: esse vendedor não foi escolhido nesta requisição, então é
       // ele que cede. Sem isso o par (vendedor da rede A, distribuidor B) era
       // gravado — incoerência que ninguém pediu e que a CHECK não recusa.
+      //
+      // Só vale quando a rede está de fato MUDANDO. Reenviar o distribuidor
+      // que o cliente já tem não é um pedido de mover nada, e ceder ali
+      // apagaria o vendedor num PATCH que não alterou coisa alguma — o que
+      // acontece em cadastros cujo par já é cruzado, estado que a regra do
+      // valor explícito permite criar.
+      const distribuidorMudou = distribuidorId !== clienteAtual.distribuidorId;
+
       const vendedorCedeParaDistribuidorExplicito =
         !vendedorExplicito &&
         distribuidorExplicito &&
         Boolean(distribuidorId) &&
+        distribuidorMudou &&
         Boolean(vendedorFinal) &&
         vendedorFinal?.distribuidorId !== distribuidorId;
 

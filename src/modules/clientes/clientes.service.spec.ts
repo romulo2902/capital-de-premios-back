@@ -976,4 +976,83 @@ describe('ClientesService', () => {
       );
     });
   });
+
+  // ─── REGRESSAO: PATCH sem mudanca nao pode apagar o vendedor ─────────
+  // A regra "o vendedor do cadastro cede ao distribuidor explicito" existe
+  // para quando o cliente MUDA de rede. Reenviar o distribuidor atual nao
+  // pede mudanca nenhuma e nao pode destruir o vinculo do vendedor.
+  describe('update — reenvio do distribuidor atual e idempotente', () => {
+    const admin = {
+      id: 'usuario-admin',
+      email: 'admin@test.com',
+      cpf: '12345678900',
+      perfil: 'ADMIN',
+      status: 'ATIVO',
+    } as const;
+
+    it('preserva o vendedor quando o distribuidor informado e o que ja estava gravado', async () => {
+      // Par cruzado pre-existente: legitimo sob a regra do explicito vence.
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+        id: 'cliente-1',
+        nome: 'Cliente',
+        vendedorId: 'vendedor-rede-A',
+        distribuidorId: 'distribuidor-B',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-B',
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-rede-A',
+        distribuidorId: 'distribuidor-A',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.update(
+        'cliente-1',
+        { distribuidorId: 'distribuidor-B' },
+        admin,
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: 'vendedor-rede-A',
+            distribuidorId: 'distribuidor-B',
+          }),
+        }),
+      );
+    });
+
+    it('ainda cede quando a rede muda de verdade', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce({
+        id: 'cliente-2',
+        nome: 'Cliente',
+        vendedorId: 'vendedor-rede-A',
+        distribuidorId: 'distribuidor-A',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-B',
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-rede-A',
+        distribuidorId: 'distribuidor-A',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-2' });
+
+      await service.update(
+        'cliente-2',
+        { distribuidorId: 'distribuidor-B' },
+        admin,
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            vendedorId: null,
+            distribuidorId: 'distribuidor-B',
+          }),
+        }),
+      );
+    });
+  });
 });
