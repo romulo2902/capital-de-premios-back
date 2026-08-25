@@ -179,12 +179,25 @@ export class CreateVendaSenaDto {
   dataNascimento?: string;
 
   // Origem da venda
-  @ApiPropertyOptional({ example: 'uuid-do-vendedor' })
+  @ApiPropertyOptional({
+    example: 'uuid-do-vendedor',
+    description:
+      'ID do vendedor que originou a venda. Aceito apenas de ADMIN e ' +
+      'DISTRIBUIDOR (vendedor da própria rede). Para VENDEDOR vem do token, e ' +
+      'na loja pública (`POST /capital-sena/comprar`) é descartado — lá o ' +
+      'vínculo vem só de `seller_id`.',
+  })
   @IsOptional()
   @IsUUID('4', { message: 'vendedorId deve ser um UUID válido' })
   vendedorId?: string;
 
-  @ApiPropertyOptional({ example: 'uuid-do-distribuidor' })
+  @ApiPropertyOptional({
+    example: 'uuid-do-distribuidor',
+    description:
+      'ID do distribuidor que originou a venda. Aceito apenas de ADMIN — para ' +
+      'DISTRIBUIDOR vem do token, para VENDEDOR é derivado do vendedor, e na ' +
+      'loja pública é descartado em favor de `seller_id`.',
+  })
   @IsOptional()
   @IsUUID('4', { message: 'distribuidorId deve ser um UUID válido' })
   distribuidorId?: string;

@@ -28,8 +28,24 @@ export class VendasSenaLojaController {
   @ApiOperation({
     summary:
       'Comprar cartela(s) Sena — recebe `numeros` do frontend com 6 números + bola extra. Gera PIX/Cartão e aguarda confirmação.',
+    description:
+      'Rota pública. O vínculo comercial da venda vem exclusivamente de ' +
+      '`seller_id` (o `?seller_id=` do link/QR Code do vendedor ou distribuidor). ' +
+      '`vendedorId` e `distribuidorId` enviados no corpo são descartados: sem ' +
+      'autenticação, aceitá-los deixaria qualquer um escolher o destino da comissão.',
   })
   comprar(@Body() dto: CreateVendaSenaDto) {
+    // Rota pública e sem autenticação: o vínculo comercial só pode vir de
+    // `seller_id`, que o service resolve contra o banco.
+    //
+    // Estes dois `delete` sustentam a garantia — não são vestigiais. O service
+    // só deixa o `seller_id` definir o vínculo quando nenhum dos dois campos
+    // veio no corpo (`if (!dto.vendedorId && !dto.distribuidorId)`). Sem o
+    // descarte, um corpo com `vendedorId` torna essa condição falsa, o bloco do
+    // `seller_id` é pulado inteiro e o valor do corpo chega intacto à geração
+    // de comissão — qualquer um, sem login, escolhendo o destino dela.
+    delete dto.vendedorId;
+    delete dto.distribuidorId;
     return this.vendasSenaService.create(dto);
   }
 

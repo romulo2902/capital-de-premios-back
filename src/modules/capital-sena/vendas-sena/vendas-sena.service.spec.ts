@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import { ModoSelecaoSena, Prisma, StatusVendaSena } from '@prisma/client';
+import {
+  ModoSelecaoSena,
+  Prisma,
+  StatusEdicaoSena,
+  StatusVendaSena,
+} from '@prisma/client';
 import { VendasSenaService } from './vendas-sena.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
@@ -582,6 +587,105 @@ describe('VendasSenaService', () => {
       expect(mockPrisma.distribuidor.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: { in: ['dist-1'] } } }),
       );
+    });
+  });
+  // ─── Vinculo do cliente na compra Sena ───────────────────────────────
+  describe('buscarClientePorIdParaCompra — vinculo do cliente', () => {
+    // Mesmo motivo do bloco acima: ServicePrivado colapsa para `never`. Como
+    // este metodo e privado, alcancamos ele por um alias tipado local.
+    const buscarCliente = (
+      clienteId: string,
+      vendedorId?: string,
+      distribuidorId?: string,
+    ): Promise<unknown> =>
+      (
+        service as unknown as {
+          buscarClientePorIdParaCompra(
+            clienteId: string,
+            vendedorId?: string,
+            distribuidorId?: string,
+          ): Promise<unknown>;
+        }
+      ).buscarClientePorIdParaCompra(clienteId, vendedorId, distribuidorId);
+
+    const CLIENTE = {
+      id: 'cliente-1',
+      cpf: '12345678901',
+      nome: 'Fulano',
+      telefone: '64999999999',
+      email: null,
+      dataNascimento: null,
+    };
+
+    beforeEach(() => {
+      mockPrisma.cliente.findUnique.mockResolvedValue(CLIENTE);
+      mockPrisma.cliente.update.mockResolvedValue(CLIENTE);
+    });
+
+    it('deriva o distribuidor a partir do vendedor', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        distribuidorId: 'distribuidor-do-vendedor',
+      });
+
+      await buscarCliente('cliente-1', 'vendedor-1');
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            vendedorId: 'vendedor-1',
+            distribuidorId: 'distribuidor-do-vendedor',
+          },
+        }),
+      );
+    });
+
+    it('rejeita vendedor inexistente em vez de gravar par que a CHECK recusa', async () => {
+      mockPrisma.vendedor.findUnique.mockResolvedValue(null);
+
+      await expect(
+        buscarCliente('cliente-1', 'vendedor-fantasma'),
+      ).rejects.toThrow('Vendedor não encontrado');
+
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('mantem o vinculo atual quando nada e informado', async () => {
+      await buscarCliente('cliente-1');
+
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── REGRESSAO: seller_id invalido precisa continuar falhando ────────
+  describe('create — validacao do seller_id', () => {
+    const servicePublico = () => service as unknown as VendasSenaService;
+
+    beforeEach(() => {
+      mockPrisma.edicaoSena.findUnique.mockResolvedValue({
+        id: 'edicao-1',
+        numero: '001',
+        status: StatusEdicaoSena.ATIVA,
+        dataEncerramento: new Date('2099-01-01'),
+        valorCartela: new Prisma.Decimal(10),
+        combos: [],
+      });
+    });
+
+    it('rejeita seller_id inexistente mesmo quando ha vinculo explicito', async () => {
+      // O vinculo explicito vence, mas isso nao pode fazer o seller_id
+      // invalido passar despercebido.
+      mockPrisma.usuario.findUnique.mockResolvedValue(null);
+      mockPrisma.vendedor.findUnique.mockResolvedValue(null);
+      mockPrisma.distribuidor.findUnique.mockResolvedValue(null);
+
+      await expect(
+        servicePublico().create({
+          edicaoSenaId: 'edicao-1',
+          seller_id: 'seller-inexistente',
+          vendedorId: 'vendedor-1',
+          numeros: [{ numeros: [1, 2, 3, 4, 5, 6], bola_extra: 7 }],
+        } as never),
+      ).rejects.toThrow('Seller não encontrado');
     });
   });
 });
