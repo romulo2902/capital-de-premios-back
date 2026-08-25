@@ -196,13 +196,18 @@ export class VendasService {
     //
     // Roda ANTES de resolver o cliente: a resolução grava o vínculo comercial
     // no cadastro, e um vendedor recusado aqui não pode deixar rastro lá.
+    let distribuidorDoVendedor: string | undefined;
+
     if (dto.vendedorId) {
       const vendedor = await this.prisma.vendedor.findUnique({
         where: { id: dto.vendedorId },
+        select: { id: true, distribuidorId: true },
       });
       if (!vendedor) {
         throw new NotFoundException('Vendedor não encontrado');
       }
+
+      distribuidorDoVendedor = vendedor.distribuidorId;
 
       // Um DISTRIBUIDOR pode lançar venda para um vendedor da própria rede,
       // mas não para o de outra — senão escolheria a quem creditar a comissão.
@@ -235,6 +240,7 @@ export class VendasService {
           dto.clienteId,
           dto.vendedorId,
           dto.distribuidorId,
+          distribuidorDoVendedor,
         )
       : await this.buscarOuCriarClientePorDto(dto);
     const dadosClientePagamento =
@@ -1771,11 +1777,13 @@ export class VendasService {
     clienteId: string,
     vendedorId?: string,
     distribuidorId?: string,
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<ClienteCompra> {
     const relacionamentoMaisRecente =
       await this.resolverRelacionamentoMaisRecenteDoCliente(
         vendedorId,
         distribuidorId,
+        distribuidorDoVendedorConhecido,
       );
 
     const cliente = await this.prisma.cliente.findUnique({
@@ -1893,18 +1901,22 @@ export class VendasService {
   private async resolverRelacionamentoMaisRecenteDoCliente(
     vendedorId?: string,
     distribuidorId?: string,
+    /** Evita reconsultar o vendedor quando o chamador já o carregou. */
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<RelacionamentoClienteMaisRecente> {
-    let distribuidorDoVendedor: string | null = null;
+    let distribuidorDoVendedor: string | null =
+      distribuidorDoVendedorConhecido ?? null;
 
-    if (vendedorId) {
+    if (vendedorId && !distribuidorDoVendedor) {
       const vendedor = await this.prisma.vendedor.findUnique({
         where: { id: vendedorId },
         select: { distribuidorId: true },
       });
 
-      // A validação equivalente já existe em `create`, mas só depois de o
-      // cliente ser resolvido. Antecipar aqui evita gravar o vínculo com um
-      // vendedor inexistente antes de a venda falhar.
+      // `create` já valida o vendedor antes de chegar aqui, mas este método
+      // também atende a loja pública (LojaPublicaService), que não passa por
+      // aquela validação. Sem o 404 o par (vendedor, null) seria gravado e a
+      // CHECK do banco devolveria erro de constraint no lugar.
       if (!vendedor) {
         throw new NotFoundException('Vendedor não encontrado');
       }

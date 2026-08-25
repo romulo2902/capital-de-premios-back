@@ -28,6 +28,11 @@ export class VendasSenaLojaController {
   @ApiOperation({
     summary:
       'Comprar cartela(s) Sena — recebe `numeros` do frontend com 6 números + bola extra. Gera PIX/Cartão e aguarda confirmação.',
+    description:
+      'Rota pública. O vínculo comercial da venda vem exclusivamente de ' +
+      '`seller_id` (o `?seller_id=` do link/QR Code do vendedor ou distribuidor). ' +
+      '`vendedorId` e `distribuidorId` enviados no corpo são descartados: sem ' +
+      'autenticação, aceitá-los deixaria qualquer um escolher o destino da comissão.',
   })
   comprar(@Body() dto: CreateVendaSenaDto) {
     // Rota pública e sem autenticação: o vínculo comercial só pode vir de

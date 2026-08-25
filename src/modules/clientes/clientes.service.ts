@@ -6,7 +6,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { resolverVinculoCliente } from '../../common/utils/vinculo-cliente.util';
+import {
+  normalizarIdPreservandoAusencia,
+  resolverVinculoCliente,
+} from '../../common/utils/vinculo-cliente.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
@@ -51,17 +54,6 @@ export class ClientesService {
   private readonly logger = new Logger(ClientesService.name);
 
   constructor(private readonly prisma: PrismaService) {}
-
-  private normalizeRelationId(
-    value: string | null | undefined,
-  ): string | null | undefined {
-    if (value === undefined || value === null) {
-      return value;
-    }
-
-    const normalizedValue = value.trim();
-    return normalizedValue === '' ? null : normalizedValue;
-  }
 
   private buildHierarchyWhere(user?: RequestUser): Prisma.ClienteWhereInput {
     if (!user || user.perfil === 'ADMIN') {
@@ -223,34 +215,95 @@ export class ClientesService {
     return vendedor;
   }
 
+  /**
+   * Impede que VENDEDOR ou DISTRIBUIDOR apontem um cliente para fora da própria
+   * rede.
+   *
+   * A criação tem esses guards embutidos em `resolverRelacionamentosParaCriacao`,
+   * mas `PATCH /admin/clientes/:id` também é aberto aos três perfis e não tinha
+   * equivalente: o escopo de `findOne` só controla QUAIS clientes o usuário
+   * enxerga, não para onde ele pode movê-los.
+   */
+  private async garantirVinculoPermitido(
+    vendedor: VendedorDoVinculo | null,
+    distribuidorInformado: string | null | undefined,
+    user?: RequestUser,
+  ): Promise<void> {
+    if (!user || user.perfil === 'ADMIN') {
+      return;
+    }
+
+    if (user.perfil === 'VENDEDOR') {
+      if (!user.vendedorId) {
+        throw new ForbiddenException(
+          'Usuário vendedor sem vínculo válido para atualizar cliente',
+        );
+      }
+
+      if (vendedor && vendedor.id !== user.vendedorId) {
+        throw new ForbiddenException(
+          'Vendedor só pode vincular cliente a si mesmo',
+        );
+      }
+
+      if (distribuidorInformado) {
+        const vendedorLogado =
+          vendedor?.id === user.vendedorId
+            ? vendedor
+            : await this.prisma.vendedor.findUnique({
+                where: { id: user.vendedorId },
+                select: { id: true, distribuidorId: true },
+              });
+
+        if (distribuidorInformado !== vendedorLogado?.distribuidorId) {
+          throw new ForbiddenException(
+            'Vendedor só pode vincular cliente ao seu distribuidor',
+          );
+        }
+      }
+
+      return;
+    }
+
+    if (user.perfil === 'DISTRIBUIDOR') {
+      if (!user.distribuidorId) {
+        throw new ForbiddenException(
+          'Usuário distribuidor sem vínculo válido para atualizar cliente',
+        );
+      }
+
+      if (
+        distribuidorInformado &&
+        distribuidorInformado !== user.distribuidorId
+      ) {
+        throw new ForbiddenException(
+          'Distribuidor só pode vincular cliente à própria rede',
+        );
+      }
+
+      if (vendedor && vendedor.distribuidorId !== user.distribuidorId) {
+        throw new ForbiddenException(
+          'Vendedor não pertence ao distribuidor autenticado',
+        );
+      }
+    }
+  }
+
   private async resolverRelacionamentosParaCriacao(
     vendedorIdInformado: string | null | undefined,
     distribuidorIdInformado: string | null | undefined,
     user: RequestUser,
   ): Promise<{ vendedorId: string | null; distribuidorId: string | null }> {
-    const vendedorId = this.normalizeRelationId(vendedorIdInformado);
-    const distribuidorId = this.normalizeRelationId(distribuidorIdInformado);
+    const vendedorId = normalizarIdPreservandoAusencia(vendedorIdInformado);
+    const distribuidorId = normalizarIdPreservandoAusencia(
+      distribuidorIdInformado,
+    );
 
-    const vendedor = vendedorId
-      ? await this.prisma.vendedor.findUnique({
-          where: { id: vendedorId },
-          select: { id: true, distribuidorId: true },
-        })
-      : null;
-
-    if (vendedorId && !vendedor) {
-      throw new NotFoundException('Vendedor não encontrado');
-    }
-
-    if (distribuidorId) {
-      const distribuidor = await this.prisma.distribuidor.findUnique({
-        where: { id: distribuidorId },
-        select: { id: true },
-      });
-      if (!distribuidor) {
-        throw new NotFoundException('Distribuidor não encontrado');
-      }
-    }
+    // Mesmas checagens de existência do caminho de atualização.
+    const vendedor = await this.validateRelacionamentos(
+      vendedorId,
+      distribuidorId,
+    );
 
     // Divergência entre vendedor e distribuidor informados não é erro: o valor
     // explícito vence (ver resolverVinculoCliente). Para VENDEDOR e
@@ -547,13 +600,15 @@ export class ClientesService {
       if (conflict) throw new ConflictException('CPF já cadastrado');
     }
 
-    const vendedorId = this.normalizeRelationId(dto.vendedorId);
-    const distribuidorId = this.normalizeRelationId(dto.distribuidorId);
+    const vendedorId = normalizarIdPreservandoAusencia(dto.vendedorId);
+    const distribuidorId = normalizarIdPreservandoAusencia(dto.distribuidorId);
 
     const vendedorValidado = await this.validateRelacionamentos(
       vendedorId,
       distribuidorId,
     );
+
+    await this.garantirVinculoPermitido(vendedorValidado, distribuidorId, user);
 
     const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };
     delete data.codigo;

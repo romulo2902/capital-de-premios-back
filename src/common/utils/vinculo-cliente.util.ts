@@ -1,4 +1,7 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 
 /**
  * Vínculo comercial de um Cliente: o vendedor que o atendeu e o distribuidor
@@ -75,9 +78,87 @@ export function resolverVinculoCliente({
   return null;
 }
 
-/** Trata string vazia como ausência de valor. */
-function normalizarId(value: string | null | undefined): string | null {
-  if (!value) return null;
+/**
+ * Trata string vazia como ausência de valor, colapsando para `null`.
+ *
+ * Use `normalizarIdPreservandoAusencia` quando for preciso distinguir "campo
+ * não veio" (`undefined`) de "campo veio vazio" (`null`).
+ */
+export function normalizarId(value: string | null | undefined): string | null {
+  return normalizarIdPreservandoAusencia(value) ?? null;
+}
+
+/**
+ * Normaliza mantendo a diferença entre `undefined` (campo ausente no payload)
+ * e `null` (campo presente e vazio) — distinção que os fluxos de atualização
+ * usam para decidir entre preservar e sobrescrever.
+ */
+export function normalizarIdPreservandoAusencia(
+  value: string | null | undefined,
+): string | null | undefined {
+  if (value === undefined || value === null) {
+    return value;
+  }
+
   const normalizado = value.trim();
   return normalizado === '' ? null : normalizado;
+}
+
+/** Campos de vínculo comercial que um DTO de criação de venda pode trazer. */
+export interface VinculoNoCorpo {
+  vendedorId?: string;
+  distribuidorId?: string;
+  seller_id?: string;
+}
+
+/** Só o que o guard precisa saber do usuário autenticado. */
+export interface UsuarioDoVinculo {
+  perfil: string;
+  vendedorId?: string;
+  distribuidorId?: string;
+}
+
+/**
+ * Aplica ao DTO o vínculo comercial derivado do token, descartando o que veio
+ * no corpo. Esses campos definem para quem vai a comissão, então não podem ser
+ * escolhidos pelo cliente da API — exceto por ADMIN, que informa livremente.
+ *
+ * `seller_id` também é descartado para VENDEDOR e DISTRIBUIDOR: ele é o
+ * mecanismo da loja pública e, se aceito aqui, sobrescreveria o vínculo do
+ * token no service.
+ */
+export function aplicarVinculoDoToken(
+  dto: VinculoNoCorpo,
+  user: UsuarioDoVinculo,
+): void {
+  if (user.perfil === 'VENDEDOR') {
+    // Sem vínculo no token não há a quem creditar: recusar é mais seguro do
+    // que cair fora do guard e deixar o corpo decidir.
+    if (!user.vendedorId) {
+      throw new ForbiddenException(
+        'Usuário vendedor sem vínculo válido para criar venda',
+      );
+    }
+
+    dto.vendedorId = user.vendedorId;
+    delete dto.distribuidorId;
+    delete dto.seller_id;
+    return;
+  }
+
+  if (user.perfil === 'DISTRIBUIDOR') {
+    if (!user.distribuidorId) {
+      throw new ForbiddenException(
+        'Usuário distribuidor sem vínculo válido para criar venda',
+      );
+    }
+
+    dto.distribuidorId = user.distribuidorId;
+    // `vendedorId` é preservado: o distribuidor pode lançar venda para um
+    // vendedor da própria rede. A posse é validada no service.
+    delete dto.seller_id;
+    return;
+  }
+
+  // ADMIN: vínculo livre.
 }

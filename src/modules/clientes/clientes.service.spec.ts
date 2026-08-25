@@ -583,4 +583,134 @@ describe('ClientesService', () => {
       );
     });
   });
+  // ─── REGRESSAO: PATCH sem guard de perfil ────────────────────────────
+  // Ao remover o ConflictException, o update ficou sem qualquer checagem de
+  // perfil — e PATCH /admin/clientes/:id e aberto a ADMIN, DISTRIBUIDOR e
+  // VENDEDOR. O escopo de leitura controla QUAIS clientes o usuario enxerga,
+  // nao para onde ele pode move-los.
+  describe('update — guard de rede por perfil', () => {
+    const clienteProprio = {
+      id: 'cliente-1',
+      nome: 'Cliente',
+      vendedorId: 'vendedor-logado',
+      distribuidorId: 'distribuidor-A',
+    };
+
+    const vendedorLogado = {
+      id: 'usuario-v',
+      email: 'v@test.com',
+      cpf: '12345678900',
+      perfil: 'VENDEDOR',
+      status: 'ATIVO',
+      vendedorId: 'vendedor-logado',
+    } as const;
+
+    const distribuidorLogado = {
+      id: 'usuario-d',
+      email: 'd@test.com',
+      cpf: '12345678900',
+      perfil: 'DISTRIBUIDOR',
+      status: 'ATIVO',
+      distribuidorId: 'distribuidor-A',
+    } as const;
+
+    it('VENDEDOR nao move cliente para distribuidor de outra rede', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-B',
+      });
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-logado',
+        distribuidorId: 'distribuidor-A',
+      });
+
+      await expect(
+        service.update(
+          'cliente-1',
+          { distribuidorId: 'distribuidor-B' },
+          vendedorLogado,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockPrisma.cliente.update).not.toHaveBeenCalled();
+    });
+
+    it('VENDEDOR nao aponta cliente para outro vendedor', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'outro-vendedor',
+        distribuidorId: 'distribuidor-A',
+      });
+
+      await expect(
+        service.update(
+          'cliente-1',
+          { vendedorId: 'outro-vendedor' },
+          vendedorLogado,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('DISTRIBUIDOR nao move cliente para outra rede', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-B',
+      });
+
+      await expect(
+        service.update(
+          'cliente-1',
+          { distribuidorId: 'distribuidor-B' },
+          distribuidorLogado,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('DISTRIBUIDOR nao aponta cliente para vendedor de outra rede', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-externo',
+        distribuidorId: 'distribuidor-B',
+      });
+
+      await expect(
+        service.update(
+          'cliente-1',
+          { vendedorId: 'vendedor-externo' },
+          distribuidorLogado,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('VENDEDOR ainda atualiza dados do proprio cliente', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.update('cliente-1', { nome: 'Novo Nome' }, vendedorLogado);
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalled();
+    });
+
+    it('ADMIN segue com vinculo livre', async () => {
+      mockPrisma.cliente.findFirst.mockResolvedValueOnce(clienteProprio);
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-B',
+      });
+      mockPrisma.cliente.update.mockResolvedValue({ id: 'cliente-1' });
+
+      await service.update(
+        'cliente-1',
+        { distribuidorId: 'distribuidor-B' },
+        {
+          id: 'usuario-admin',
+          email: 'admin@test.com',
+          cpf: '12345678900',
+          perfil: 'ADMIN',
+          status: 'ATIVO',
+        },
+      );
+
+      expect(mockPrisma.cliente.update).toHaveBeenCalled();
+    });
+  });
 });

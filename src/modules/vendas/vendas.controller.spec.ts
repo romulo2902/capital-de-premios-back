@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenException } from '@nestjs/common';
 import { VendasController } from './vendas.controller';
 import { VendasService } from './vendas.service';
 import { CreateVendaDto } from './dto/create-venda.dto';
@@ -99,5 +100,29 @@ describe('VendasController — vínculo comercial', () => {
     const enviado = dtoRecebidoPeloService;
     expect(enviado?.vendedorId).toBe('vendedor-1');
     expect(enviado?.distribuidorId).toBe('distribuidor-1');
+  });
+  // Regressao: os ramos do guard exigiam user.vendedorId/user.distribuidorId,
+  // entao um token com perfil mas sem vinculo caia FORA dos dois e os campos
+  // do corpo sobreviviam intactos.
+  it('VENDEDOR sem vinculo no token e recusado, nao ignorado', async () => {
+    expect(() =>
+      controller.create(
+        { ...dtoBase, distribuidorId: 'qualquer-rede' },
+        usuario({ perfil: 'VENDEDOR', vendedorId: undefined }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(mockVendasService.create).not.toHaveBeenCalled();
+  });
+
+  it('DISTRIBUIDOR sem vinculo no token e recusado, nao ignorado', async () => {
+    expect(() =>
+      controller.create(
+        { ...dtoBase, vendedorId: 'qualquer-vendedor' },
+        usuario({ perfil: 'DISTRIBUIDOR', distribuidorId: undefined }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(mockVendasService.create).not.toHaveBeenCalled();
   });
 });

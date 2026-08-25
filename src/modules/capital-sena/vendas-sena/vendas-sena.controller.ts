@@ -20,6 +20,7 @@ import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../../auth/strategies/jwt.strategy';
+import { aplicarVinculoDoToken } from '../../../common/utils/vinculo-cliente.util';
 import { VendasSenaService } from './vendas-sena.service';
 import { CreateVendaSenaDto } from './dto/create-venda-sena.dto';
 import { FiltroVendasSenaDto } from './dto/filtro-vendas-sena.dto';
@@ -37,18 +38,15 @@ export class VendasSenaController {
   @ApiOperation({
     summary:
       'Criar venda Sena — recebe `numeros` do frontend com 6 números + bola extra (ADMIN=aprova direto, DISTRIBUIDOR/VENDEDOR=gateway)',
+    description:
+      'O vínculo comercial vem do token, não do corpo. VENDEDOR: `vendedorId` é ' +
+      'forçado ao do token e `distribuidorId` do corpo é ignorado. DISTRIBUIDOR: ' +
+      '`distribuidorId` é forçado ao do token e `vendedorId` só é aceito se o ' +
+      'vendedor pertencer à sua rede (senão 403). `seller_id` é ignorado para ' +
+      'ambos — é o mecanismo da loja pública. ADMIN informa tudo livremente.',
   })
   create(@Body() dto: CreateVendaSenaDto, @CurrentUser() user: RequestUser) {
-    // Ver VendasController.create: o vínculo comercial vem do token, nunca do
-    // corpo. Só ADMIN informa vendedorId/distribuidorId livremente.
-    if (user.perfil === 'VENDEDOR' && user.vendedorId) {
-      dto.vendedorId = user.vendedorId;
-      delete dto.distribuidorId;
-    } else if (user.perfil === 'DISTRIBUIDOR' && user.distribuidorId) {
-      dto.distribuidorId = user.distribuidorId;
-      // Mantém o vendedorId: o distribuidor pode lançar venda para um vendedor
-      // da própria rede. O service valida a posse.
-    }
+    aplicarVinculoDoToken(dto, user);
     return this.vendasSenaService.create(dto, user);
   }
 

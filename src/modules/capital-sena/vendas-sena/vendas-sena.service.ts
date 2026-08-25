@@ -124,9 +124,15 @@ export class VendasSenaService {
       );
     }
 
-    const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
-    dto.vendedorId = sellerOrigem.vendedorId ?? dto.vendedorId;
-    dto.distribuidorId = sellerOrigem.distribuidorId ?? dto.distribuidorId;
+    // Um `seller_id` resolvido substitui o PAR inteiro, nunca campo a campo.
+    // Com `??` por campo, um link de distribuidor (que resolve vendedorId
+    // nulo por definição) deixava passar o vendedorId do corpo, misturando
+    // redes e desviando a comissão.
+    if (dto.seller_id) {
+      const sellerOrigem = await this.resolverSellerOrigem(dto.seller_id);
+      dto.vendedorId = sellerOrigem.vendedorId ?? undefined;
+      dto.distribuidorId = sellerOrigem.distribuidorId ?? undefined;
+    }
 
     // 2. Resolver combo (define quantidade esperada quando há combo)
     let comboSenaId: string | null = null;
@@ -158,11 +164,16 @@ export class VendasSenaService {
     //
     // Roda ANTES de resolver o cliente: a resolução grava o vínculo comercial
     // no cadastro, e um vendedor recusado aqui não pode deixar rastro lá.
+    let distribuidorDoVendedor: string | undefined;
+
     if (dto.vendedorId) {
       const vendedor = await this.prisma.vendedor.findUnique({
         where: { id: dto.vendedorId },
+        select: { id: true, distribuidorId: true },
       });
       if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
+
+      distribuidorDoVendedor = vendedor.distribuidorId;
 
       // Um DISTRIBUIDOR pode lançar venda para um vendedor da própria rede,
       // mas não para o de outra — senão escolheria a quem creditar a comissão.
@@ -190,6 +201,7 @@ export class VendasSenaService {
           dto.clienteId,
           dto.vendedorId,
           dto.distribuidorId,
+          distribuidorDoVendedor,
         )
       : await this.buscarOuCriarClientePorDto(dto);
     const dadosClientePagamento =
@@ -801,11 +813,13 @@ export class VendasSenaService {
     clienteId: string,
     vendedorId?: string,
     distribuidorId?: string,
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<ClienteSenaCompra> {
     const relacionamentoMaisRecente =
       await this.resolverRelacionamentoMaisRecenteDoCliente(
         vendedorId,
         distribuidorId,
+        distribuidorDoVendedorConhecido,
       );
 
     const cliente = await this.prisma.cliente.findUnique({
@@ -923,19 +937,22 @@ export class VendasSenaService {
   private async resolverRelacionamentoMaisRecenteDoCliente(
     vendedorId?: string,
     distribuidorId?: string,
+    /** Evita reconsultar o vendedor quando o chamador já o carregou. */
+    distribuidorDoVendedorConhecido?: string,
   ): Promise<RelacionamentoClienteMaisRecente> {
-    let distribuidorDoVendedor: string | null = null;
+    let distribuidorDoVendedor: string | null =
+      distribuidorDoVendedorConhecido ?? null;
 
-    if (vendedorId) {
+    if (vendedorId && !distribuidorDoVendedor) {
       const vendedor = await this.prisma.vendedor.findUnique({
         where: { id: vendedorId },
         select: { distribuidorId: true },
       });
 
-      // A validação equivalente existe na etapa 5 de `create`, mas o cliente é
-      // resolvido antes dela. Sem antecipar, um vendedorId inexistente tentaria
-      // gravar o par (vendedor, null) — que a CHECK constraint do banco recusa,
-      // devolvendo erro de constraint em vez de 404.
+      // `create` já valida o vendedor na etapa 4, antes de chegar aqui. O 404
+      // permanece porque este método também é alcançado por caminhos que não
+      // passam por aquela validação; sem ele o par (vendedor, null) seria
+      // gravado e a CHECK do banco devolveria erro de constraint.
       if (!vendedor) {
         throw new NotFoundException('Vendedor não encontrado');
       }

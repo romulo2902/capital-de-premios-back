@@ -1,5 +1,11 @@
-import { InternalServerErrorException } from '@nestjs/common';
-import { resolverVinculoCliente } from './vinculo-cliente.util';
+import {
+  ForbiddenException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import {
+  aplicarVinculoDoToken,
+  resolverVinculoCliente,
+} from './vinculo-cliente.util';
 
 describe('resolverVinculoCliente', () => {
   const DIST = 'distribuidor-do-vendedor';
@@ -156,5 +162,69 @@ describe('resolverVinculoCliente', () => {
         }
       },
     );
+  });
+});
+
+describe('aplicarVinculoDoToken', () => {
+  const dto = (extra: Record<string, string> = {}) => ({
+    vendedorId: 'vendedor-do-corpo',
+    distribuidorId: 'distribuidor-do-corpo',
+    seller_id: 'seller-do-corpo',
+    ...extra,
+  });
+
+  it('VENDEDOR: forca o proprio vendedor e descarta o resto', () => {
+    const payload = dto();
+
+    aplicarVinculoDoToken(payload, {
+      perfil: 'VENDEDOR',
+      vendedorId: 'vendedor-logado',
+    });
+
+    expect(payload.vendedorId).toBe('vendedor-logado');
+    expect(payload.distribuidorId).toBeUndefined();
+    expect(payload.seller_id).toBeUndefined();
+  });
+
+  it('DISTRIBUIDOR: forca o proprio distribuidor e preserva o vendedor', () => {
+    const payload = dto();
+
+    aplicarVinculoDoToken(payload, {
+      perfil: 'DISTRIBUIDOR',
+      distribuidorId: 'distribuidor-logado',
+    });
+
+    expect(payload.distribuidorId).toBe('distribuidor-logado');
+    // Preservado de proposito: o service valida se o vendedor e da rede dele.
+    expect(payload.vendedorId).toBe('vendedor-do-corpo');
+    expect(payload.seller_id).toBeUndefined();
+  });
+
+  it('ADMIN: nao mexe em nada', () => {
+    const payload = dto();
+
+    aplicarVinculoDoToken(payload, { perfil: 'ADMIN' });
+
+    expect(payload).toEqual({
+      vendedorId: 'vendedor-do-corpo',
+      distribuidorId: 'distribuidor-do-corpo',
+      seller_id: 'seller-do-corpo',
+    });
+  });
+
+  it('recusa VENDEDOR sem vinculo no token em vez de deixar o corpo decidir', () => {
+    const payload = dto();
+
+    expect(() =>
+      aplicarVinculoDoToken(payload, { perfil: 'VENDEDOR' }),
+    ).toThrow(ForbiddenException);
+
+    expect(payload.distribuidorId).toBe('distribuidor-do-corpo');
+  });
+
+  it('recusa DISTRIBUIDOR sem vinculo no token', () => {
+    expect(() =>
+      aplicarVinculoDoToken(dto(), { perfil: 'DISTRIBUIDOR' }),
+    ).toThrow(ForbiddenException);
   });
 });

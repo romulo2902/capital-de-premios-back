@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenException } from '@nestjs/common';
 import { VendasSenaController } from './vendas-sena.controller';
 import { VendasSenaLojaController } from './vendas-sena-loja.controller';
 import { VendasSenaService } from './vendas-sena.service';
@@ -114,6 +115,52 @@ describe('Vendas Sena — vínculo comercial nos controllers', () => {
 
       expect(dtoRecebido?.seller_id).toBe('usuario-do-vendedor');
       expect(dtoRecebido?.distribuidorId).toBeUndefined();
+    });
+  });
+  describe('vinculo do token vence seller_id e ausencia de vinculo', () => {
+    // Regressao: o service faz `sellerOrigem.X ?? dto.X`, entao um seller_id
+    // apontando para outra rede sobrescrevia o vinculo vindo do token.
+    it('VENDEDOR: descarta seller_id do corpo', async () => {
+      await controller.create(
+        { ...dtoBase, seller_id: 'usuario-de-outra-rede' },
+        usuario({ perfil: 'VENDEDOR', vendedorId: 'vendedor-logado' }),
+      );
+
+      expect(dtoRecebido?.seller_id).toBeUndefined();
+      expect(dtoRecebido?.vendedorId).toBe('vendedor-logado');
+    });
+
+    it('DISTRIBUIDOR: descarta seller_id do corpo', async () => {
+      await controller.create(
+        { ...dtoBase, seller_id: 'usuario-de-outra-rede' },
+        usuario({
+          perfil: 'DISTRIBUIDOR',
+          distribuidorId: 'distribuidor-logado',
+        }),
+      );
+
+      expect(dtoRecebido?.seller_id).toBeUndefined();
+      expect(dtoRecebido?.distribuidorId).toBe('distribuidor-logado');
+    });
+
+    it('ADMIN: preserva seller_id', async () => {
+      await controller.create(
+        { ...dtoBase, seller_id: 'usuario-seller' },
+        usuario({ perfil: 'ADMIN' }),
+      );
+
+      expect(dtoRecebido?.seller_id).toBe('usuario-seller');
+    });
+
+    it('VENDEDOR sem vinculo no token e recusado', async () => {
+      expect(() =>
+        controller.create(
+          { ...dtoBase, distribuidorId: 'qualquer-rede' },
+          usuario({ perfil: 'VENDEDOR', vendedorId: undefined }),
+        ),
+      ).toThrow(ForbiddenException);
+
+      expect(mockService.create).not.toHaveBeenCalled();
     });
   });
 });
