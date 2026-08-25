@@ -166,7 +166,10 @@ Authorization: Bearer <token-pos>
 
 - autenticação via token do POS
 - acesso permitido para `VENDEDOR` e `DISTRIBUIDOR`
-- consulta limitada à hierarquia do operador autenticado
+- consulta limitada à rede do operador autenticado: `VENDEDOR` enxerga todos os
+  clientes do distribuidor dele (inclusive os atendidos por outros vendedores da
+  rede) e `DISTRIBUIDOR` enxerga os da própria rede — cliente sem vínculo nenhum
+  não aparece
 - CPF pode ser enviado com ou sem máscara
 - se encontrar cliente, retornar dados prontos para preencher a tela
 - se não encontrar cliente, retornar resposta simples para o POS seguir com preenchimento manual
