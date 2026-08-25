@@ -20,6 +20,7 @@ import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 import { aplicarVinculoDoToken } from '../../common/utils/vinculo-cliente.util';
+import { variacoesDeCpf } from '../../common/utils/cpf.util';
 import { CreateVendaDto } from '../vendas/dto/create-venda.dto';
 import { CreateVendaSenaDto } from '../capital-sena/vendas-sena/dto/create-venda-sena.dto';
 import type { CreatePosVendaDto } from './dto/create-pos-venda.dto';
@@ -72,10 +73,10 @@ export class PosService {
   }
 
   async buscarClientePorCpf(cpf: string, user: RequestUser) {
-    const cpfLimpo = cpf.replace(/\D/g, '');
+    const escopo = await this.buildClienteScope(user);
     const cliente = await this.prisma.cliente.findFirst({
       where: {
-        AND: [this.buildClienteCpfWhere(cpfLimpo), this.buildClienteScope(user)],
+        AND: [this.buildClienteCpfWhere(cpf), escopo],
       },
       select: {
         id: true,
@@ -273,7 +274,8 @@ export class PosService {
         ? await this.confirmarVendaPosPendente(venda.id, venda.gatewayId, {
             gatewayPolling: cobrancaGateway?.payload,
             confirmadoEm:
-              cobrancaGateway?.paidAt?.toISOString() ?? new Date().toISOString(),
+              cobrancaGateway?.paidAt?.toISOString() ??
+              new Date().toISOString(),
           })
         : venda.status;
 
@@ -360,16 +362,12 @@ export class PosService {
       venda.status === StatusVendaSena.PENDENTE &&
       statusGateway === 'APROVADO' &&
       venda.gatewayId
-        ? await this.confirmarVendaSenaPosPendente(
-            venda.id,
-            venda.gatewayId,
-            {
-              gatewayPolling: cobrancaGateway?.payload,
-              confirmadoEm:
-                cobrancaGateway?.paidAt?.toISOString() ??
-                new Date().toISOString(),
-            },
-          )
+        ? await this.confirmarVendaSenaPosPendente(venda.id, venda.gatewayId, {
+            gatewayPolling: cobrancaGateway?.payload,
+            confirmadoEm:
+              cobrancaGateway?.paidAt?.toISOString() ??
+              new Date().toISOString(),
+          })
         : venda.status;
 
     return {
@@ -388,7 +386,9 @@ export class PosService {
 
   // ─── Helpers ──────────────────────────────────────────────────────
 
-  private validarDadosPagamento(tipoPagamento: TipoPagamento | undefined): void {
+  private validarDadosPagamento(
+    tipoPagamento: TipoPagamento | undefined,
+  ): void {
     if (
       tipoPagamento &&
       tipoPagamento !== TipoPagamento.PIX &&
@@ -695,11 +695,33 @@ export class PosService {
     }
   }
 
+  /**
+   * Casa o CPF nos dois formatos em que ele pode ter sido gravado.
+   *
+   * Comparar só dígitos deixava de fora o cliente cadastrado pelo painel com
+   * máscara (`031.123.456-75`) — o terminal dizia "não encontrado" para um
+   * cadastro que existe e está na rede do operador.
+   */
   private buildClienteCpfWhere(cpf: string) {
-    return { cpf };
+    return { cpf: { in: variacoesDeCpf(cpf) } };
   }
 
-  private buildClienteScope(user: RequestUser) {
+  /**
+   * Escopo de LEITURA do autofill do POS.
+   *
+   * A carteira é da rede: qualquer vendedor enxerga os clientes do próprio
+   * distribuidor (os dos colegas e os captados direto pelo distribuidor), para
+   * que um cliente já cadastrado na casa não precise ser redigitado só porque
+   * quem está no terminal é outro vendedor. Cliente órfão — sem vendedor e sem
+   * distribuidor — continua fora do POS.
+   *
+   * Isto NÃO afeta a comissão: o vínculo da venda vem do token
+   * (`aplicarVinculoDoToken`) e o cadastro do cliente é reapontado pela regra
+   * de compra, não por quem o consultou.
+   *
+   * A rede vem do banco porque o token do POS carrega só o `vendedorId`.
+   */
+  private async buildClienteScope(user: RequestUser) {
     if (user.perfil === 'DISTRIBUIDOR') {
       if (!user.distribuidorId) {
         throw new ForbiddenException(
@@ -717,7 +739,20 @@ export class PosService {
         );
       }
 
-      return { vendedorId: user.vendedorId };
+      const vendedor = await this.prisma.vendedor.findUnique({
+        where: { id: user.vendedorId },
+        select: { distribuidorId: true },
+      });
+
+      // Sem vendedor não há rede: recusar é mais seguro do que devolver um
+      // escopo vazio, que abriria a base inteira no terminal.
+      if (!vendedor) {
+        throw new ForbiddenException(
+          'Usuário vendedor sem vínculo válido para consultar clientes no POS',
+        );
+      }
+
+      return { distribuidorId: vendedor.distribuidorId };
     }
 
     throw new ForbiddenException(

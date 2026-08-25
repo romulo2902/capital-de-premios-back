@@ -23,6 +23,7 @@ import {
   normalizePagination,
 } from '../../common/utils/pagination.util';
 import { parseEValidarDataNascimento } from '../../common/utils/data-nascimento.util';
+import { normalizarCpf, variacoesDeCpf } from '../../common/utils/cpf.util';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 type VendedorDoVinculo = {
@@ -58,7 +59,24 @@ export class ClientesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private buildHierarchyWhere(user?: RequestUser): Prisma.ClienteWhereInput {
+  /**
+   * Escopo de LEITURA de clientes por perfil.
+   *
+   * A carteira é da rede, não do vendedor: todo vendedor enxerga os clientes do
+   * próprio distribuidor — os dos colegas de rede e os captados direto pelo
+   * distribuidor — e não só os que ele mesmo atendeu. Assim qualquer vendedor
+   * consegue atender um cliente que já é da casa sem recadastrá-lo.
+   *
+   * O escopo de ESCRITA continua estreito (ver `garantirVinculoPermitido`): ver
+   * o cliente do colega não autoriza apontá-lo para outro vendedor.
+   *
+   * A rede do vendedor vem do banco, e não do token, porque o token do POS só
+   * carrega `vendedorId` — e ler na hora mantém o escopo correto quando o
+   * vendedor é movido de distribuidor.
+   */
+  private async buildHierarchyWhere(
+    user?: RequestUser,
+  ): Promise<Prisma.ClienteWhereInput> {
     if (!user || user.perfil === 'ADMIN') {
       return {};
     }
@@ -74,16 +92,38 @@ export class ClientesService {
     }
 
     if (user.perfil === 'VENDEDOR') {
-      if (!user.vendedorId) {
-        throw new ForbiddenException(
-          'Usuário vendedor sem vínculo válido para consultar clientes',
-        );
-      }
-
-      return { vendedorId: user.vendedorId };
+      return { distribuidorId: await this.redeDoVendedor(user) };
     }
 
     return {};
+  }
+
+  /**
+   * `distribuidorId` da rede do vendedor autenticado.
+   *
+   * Recusa em vez de devolver escopo vazio: um vendedor sem vendedor cadastrado
+   * (ou sem rede) não tem carteira nenhuma, e cair para `{}` abriria a base
+   * inteira.
+   */
+  private async redeDoVendedor(user: RequestUser): Promise<string> {
+    if (!user.vendedorId) {
+      throw new ForbiddenException(
+        'Usuário vendedor sem vínculo válido para consultar clientes',
+      );
+    }
+
+    const vendedor = await this.prisma.vendedor.findUnique({
+      where: { id: user.vendedorId },
+      select: { distribuidorId: true },
+    });
+
+    if (!vendedor) {
+      throw new ForbiddenException(
+        'Usuário vendedor sem vínculo válido para consultar clientes',
+      );
+    }
+
+    return vendedor.distribuidorId;
   }
 
   private mergeWhere(
@@ -103,18 +143,8 @@ export class ClientesService {
     };
   }
 
-  private formatarCpf(cpf: string): string {
-    const cpfLimpo = cpf.replace(/\D/g, '');
-
-    if (cpfLimpo.length !== 11) {
-      return cpf;
-    }
-
-    return `${cpfLimpo.slice(0, 3)}.${cpfLimpo.slice(3, 6)}.${cpfLimpo.slice(6, 9)}-${cpfLimpo.slice(9, 11)}`;
-  }
-
   private mascararCpf(cpf: string): string {
-    const cpfLimpo = cpf.replace(/\D/g, '');
+    const cpfLimpo = normalizarCpf(cpf);
 
     if (cpfLimpo.length !== 11) {
       return cpf;
@@ -257,9 +287,10 @@ export class ClientesService {
         );
       }
 
-      // `null` explícito desvincula. Para o vendedor isso significa perder o
-      // cliente de vez: sem `vendedorId` ele sai do escopo de leitura dele e
-      // não há como desfazer.
+      // `null` explícito desvincula. O cliente continua visível para ele (o
+      // escopo de leitura é o da rede), mas a atribuição some — e devolvê-la
+      // exigiria apontar o cliente de volta, que o vendedor não pode fazer
+      // sozinho. Desvincular não é escolha dele.
       if (contexto === 'atualizacao' && vendedorInformado === null) {
         throw new ForbiddenException(
           'Vendedor não pode desvincular cliente de si mesmo',
@@ -383,8 +414,13 @@ export class ClientesService {
   }
 
   async create(dto: CreateClienteDto, user: RequestUser) {
-    const existing = await this.prisma.cliente.findUnique({
-      where: { cpf: dto.cpf },
+    // Grava só dígitos. O DTO aceita as duas formas, e gravar a mascarada
+    // deixava o cadastro invisível para toda busca por CPF — que compara
+    // dígitos — além de escapar da `@unique`, que não sabe que
+    // `031.123.456-75` e `03112345675` são o mesmo cliente.
+    const cpf = normalizarCpf(dto.cpf);
+    const existing = await this.prisma.cliente.findFirst({
+      where: { cpf: { in: variacoesDeCpf(cpf) } },
     });
     if (existing) throw new ConflictException('CPF já cadastrado');
     if (!dto.dataNascimento) {
@@ -400,7 +436,7 @@ export class ClientesService {
 
     const data: Prisma.ClienteUncheckedCreateInput = {
       ...(dto.codigo ? { codigo: dto.codigo } : {}),
-      cpf: dto.cpf,
+      cpf,
       nome: dto.nome,
       telefone: dto.telefone,
       dataNascimento: parseEValidarDataNascimento(dto.dataNascimento),
@@ -450,7 +486,10 @@ export class ClientesService {
       ];
     }
 
-    const where = this.mergeWhere(filtersWhere, this.buildHierarchyWhere(user));
+    const where = this.mergeWhere(
+      filtersWhere,
+      await this.buildHierarchyWhere(user),
+    );
 
     const [data, total] = await Promise.all([
       this.prisma.cliente.findMany({
@@ -480,7 +519,7 @@ export class ClientesService {
 
   async findOne(id: string, user?: RequestUser) {
     const cliente = await this.prisma.cliente.findFirst({
-      where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
+      where: this.mergeWhere({ id }, await this.buildHierarchyWhere(user)),
       include: {
         vendedor: { select: { id: true, nome: true, codigo: true } },
         distribuidor: { select: { id: true, nome: true, codigo: true } },
@@ -493,7 +532,10 @@ export class ClientesService {
 
   async findByCpf(cpf: string, user?: RequestUser) {
     const cliente = await this.prisma.cliente.findFirst({
-      where: this.mergeWhere({ cpf }, this.buildHierarchyWhere(user)),
+      where: this.mergeWhere(
+        { cpf: { in: variacoesDeCpf(cpf) } },
+        await this.buildHierarchyWhere(user),
+      ),
     });
     if (!cliente) throw new NotFoundException('Cliente não encontrado');
     return cliente;
@@ -501,7 +543,7 @@ export class ClientesService {
 
   async findByCodigo(codigo: number, user?: RequestUser) {
     const cliente = await this.prisma.cliente.findFirst({
-      where: this.mergeWhere({ codigo }, this.buildHierarchyWhere(user)),
+      where: this.mergeWhere({ codigo }, await this.buildHierarchyWhere(user)),
     });
     if (!cliente) throw new NotFoundException('Cliente não encontrado');
     return cliente;
@@ -510,11 +552,8 @@ export class ClientesService {
   async buscarMeusDados(
     cpf: string,
   ): Promise<{ message: string; data: { cliente: MeusDadosClienteResponse } }> {
-    const cpfLimpo = cpf.replace(/\D/g, '');
     const cliente = await this.prisma.cliente.findFirst({
-      where: {
-        OR: [{ cpf: cpfLimpo }, { cpf: this.formatarCpf(cpfLimpo) }],
-      },
+      where: { cpf: { in: variacoesDeCpf(cpf) } },
       select: {
         id: true,
         nome: true,
@@ -596,9 +635,11 @@ export class ClientesService {
   async update(id: string, dto: UpdateClienteDto, user?: RequestUser) {
     const clienteAtual = await this.findOne(id, user);
 
-    if (dto.cpf) {
+    const cpf = dto.cpf ? normalizarCpf(dto.cpf) : undefined;
+
+    if (cpf) {
       const conflict = await this.prisma.cliente.findFirst({
-        where: { cpf: dto.cpf, NOT: { id } },
+        where: { cpf: { in: variacoesDeCpf(cpf) }, NOT: { id } },
       });
       if (conflict) throw new ConflictException('CPF já cadastrado');
     }
@@ -621,6 +662,9 @@ export class ClientesService {
 
     const data: Prisma.ClienteUncheckedUpdateInput = { ...dto };
     delete data.codigo;
+    if (cpf) {
+      data.cpf = cpf;
+    }
     if (dto.dataNascimento) {
       data.dataNascimento = parseEValidarDataNascimento(dto.dataNascimento);
     }

@@ -70,9 +70,7 @@ describe('ClientesService', () => {
     const result = await service.buscarMeusDados('031.123.456-75');
 
     expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
-      where: {
-        OR: [{ cpf: '03112345675' }, { cpf: '031.123.456-75' }],
-      },
+      where: { cpf: { in: ['03112345675', '031.123.456-75'] } },
       select: {
         id: true,
         nome: true,
@@ -155,9 +153,15 @@ describe('ClientesService', () => {
     );
   });
 
-  it('findAll should limitar clientes ao vendedor autenticado', async () => {
+  // A carteira é da rede, não do vendedor: quem está logado enxerga todos os
+  // clientes do próprio distribuidor, inclusive os que outro vendedor da rede
+  // atendeu e os captados direto pelo distribuidor.
+  it('findAll should limitar clientes à rede do vendedor autenticado', async () => {
     mockPrisma.cliente.findMany.mockResolvedValue([]);
     mockPrisma.cliente.count.mockResolvedValue(0);
+    mockPrisma.vendedor.findUnique.mockResolvedValue({
+      distribuidorId: 'distribuidor-1',
+    });
 
     await service.findAll(1, 20, undefined, undefined, undefined, {
       id: 'usuario-vendedor',
@@ -168,11 +172,117 @@ describe('ClientesService', () => {
       vendedorId: 'vendedor-1',
     });
 
+    expect(mockPrisma.vendedor.findUnique).toHaveBeenCalledWith({
+      where: { id: 'vendedor-1' },
+      select: { distribuidorId: true },
+    });
     expect(mockPrisma.cliente.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { vendedorId: 'vendedor-1' },
+        where: { distribuidorId: 'distribuidor-1' },
       }),
     );
+  });
+
+  it('findOne should aceitar cliente de outro vendedor da mesma rede', async () => {
+    mockPrisma.vendedor.findUnique.mockResolvedValue({
+      distribuidorId: 'distribuidor-1',
+    });
+    mockPrisma.cliente.findFirst.mockResolvedValue({
+      id: 'cliente-do-colega',
+      vendedorId: 'vendedor-2',
+      distribuidorId: 'distribuidor-1',
+    });
+
+    const cliente = await service.findOne('cliente-do-colega', {
+      id: 'usuario-vendedor',
+      email: 'vend@test.com',
+      cpf: '12345678900',
+      perfil: 'VENDEDOR',
+      status: 'ATIVO',
+      vendedorId: 'vendedor-1',
+    });
+
+    expect(cliente.id).toBe('cliente-do-colega');
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          AND: [
+            { id: 'cliente-do-colega' },
+            { distribuidorId: 'distribuidor-1' },
+          ],
+        },
+      }),
+    );
+  });
+
+  // Sem cadastro de vendedor não há rede. Cair para escopo vazio devolveria a
+  // base inteira, que é o oposto do que o escopo existe para fazer.
+  it('findAll should recusar vendedor cujo cadastro não existe mais', async () => {
+    mockPrisma.vendedor.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.findAll(1, 20, undefined, undefined, undefined, {
+        id: 'usuario-vendedor',
+        email: 'vend@test.com',
+        cpf: '12345678900',
+        perfil: 'VENDEDOR',
+        status: 'ATIVO',
+        vendedorId: 'vendedor-fantasma',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(mockPrisma.cliente.findMany).not.toHaveBeenCalled();
+  });
+
+  // O DTO aceita CPF mascarado. Gravar a máscara deixava o cadastro invisível
+  // para toda busca por CPF (que compara dígitos) e escapava da `@unique`.
+  it('create should gravar o CPF só com dígitos', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValueOnce(null);
+    mockPrisma.cliente.create.mockResolvedValue({
+      id: 'cliente-1',
+      nome: 'Tiago Lima',
+      codigo: 1,
+    });
+
+    await service.create(
+      {
+        cpf: '031.123.456-75',
+        nome: 'Tiago Lima',
+        telefone: '(64) 98461-4339',
+        dataNascimento: '1990-05-20',
+      },
+      {
+        id: 'usuario-admin',
+        email: 'admin@test.com',
+        cpf: '00000000000',
+        perfil: 'ADMIN',
+        status: 'ATIVO',
+      },
+    );
+
+    // A checagem de duplicado cobre as duas formas: sem isso, o mesmo cliente
+    // entraria duas vezes, uma em cada formato.
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
+      where: { cpf: { in: ['03112345675', '031.123.456-75'] } },
+    });
+    expect(mockPrisma.cliente.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ cpf: '03112345675' }),
+      }),
+    );
+  });
+
+  it('findByCpf should achar cadastro gravado com máscara', async () => {
+    mockPrisma.cliente.findFirst.mockResolvedValue({
+      id: 'cliente-1',
+      cpf: '031.123.456-75',
+    });
+
+    const cliente = await service.findByCpf('03112345675');
+
+    expect(cliente.id).toBe('cliente-1');
+    expect(mockPrisma.cliente.findFirst).toHaveBeenCalledWith({
+      where: { cpf: { in: ['03112345675', '031.123.456-75'] } },
+    });
   });
 
   it('create should vincular cliente ao vendedor autenticado', async () => {
