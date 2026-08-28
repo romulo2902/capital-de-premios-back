@@ -285,6 +285,34 @@ export class MaquininhasService {
     return maquininha.id;
   }
 
+  /**
+   * Valida a maquininha pelo número de série impresso no aparelho.
+   *
+   * O terminal não conhece o UUID interno, só a série física — é o caso de
+   * uso de quem digita ou lê o aparelho na hora de vender. Mesma regra de
+   * escopo e status do `garantirMaquininhaDoOperador`: aparelho fora do
+   * alcance ou inativo responde 404, nunca 403, para não entregar a
+   * existência de equipamento de outra rede a quem tentar adivinhar a série.
+   */
+  async validarPorNumeroSerie(numeroSerie: string, user: RequestUser) {
+    const maquininha = await this.prisma.maquininha.findFirst({
+      where: {
+        ...this.buildEscopoDoOperador(user),
+        numeroSerie: this.normalizarSerie(numeroSerie),
+        status: StatusMaquininha.ATIVA,
+      },
+      select: MAQUININHA_SELECT,
+    });
+
+    if (!maquininha) {
+      throw new NotFoundException(
+        'Maquininha não encontrada, inativa ou não vinculada a este operador',
+      );
+    }
+
+    return { message: 'Maquininha validada com sucesso', data: maquininha };
+  }
+
   private buildEscopoDoOperador(
     user: RequestUser,
   ): Prisma.MaquininhaWhereInput {
