@@ -20,12 +20,14 @@ export class CreateVendedorDto {
   @IsInt()
   codigo?: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'uuid-do-distribuidor',
-    description: 'ID UUID do distribuidor responsável por este vendedor.',
+    description:
+      'ID UUID do distribuidor responsável por este vendedor. Obrigatório para ADMIN. Ignorado para DISTRIBUIDOR — nesse caso a rede vem do token.',
   })
+  @IsOptional()
   @IsString()
-  distribuidorId: string;
+  distribuidorId?: string;
 
   @ApiProperty({
     example: 'Maria da Silva',

@@ -6,6 +6,8 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { VendasModule } from '../vendas/vendas.module';
 import { VendasSenaModule } from '../capital-sena/vendas-sena/vendas-sena.module';
 import { PagamentosModule } from '../pagamentos/pagamentos.module';
+import { VendedoresModule } from '../vendedores/vendedores.module';
+import { MaquininhasModule } from '../maquininhas/maquininhas.module';
 import { PosController } from './pos.controller';
 import { PosService } from './pos.service';
 import { PosAuthService } from './pos-auth.service';
@@ -20,6 +22,8 @@ import { JwtPosStrategy } from './strategies/jwt-pos.strategy';
     VendasModule,
     VendasSenaModule,
     PagamentosModule,
+    VendedoresModule,
+    MaquininhasModule,
   ],
   controllers: [PosController],
   providers: [PosService, PosAuthService, JwtPosStrategy],
