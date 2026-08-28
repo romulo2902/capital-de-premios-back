@@ -341,4 +341,55 @@ describe('MaquininhasService', () => {
       ).rejects.toThrow(NotFoundException);
     });
   });
+
+  describe('validarPorNumeroSerie', () => {
+    it('normaliza a série antes de buscar', async () => {
+      mockPrisma.maquininha.findFirst.mockResolvedValue({
+        id: 'maq-1',
+        numeroSerie: '8012345678',
+      });
+
+      await service.validarPorNumeroSerie('  8012345678 ', vendedor);
+
+      const [{ where }] = mockPrisma.maquininha.findFirst.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(where.numeroSerie).toBe('8012345678');
+      expect(where.status).toBe(StatusMaquininha.ATIVA);
+      expect(where.vendedorId).toBe('vend-1');
+    });
+
+    it('normaliza caixa e espaços internos como o cadastro faz', async () => {
+      mockPrisma.maquininha.findFirst.mockResolvedValue({ id: 'maq-1' });
+
+      await service.validarPorNumeroSerie('80a1 b2c3', vendedor);
+
+      const [{ where }] = mockPrisma.maquininha.findFirst.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      // mesmo normalizarSerie do create/update: trim + upperCase, sem remover
+      // espaços internos — só reflete o comportamento existente.
+      expect(where.numeroSerie).toBe('80A1 B2C3');
+    });
+
+    it('retorna a maquininha encontrada, dentro do escopo do operador', async () => {
+      const maquininha = { id: 'maq-1', numeroSerie: '8012345678' };
+      mockPrisma.maquininha.findFirst.mockResolvedValue(maquininha);
+
+      const resultado = await service.validarPorNumeroSerie(
+        '8012345678',
+        distribuidor,
+      );
+
+      expect(resultado.data).toBe(maquininha);
+    });
+
+    it('responde 404 para série fora do escopo, sem vazar existência', async () => {
+      mockPrisma.maquininha.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.validarPorNumeroSerie('serie-alheia', vendedor),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
 });

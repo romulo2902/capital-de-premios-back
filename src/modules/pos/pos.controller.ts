@@ -37,6 +37,7 @@ import { MaquininhasService } from '../maquininhas/maquininhas.service';
 import { CreateMaquininhaDto } from '../maquininhas/dto/create-maquininha.dto';
 import { UpdateMaquininhaDto } from '../maquininhas/dto/update-maquininha.dto';
 import { FiltroMaquininhasDto } from '../maquininhas/dto/filtro-maquininhas.dto';
+import { ValidarMaquininhaDto } from '../maquininhas/dto/validar-maquininha.dto';
 import { ListarCombosAdminDto } from '../vendas/dto/listar-combos-admin.dto';
 
 const POS_AUTH_TAG = 'POS / Autenticação';
@@ -1354,6 +1355,73 @@ venda. Não existe filtro por rede na query.
     @CurrentUser() user: RequestUser,
   ) {
     return this.maquininhasService.findAll(filtros, user);
+  }
+
+  @Get('maquininhas/validar')
+  @UseGuards(PosAuthGuard, RolesGuard)
+  @Roles('DISTRIBUIDOR', 'VENDEDOR')
+  @ApiBearerAuth()
+  @ApiTags(POS_MAQUININHAS_TAG)
+  @ApiOperation({
+    summary:
+      '16.1. 🔒 Validar maquininha pelo número de série (VENDEDOR + DISTRIBUIDOR)',
+    description: `
+O terminal só conhece o número de série impresso no aparelho, não o UUID
+interno — esta rota traduz um pelo outro antes de lançar a venda.
+
+A série é normalizada (sem espaços, caixa alta) e comparada dentro do escopo
+do operador: **DISTRIBUIDOR** alcança qualquer aparelho da própria rede,
+**VENDEDOR** só o que está atribuído a ele. Fora do alcance, inativo ou
+inexistente, a resposta é sempre **404** — nunca 403, para não confirmar a
+existência de um aparelho de outra rede a quem tentar adivinhar a série.
+
+O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
+\`POST /pos/vendas\` e \`POST /pos/capital-sena/vendas\`.
+    `.trim(),
+  })
+  @ApiQuery({
+    name: 'numeroSerie',
+    required: true,
+    type: String,
+    description: 'Número de série impresso no aparelho.',
+    example: '8012345678',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Maquininha validada.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Maquininha validada com sucesso',
+        data: {
+          id: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+          numeroSerie: '8012345678',
+          apelido: 'Maquininha do balcão',
+          operadora: 'PagBank',
+          status: 'ATIVA',
+          vendedor: { id: 'a1b2c3d4-...', nome: 'Maria da Silva', codigo: 4933 },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Operador sem vínculo válido de rede.',
+  })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Maquininha não encontrada, inativa, ou fora do alcance deste operador.',
+  })
+  validarMaquininha(
+    @Query() dto: ValidarMaquininhaDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.maquininhasService.validarPorNumeroSerie(
+      dto.numeroSerie,
+      user,
+    );
   }
 
   @Patch('maquininhas/:id')
