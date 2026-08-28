@@ -111,6 +111,19 @@ export class AuthService {
       throw new UnauthorizedException('Usuário inativo');
     }
 
+    // Vendedor de rede inativa não entra: o `JwtStrategy` já barraria no
+    // primeiro request, mas emitir um token que morre em seguida daria uma
+    // mensagem de erro sem relação com a causa.
+    if (usuario.perfil === 'VENDEDOR') {
+      const vendedor = await this.prisma.vendedor.findFirst({
+        where: { usuarioId: usuario.id },
+        select: { distribuidor: { select: { status: true } } },
+      });
+      if (vendedor?.distribuidor?.status === 'INATIVO') {
+        throw new UnauthorizedException('Distribuidor da rede está inativo');
+      }
+    }
+
     // Apenas perfis do painel admin podem logar aqui (ADMIN, DISTRIBUIDOR, VENDEDOR)
     if (!AuthService.PERFIS_ADMIN.has(usuario.perfil)) {
       throw new UnauthorizedException(
