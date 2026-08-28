@@ -149,6 +149,11 @@ enum TipoBanner {
   SENA
 }
 
+enum StatusMaquininha {
+  ATIVA
+  INATIVA
+}
+
 model Usuario {
   id                 String        @id @default(uuid())
   cpf                String?       @unique
@@ -193,6 +198,7 @@ model Distribuidor {
   saques                    Saque[]
   comissoesDistribuidor     ComissaoDistribuidor[]
   comissoesDistribuidorSena ComissaoDistribuidorSena[]
+  maquininhas               Maquininha[]
 }
 
 model Vendedor {
@@ -230,6 +236,7 @@ model Vendedor {
   comissoes       Comissao[]
   comissoesSena   ComissaoSena[]
   saques          Saque[]
+  maquininhas     Maquininha[]
 }
 
 model Cliente {
@@ -355,12 +362,14 @@ model Venda {
   status               StatusVenda           @default(PENDENTE)
   origemParticipacao   OrigemParticipacao    @default(DIGITAL)
   tipoPagamento        TipoPagamento
+  maquininhaId         String?
   gatewayId            String?
   gatewayPayload       Json?
   createdAt            DateTime              @default(now())
   edicao               Edicao                @relation(fields: [edicaoId], references: [id])
   cliente              Cliente               @relation(fields: [clienteId], references: [id])
   vendedor             Vendedor?             @relation(fields: [vendedorId], references: [id])
+  maquininha           Maquininha?           @relation(fields: [maquininhaId], references: [id])
   criadoPor            Usuario?              @relation("VendaCriadaPor", fields: [criadoPorId], references: [id])
   bilhetes             Bilhete[]
   comissao             Comissao?
@@ -548,24 +557,26 @@ model PremioSena {
 }
 
 model VendaSena {
-  id             String          @id @default(uuid())
-  edicaoSenaId   String
-  clienteId      String
-  vendedorId     String?
-  distribuidorId String?
-  comboSenaId    String?
-  quantidade     Int
-  total          Decimal
-  status         StatusVendaSena @default(PENDENTE)
-  tipoPagamento  TipoPagamento
+  id                 String             @id @default(uuid())
+  edicaoSenaId       String
+  clienteId          String
+  vendedorId         String?
+  distribuidorId     String?
+  comboSenaId        String?
+  quantidade         Int
+  total              Decimal
+  status             StatusVendaSena    @default(PENDENTE)
+  tipoPagamento      TipoPagamento
   origemParticipacao OrigemParticipacao @default(DIGITAL)
-  gatewayId      String?
-  gatewayPayload Json?
-  createdAt      DateTime        @default(now())
+  maquininhaId       String?
+  gatewayId          String?
+  gatewayPayload     Json?
+  createdAt          DateTime           @default(now())
 
   edicaoSena               EdicaoSena                @relation(fields: [edicaoSenaId], references: [id])
   cliente                  Cliente                   @relation(fields: [clienteId], references: [id])
   vendedor                 Vendedor?                 @relation(fields: [vendedorId], references: [id])
+  maquininha               Maquininha?               @relation(fields: [maquininhaId], references: [id])
   cartelas                 CartelaSena[]
   comissaoSena             ComissaoSena?
   comissaoDistribuidorSena ComissaoDistribuidorSena?
@@ -635,23 +646,46 @@ model ComissaoDistribuidorSena {
 /// Configuração global de percentuais de comissão padrão.
 /// Tabela singleton — apenas uma linha com chave = "DEFAULT".
 model ConfiguracaoComissao {
-  chave                    String  @id @default("DEFAULT")
-  percentualDistribuidor   Decimal @default(0)
-  percentualVendedor       Decimal @default(0)
-  updatedAt                DateTime @updatedAt
+  chave                  String   @id @default("DEFAULT")
+  percentualDistribuidor Decimal  @default(0)
+  percentualVendedor     Decimal  @default(0)
+  updatedAt              DateTime @updatedAt
 }
 
 model Banner {
-  id          String     @id @default(uuid())
-  tipo        TipoBanner
-  titulo      String?
-  descricao   String?
-  imagemUrl   String
-  linkUrl     String?
-  ordem       Int        @default(0)
-  ativo       Boolean    @default(true)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id        String     @id @default(uuid())
+  tipo      TipoBanner
+  titulo    String?
+  descricao String?
+  imagemUrl String
+  linkUrl   String?
+  ordem     Int        @default(0)
+  ativo     Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
   @@index([tipo, ativo, ordem])
+}
+
+// Maquininhas de cartão da rede. Cadastradas pelo distribuidor no terminal POS
+// e compartilhadas entre os vendedores da própria rede (N:N implícito). O
+// `maquininhaId` da venda só é gravado pelo canal POS — nos demais canais fica
+// null, porque o campo nem é exposto nos DTOs de venda do admin e da loja.
+model Maquininha {
+  id             String           @id @default(uuid())
+  distribuidorId String
+  vendedorId     String?
+  numeroSerie    String           @unique
+  apelido        String?
+  operadora      String?
+  status         StatusMaquininha @default(ATIVA)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  distribuidor   Distribuidor     @relation(fields: [distribuidorId], references: [id])
+  vendedor       Vendedor?        @relation(fields: [vendedorId], references: [id])
+  vendas         Venda[]
+  vendasSena     VendaSena[]
+
+  @@index([distribuidorId, status])
+  @@index([vendedorId])
 }
