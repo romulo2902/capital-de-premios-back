@@ -18,6 +18,8 @@ interface OperadorPos {
   status: StatusUsuario;
   vendedorId?: string;
   distribuidorId?: string;
+  /** Status da rede. Só preenchido para VENDEDOR — o distribuidor é a rede. */
+  statusDaRede?: StatusUsuario;
 }
 
 /**
@@ -47,6 +49,12 @@ export class PosAuthService {
 
     if (operador.status === StatusUsuario.INATIVO) {
       throw new UnauthorizedException('Operador inativo');
+    }
+
+    // Rede inativa derruba o vendedor junto, senão inativar o distribuidor
+    // deixaria o time inteiro operando o terminal normalmente.
+    if (operador.statusDaRede === StatusUsuario.INATIVO) {
+      throw new UnauthorizedException('Distribuidor da rede está inativo');
     }
 
     const payload: PosJwtPayload = {
@@ -87,6 +95,7 @@ export class PosAuthService {
         cpf: true,
         status: true,
         distribuidorId: true,
+        distribuidor: { select: { status: true } },
       },
     });
     if (vendedor) {
@@ -98,6 +107,7 @@ export class PosAuthService {
         status: vendedor.status,
         vendedorId: vendedor.id,
         distribuidorId: vendedor.distribuidorId,
+        statusDaRede: vendedor.distribuidor.status,
       };
     }
 

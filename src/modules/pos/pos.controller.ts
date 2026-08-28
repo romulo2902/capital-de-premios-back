@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -20,6 +21,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 import { PosAuthGuard } from './guards/pos-auth.guard';
 import { PosAuthService } from './pos-auth.service';
@@ -28,11 +31,50 @@ import { LoginPosDto } from './dto/login-pos.dto';
 import { CreatePosVendaDto } from './dto/create-pos-venda.dto';
 import { CreatePosVendaSenaDto } from './dto/create-pos-venda-sena.dto';
 import { ReservarCartelasPosDto } from './dto/reservar-cartelas-pos.dto';
+import { CreatePosVendedorDto } from './dto/create-pos-vendedor.dto';
+import { FiltroPosVendedoresDto } from './dto/filtro-pos-vendedores.dto';
+import { MaquininhasService } from '../maquininhas/maquininhas.service';
+import { CreateMaquininhaDto } from '../maquininhas/dto/create-maquininha.dto';
+import { UpdateMaquininhaDto } from '../maquininhas/dto/update-maquininha.dto';
+import { FiltroMaquininhasDto } from '../maquininhas/dto/filtro-maquininhas.dto';
 import { ListarCombosAdminDto } from '../vendas/dto/listar-combos-admin.dto';
 
 const POS_AUTH_TAG = 'POS / Autenticação';
 const POS_PREMIOS_TAG = 'POS / Prêmios';
 const POS_SENA_TAG = 'POS / Capital Sena';
+const POS_VENDEDORES_TAG = 'POS / Vendedores';
+const POS_MAQUININHAS_TAG = 'POS / Maquininhas';
+
+const POS_VENDEDOR_REQUEST_EXAMPLE = {
+  nome: 'Maria da Silva',
+  cpf: '008.016.371-80',
+  telefone: '(61) 99233-9525',
+  email: 'maria.vendedora@email.com',
+  dataNascimento: '1986-01-31',
+  tipoChavePix: 'EMAIL',
+  chavePix: 'maria.vendedora@email.com',
+  comissaoPercent: 50,
+};
+
+const POS_VENDEDOR_MINIMO_REQUEST_EXAMPLE = {
+  nome: 'João Vendedor',
+  cpf: '12345678900',
+  telefone: '(61) 98888-7777',
+  email: 'joao.vendedor@email.com',
+};
+
+const POS_MAQUININHA_REQUEST_EXAMPLE = {
+  numeroSerie: '8012345678',
+  apelido: 'Maquininha do balcão',
+  operadora: 'PagBank',
+  vendedorId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+};
+
+const POS_MAQUININHA_ESTOQUE_REQUEST_EXAMPLE = {
+  numeroSerie: '8098765432',
+  apelido: 'Reserva',
+  operadora: 'Stone',
+};
 
 const POS_LOGIN_REQUEST_EXAMPLE = {
   cpf: '12345678900',
@@ -151,12 +193,26 @@ const POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE = {
  * O pagamento é processado pela API, igual ao fluxo WhatsApp/loja. A venda nasce
  * **PENDENTE**, a API cria a cobrança no PagBank e o webhook confirma a venda,
  * gerando as cartelas. Origem da venda é sempre `POS`.
+ *
+ * ### Vendedores da rede (DISTRIBUIDOR apenas)
+ * O distribuidor cadastra e confere os vendedores da própria rede sem sair do
+ * terminal (`POST` e `GET /api/pos/vendedores`). A rede vem do token — nunca do
+ * corpo ou da query —, então um distribuidor não alcança a rede de outro. O
+ * perfil VENDEDOR recebe 403 nessas duas rotas.
+ *
+ * ### Maquininhas de cartão
+ * O distribuidor cadastra e edita o parque da rede (`POST` e `PATCH
+ * /api/pos/maquininhas`); o vendedor apenas lista (`GET`) os aparelhos
+ * atribuídos a ele, para escolher em qual passou a venda. Informar
+ * `maquininhaId` na venda é opcional e **exclusivo do POS** — nos demais canais
+ * o campo não existe e a coluna fica null.
  */
 @Controller('pos')
 export class PosController {
   constructor(
     private readonly posAuthService: PosAuthService,
     private readonly posService: PosService,
+    private readonly maquininhasService: MaquininhasService,
   ) {}
 
   // ─── 1. AUTENTICAÇÃO ──────────────────────────────────────────────
@@ -1018,5 +1074,364 @@ Sena. Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`,
     @CurrentUser() user: RequestUser,
   ) {
     return this.posService.consultarStatusPagamentoSena(id, user);
+  }
+
+  // ─── 4. VENDEDORES DA REDE ────────────────────────────────────────
+
+  @Post('vendedores')
+  @UseGuards(PosAuthGuard, RolesGuard)
+  @Roles('DISTRIBUIDOR')
+  @ApiBearerAuth()
+  @ApiTags(POS_VENDEDORES_TAG)
+  @ApiOperation({
+    summary: '13. 🔒 Cadastrar vendedor na própria rede (DISTRIBUIDOR apenas)',
+    description: `
+Cadastra um vendedor direto do terminal, já vinculado à rede do distribuidor
+logado. O \`distribuidorId\` **não é aceito no corpo** — ele vem sempre do token
+do POS, o que impede o cadastro de vendedor na rede de terceiros.
+
+O cadastro cria o \`Usuario\` de acesso e o \`Vendedor\` na mesma transação, e
+dispara a geração dos QR Codes (Prêmios e Sena) em seguida.
+
+**Senha de acesso à loja:** se \`senha\` for omitida, o vendedor entra com os
+**6 primeiros dígitos do CPF**.
+
+**Comissão:** \`comissaoPercent\` (0 a 100) é a fatia repassada ao vendedor
+dentro do percentual que o distribuidor já recebe do Admin. Omitido, fica 0.
+
+O perfil VENDEDOR recebe **403** nesta rota.
+    `.trim(),
+  })
+  @ApiBody({
+    type: CreatePosVendedorDto,
+    description:
+      'Dados do vendedor. Não envie `distribuidorId` nem `codigo` — a requisição é rejeitada com 400.',
+    examples: {
+      completo: {
+        summary: 'Cadastro completo com PIX e comissão',
+        value: POS_VENDEDOR_REQUEST_EXAMPLE,
+      },
+      minimo: {
+        summary: 'Cadastro mínimo (campos obrigatórios)',
+        value: POS_VENDEDOR_MINIMO_REQUEST_EXAMPLE,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Vendedor cadastrado e vinculado à rede do distribuidor.',
+    schema: {
+      example: {
+        statusCode: 201,
+        message: 'Vendedor cadastrado com sucesso',
+        data: {
+          id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          codigo: 4933,
+          distribuidorId: 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
+          nome: 'Maria da Silva',
+          cpf: '00801637180',
+          email: 'maria.vendedora@email.com',
+          telefone: '(61) 99233-9525',
+          comissaoPercent: '50',
+          status: 'ATIVO',
+          createdAt: '2026-05-28T14:30:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Dados inválidos, ou envio de campo não permitido (`distribuidorId`, `codigo`).',
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Operador não é DISTRIBUIDOR, ou está sem vínculo válido de rede.',
+  })
+  @ApiResponse({ status: 409, description: 'CPF ou e-mail já cadastrado.' })
+  cadastrarVendedor(
+    @Body() dto: CreatePosVendedorDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.posService.cadastrarVendedor(dto, user);
+  }
+
+  @Get('vendedores')
+  @UseGuards(PosAuthGuard, RolesGuard)
+  @Roles('DISTRIBUIDOR')
+  @ApiBearerAuth()
+  @ApiTags(POS_VENDEDORES_TAG)
+  @ApiOperation({
+    summary: '14. 🔒 Listar vendedores da própria rede (DISTRIBUIDOR apenas)',
+    description: `
+Lista os vendedores da rede do distribuidor logado — útil para conferir o
+cadastro recém-criado no terminal.
+
+O recorte por rede vem do token: não existe filtro \`distribuidorId\` nesta
+rota, então um distribuidor nunca enxerga a rede de outro.
+    `.trim(),
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Busca por nome, CPF ou e-mail.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Vendedores da rede listados.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Vendedores listados com sucesso',
+        data: [
+          {
+            id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+            codigo: 4933,
+            nome: 'Maria da Silva',
+            cpf: '00801637180',
+            email: 'maria.vendedora@email.com',
+            comissaoPercent: '50',
+            status: 'ATIVO',
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Operador não é DISTRIBUIDOR, ou está sem vínculo válido de rede.',
+  })
+  listarVendedores(
+    @Query() filtros: FiltroPosVendedoresDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.posService.listarVendedoresDaRede(filtros, user);
+  }
+
+  // ─── 5. MAQUININHAS DE CARTÃO ─────────────────────────────────────
+
+  @Post('maquininhas')
+  @UseGuards(PosAuthGuard, RolesGuard)
+  @Roles('DISTRIBUIDOR')
+  @ApiBearerAuth()
+  @ApiTags(POS_MAQUININHAS_TAG)
+  @ApiOperation({
+    summary:
+      '15. 🔒 Cadastrar maquininha na própria rede (DISTRIBUIDOR apenas)',
+    description: `
+Cadastra um aparelho de cartão na rede do distribuidor logado. A rede vem do
+token: se \`distribuidorId\` vier no corpo, é **descartado em silêncio**, não
+recusado — o campo existe no DTO por causa do painel administrativo, onde o
+ADMIN escolhe a rede.
+
+O \`numeroSerie\` é normalizado (sem espaços, caixa alta) e é **único global**:
+um aparelho físico existe uma vez só, então a rede B não consegue cadastrar a
+maquininha que já está na rede A. Reincidência responde **409**.
+
+\`vendedorId\` é opcional: omitido, o aparelho fica no estoque do distribuidor.
+Vendedor de outra rede é recusado com **400**.
+    `.trim(),
+  })
+  @ApiBody({
+    type: CreateMaquininhaDto,
+    examples: {
+      comVendedor: {
+        summary: 'Aparelho já entregue a um vendedor',
+        value: POS_MAQUININHA_REQUEST_EXAMPLE,
+      },
+      estoque: {
+        summary: 'Aparelho no estoque do distribuidor',
+        value: POS_MAQUININHA_ESTOQUE_REQUEST_EXAMPLE,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Maquininha cadastrada na rede.',
+    schema: {
+      example: {
+        statusCode: 201,
+        message: 'Maquininha cadastrada com sucesso',
+        data: {
+          id: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+          numeroSerie: '8012345678',
+          apelido: 'Maquininha do balcão',
+          operadora: 'PagBank',
+          status: 'ATIVA',
+          distribuidorId: 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
+          createdAt: '2026-08-28T14:30:00.000Z',
+          vendedores: [
+            { id: 'a1b2c3d4-...', nome: 'Maria da Silva', codigo: 4933 },
+          ],
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos, ou vendedor fora da rede do distribuidor.',
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Operador não é DISTRIBUIDOR, ou está sem vínculo de rede.',
+  })
+  @ApiResponse({ status: 409, description: 'Número de série já cadastrado.' })
+  cadastrarMaquininha(
+    @Body() dto: CreateMaquininhaDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.maquininhasService.create(dto, user);
+  }
+
+  @Get('maquininhas')
+  @UseGuards(PosAuthGuard, RolesGuard)
+  @Roles('DISTRIBUIDOR', 'VENDEDOR')
+  @ApiBearerAuth()
+  @ApiTags(POS_MAQUININHAS_TAG)
+  @ApiOperation({
+    summary: '16. 🔒 Listar maquininhas do operador (VENDEDOR + DISTRIBUIDOR)',
+    description: `
+O recorte sai do token e muda com o perfil:
+
+- **DISTRIBUIDOR** — o parque inteiro da própria rede.
+- **VENDEDOR** — apenas o aparelho atribuído a ele.
+
+É desta lista que o terminal monta o seletor de \`maquininhaId\` na tela de
+venda. Não existe filtro por rede na query.
+    `.trim(),
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Busca por número de série, apelido ou operadora.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['ATIVA', 'INATIVA'],
+    description: 'Filtrar por situação do aparelho.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Maquininhas listadas.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Maquininhas listadas com sucesso',
+        data: [
+          {
+            id: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+            numeroSerie: '8012345678',
+            apelido: 'Maquininha do balcão',
+            operadora: 'PagBank',
+            status: 'ATIVA',
+            vendedores: [
+              { id: 'a1b2c3d4-...', nome: 'Maria da Silva', codigo: 4933 },
+            ],
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Operador sem vínculo válido de rede.',
+  })
+  listarMaquininhas(
+    @Query() filtros: FiltroMaquininhasDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.maquininhasService.findAll(filtros, user);
+  }
+
+  @Patch('maquininhas/:id')
+  @UseGuards(PosAuthGuard, RolesGuard)
+  @Roles('DISTRIBUIDOR')
+  @ApiBearerAuth()
+  @ApiTags(POS_MAQUININHAS_TAG)
+  @ApiOperation({
+    summary:
+      '17. 🔒 Atualizar maquininha e seu vendedor (DISTRIBUIDOR apenas)',
+    description: `
+Edita os dados do aparelho, inativa/reativa e **redefine quem usa**.
+
+\`vendedorId\` troca quem opera o aparelho; \`null\` devolve ao estoque do
+distribuidor. Omitir o campo mantém o vínculo atual.
+
+Maquininha **INATIVA** é recusada na criação de venda do POS. Aparelho de outra
+rede responde **404**, não 403 — responder diferente entregaria a existência de
+equipamento alheio a quem chutar UUID.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID da maquininha (precisa ser da rede do distribuidor).',
+    example: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+  })
+  @ApiBody({
+    type: UpdateMaquininhaDto,
+    examples: {
+      transferir: {
+        summary: 'Transferir o aparelho para outro vendedor',
+        value: { vendedorId: 'd4e5f6a7-b8c9-0123-defa-234567890123' },
+      },
+      recolher: {
+        summary: 'Recolher para o estoque (desvincula o vendedor)',
+        value: { vendedorId: null },
+      },
+      inativar: {
+        summary: 'Inativar o aparelho',
+        value: { status: 'INATIVA' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Maquininha atualizada.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Maquininha atualizada com sucesso',
+        data: {
+          id: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+          numeroSerie: '8012345678',
+          status: 'INATIVA',
+          vendedor: null,
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos, ou vendedor fora da rede do distribuidor.',
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Operador não é DISTRIBUIDOR, ou está sem vínculo de rede.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada na rede do distribuidor.',
+  })
+  @ApiResponse({ status: 409, description: 'Número de série já cadastrado.' })
+  atualizarMaquininha(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMaquininhaDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.maquininhasService.update(id, dto, user);
   }
 }

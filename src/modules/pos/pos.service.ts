@@ -18,6 +18,8 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
+import { VendedoresService } from '../vendedores/vendedores.service';
+import { MaquininhasService } from '../maquininhas/maquininhas.service';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 import { aplicarVinculoDoToken } from '../../common/utils/vinculo-cliente.util';
 import { variacoesDeCpf } from '../../common/utils/cpf.util';
@@ -25,6 +27,8 @@ import { CreateVendaDto } from '../vendas/dto/create-venda.dto';
 import { CreateVendaSenaDto } from '../capital-sena/vendas-sena/dto/create-venda-sena.dto';
 import type { CreatePosVendaDto } from './dto/create-pos-venda.dto';
 import type { CreatePosVendaSenaDto } from './dto/create-pos-venda-sena.dto';
+import type { CreatePosVendedorDto } from './dto/create-pos-vendedor.dto';
+import type { FiltroPosVendedoresDto } from './dto/filtro-pos-vendedores.dto';
 import type { ListarCombosAdminDto } from '../vendas/dto/listar-combos-admin.dto';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { RedisService } from '../../common/redis/redis.service';
@@ -51,6 +55,8 @@ export class PosService {
     private readonly vendasSenaService: VendasSenaService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
     private readonly redisService: RedisService,
+    private readonly vendedoresService: VendedoresService,
+    private readonly maquininhasService: MaquininhasService,
   ) {}
 
   // ─── Capital de Prêmios ───────────────────────────────────────────
@@ -232,8 +238,15 @@ export class PosService {
   async criarVenda(dto: CreatePosVendaDto, user: RequestUser) {
     this.validarDadosPagamento(dto.tipoPagamento);
     await this.garantirReservasSelecionadas(dto, user);
+    // Fora do dto de venda de propósito: `maquininhaId` é campo do canal POS e
+    // não existe no CreateVendaDto compartilhado com admin e loja.
+    const { maquininhaId: maquininhaSolicitada, ...dadosVenda } = dto;
+    const maquininhaId = await this.resolverMaquininha(
+      maquininhaSolicitada,
+      user,
+    );
     const vendaDto: CreateVendaDto = {
-      ...dto,
+      ...dadosVenda,
       tipoPagamento: dto.tipoPagamento ?? TipoPagamento.PIX,
     };
     // Mesma política dos controllers: o vínculo vem do token, e um operador
@@ -244,6 +257,7 @@ export class PosService {
       origemParticipacao: OrigemParticipacao.POS,
       requireGateway:
         (dto.tipoPagamento ?? TipoPagamento.PIX) === TipoPagamento.PIX,
+      maquininhaId,
     });
     await this.estenderReservasSelecionadas(dto, user);
     return result;
@@ -327,16 +341,22 @@ export class PosService {
     };
   }
 
-  criarVendaSena(dto: CreatePosVendaSenaDto, user: RequestUser) {
+  async criarVendaSena(dto: CreatePosVendaSenaDto, user: RequestUser) {
     this.validarDadosPagamento(dto.tipoPagamento);
+    const { maquininhaId: maquininhaSolicitada, ...dadosVenda } = dto;
+    const maquininhaId = await this.resolverMaquininha(
+      maquininhaSolicitada,
+      user,
+    );
     const vendaDto: CreateVendaSenaDto = {
-      ...dto,
+      ...dadosVenda,
       tipoPagamento: TipoPagamento.PIX,
     };
     aplicarVinculoDoToken(vendaDto, user);
     return this.vendasSenaService.create(vendaDto, user, {
       origemParticipacao: OrigemParticipacao.POS,
       requireGateway: true,
+      maquininhaId,
     });
   }
 
@@ -392,6 +412,86 @@ export class PosService {
         pago: statusVenda === StatusVendaSena.APROVADO,
       },
     };
+  }
+
+  // ─── Rede do distribuidor ─────────────────────────────────────────
+
+  /**
+   * Cadastra um vendedor na rede do distribuidor logado no terminal.
+   *
+   * O `distribuidorId` sai exclusivamente do token do POS — o terminal nunca
+   * informa a rede, o que impede o cadastro de vendedor na rede de terceiros.
+   * A senha de acesso à loja segue o padrão do painel admin: os 6 primeiros
+   * dígitos do CPF quando `senha` é omitida.
+   */
+  async cadastrarVendedor(dto: CreatePosVendedorDto, user: RequestUser) {
+    const distribuidorId = this.garantirDistribuidorDoToken(user);
+
+    const vendedor = await this.vendedoresService.create({
+      ...dto,
+      distribuidorId,
+    });
+
+    this.logger.log(
+      `Vendedor cadastrado pelo POS: ${vendedor.nome} (${vendedor.codigo}) → dist ${distribuidorId}`,
+    );
+
+    return { message: 'Vendedor cadastrado com sucesso', data: vendedor };
+  }
+
+  /**
+   * Lista os vendedores da própria rede para conferência no terminal.
+   *
+   * O recorte por `distribuidorId` é aplicado pelo `VendedoresService` a partir
+   * do token — a query não aceita filtro de rede.
+   */
+  async listarVendedoresDaRede(
+    filtros: FiltroPosVendedoresDto,
+    user: RequestUser,
+  ) {
+    this.garantirDistribuidorDoToken(user);
+
+    return this.vendedoresService.findAll(
+      filtros.page,
+      filtros.limit,
+      filtros.search,
+      undefined,
+      user,
+    );
+  }
+
+  /**
+   * Traduz o `maquininhaId` opcional da venda POS no id já validado.
+   *
+   * Venda sem maquininha continua válida (PIX no terminal, por exemplo): só
+   * quando o campo vem é que exigimos aparelho ATIVO e vinculado ao operador.
+   */
+  private async resolverMaquininha(
+    maquininhaId: string | undefined,
+    user: RequestUser,
+  ): Promise<string | undefined> {
+    if (!maquininhaId) return undefined;
+
+    return this.maquininhasService.garantirMaquininhaDoOperador(
+      maquininhaId,
+      user,
+    );
+  }
+
+  private garantirDistribuidorDoToken(user: RequestUser): string {
+    if (user.perfil !== 'DISTRIBUIDOR') {
+      throw new ForbiddenException(
+        'Apenas o distribuidor pode gerenciar vendedores no POS',
+      );
+    }
+
+    if (!user.distribuidorId) {
+      throw new ForbiddenException(
+        'Operador distribuidor sem vínculo válido para gerenciar vendedores',
+      );
+    }
+
+    return user.distribuidorId;
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────

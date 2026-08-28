@@ -2,7 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { VendedoresService } from './vendedores.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { QrcodeService } from '../qrcode/qrcode.service';
 
 describe('VendedoresService', () => {
@@ -152,5 +156,222 @@ describe('VendedoresService', () => {
         email: 'novo@email.com',
       }),
     ).rejects.toThrow(ConflictException);
+  });
+  describe('escopo de rede do DISTRIBUIDOR', () => {
+    const distribuidor = {
+      id: 'user-dist',
+      email: 'dist@x.com',
+      cpf: null,
+      perfil: 'DISTRIBUIDOR',
+      status: 'ATIVO',
+      distribuidorId: 'dist-1',
+    } as const;
+
+    const admin = {
+      id: 'user-admin',
+      email: 'admin@x.com',
+      cpf: null,
+      perfil: 'ADMIN',
+      status: 'ATIVO',
+    } as const;
+
+    const novoVendedor = {
+      nome: 'Maria',
+      cpf: '00801637180',
+      telefone: '(61) 99999-0000',
+      email: 'maria@x.com',
+    };
+
+    beforeEach(() => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue(null);
+      mockPrisma.usuario.findFirst.mockResolvedValue(null);
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'dist-1',
+        codigo: 1,
+      });
+      mockPrisma.usuario.create.mockResolvedValue({ id: 'usuario-novo' });
+      mockPrisma.vendedor.create.mockResolvedValue({
+        id: 'vend-novo',
+        nome: 'Maria',
+        codigo: 10,
+      });
+    });
+
+    it('create ignora o distribuidorId do corpo e usa o do token', async () => {
+      await service.create(
+        { ...novoVendedor, distribuidorId: 'rede-alheia' },
+        distribuidor,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.create.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.distribuidorId).toBe('dist-1');
+    });
+
+    it('create respeita o distribuidorId do corpo quando é ADMIN', async () => {
+      await service.create(
+        { ...novoVendedor, distribuidorId: 'dist-escolhida' },
+        admin,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.create.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.distribuidorId).toBe('dist-escolhida');
+    });
+
+    it('create exige distribuidorId do ADMIN', async () => {
+      await expect(service.create({ ...novoVendedor }, admin)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('recusa comissão negativa mesmo em chamada direta ao service', async () => {
+      // O DTO agora tem @Min(0), mas o clamp do service precisa valer para
+      // quem não passa pelo ValidationPipe.
+      await service.create(
+        { ...novoVendedor, distribuidorId: 'dist-1', comissaoPercent: -50 },
+        admin,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.create.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.comissaoPercent).toBe(0);
+    });
+
+    it('mantém o teto de 100 na comissão', async () => {
+      await service.create(
+        { ...novoVendedor, distribuidorId: 'dist-1', comissaoPercent: 250 },
+        admin,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.create.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.comissaoPercent).toBe(100);
+    });
+
+    it('update não alcança vendedor de outra rede', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.update('vend-alheio', { nome: 'X' }, distribuidor),
+      ).rejects.toThrow(NotFoundException);
+
+      // O recorte tem de estar na própria busca, não numa checagem posterior.
+      const [argumentos] = mockPrisma.vendedor.findFirst.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(JSON.stringify(argumentos.where)).toContain('dist-1');
+    });
+
+    it('update descarta tentativa do distribuidor de transferir de rede', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+
+      await service.update(
+        'vend-1',
+        { nome: 'Maria Nova', distribuidorId: 'rede-alheia' },
+        distribuidor,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.distribuidorId).toBeUndefined();
+      expect(argumentos.data.nome).toBe('Maria Nova');
+    });
+
+    it('update mantém a transferência de rede para o ADMIN', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+
+      await service.update('vend-1', { distribuidorId: 'outra-rede' }, admin);
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.distribuidorId).toBe('outra-rede');
+    });
+    it('remove não alcança vendedor de outra rede', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.remove('vend-alheio', distribuidor),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.vendedor.update).not.toHaveBeenCalled();
+    });
+
+    it('remove inativa o vendedor da própria rede, sem apagar o registro', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+
+      await service.remove('vend-1', distribuidor);
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { where: Record<string, unknown>; data: Record<string, unknown> },
+      ];
+      expect(argumentos.where.id).toBe('vend-1');
+      expect(argumentos.data.status).toBe('INATIVO');
+      expect(mockPrisma.vendedor.delete).not.toHaveBeenCalled();
+    });
+
+    it('remove escopado pela rede na própria busca', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+
+      await service.remove('vend-1', distribuidor);
+
+      const [argumentos] = mockPrisma.vendedor.findFirst.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(JSON.stringify(argumentos.where)).toContain('dist-1');
+    });
+    it('remove derruba o Usuario junto, senão o login do painel segue de pé', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.remove('vend-1', distribuidor);
+
+      const [usuarioArgs] = mockPrisma.usuario.update.mock.calls[0] as [
+        { where: Record<string, unknown>; data: Record<string, unknown> },
+      ];
+      expect(usuarioArgs.where.id).toBe('usuario-1');
+      expect(usuarioArgs.data.status).toBe('INATIVO');
+    });
+
+    it('update propaga o status para o Usuario, permitindo reativar', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.update('vend-1', { status: 'ATIVO' } as never, distribuidor);
+
+      const [usuarioArgs] = mockPrisma.usuario.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(usuarioArgs.data.status).toBe('ATIVO');
+    });
   });
 });
