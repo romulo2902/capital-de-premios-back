@@ -227,6 +227,32 @@ describe('VendedoresService', () => {
       );
     });
 
+    it('recusa comissão negativa mesmo em chamada direta ao service', async () => {
+      // O DTO agora tem @Min(0), mas o clamp do service precisa valer para
+      // quem não passa pelo ValidationPipe.
+      await service.create(
+        { ...novoVendedor, distribuidorId: 'dist-1', comissaoPercent: -50 },
+        admin,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.create.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.comissaoPercent).toBe(0);
+    });
+
+    it('mantém o teto de 100 na comissão', async () => {
+      await service.create(
+        { ...novoVendedor, distribuidorId: 'dist-1', comissaoPercent: 250 },
+        admin,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.create.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.comissaoPercent).toBe(100);
+    });
+
     it('update não alcança vendedor de outra rede', async () => {
       mockPrisma.vendedor.findFirst.mockResolvedValue(null);
 

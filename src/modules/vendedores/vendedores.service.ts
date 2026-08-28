@@ -37,6 +37,17 @@ export class VendedoresService {
     return email.trim().toLowerCase();
   }
 
+  /**
+   * Comissão presa entre 0 e 100.
+   *
+   * O DTO já valida, mas o clamp antigo só limitava o teto — percentual
+   * negativo entrava e era gravado. Mantido no service para valer também em
+   * chamada direta, que não passa pelo ValidationPipe.
+   */
+  private normalizarComissao(percentual: number): number {
+    return Math.min(Math.max(percentual, 0), 100);
+  }
+
   private gerarSenhaPadraoPorCpf(cpf: string): string {
     return cpf.slice(0, 6);
   }
@@ -202,7 +213,10 @@ export class VendedoresService {
           estado: dto.estado,
           tipoChavePix: dto.tipoChavePix,
           chavePix: dto.chavePix,
-          comissaoPercent: dto.comissaoPercent !== undefined ? Math.min(dto.comissaoPercent, 100) : 0,
+          comissaoPercent:
+            dto.comissaoPercent !== undefined
+              ? this.normalizarComissao(dto.comissaoPercent)
+              : 0,
           link: dto.link,
           status: StatusUsuario.ATIVO,
         },
@@ -334,7 +348,9 @@ export class VendedoresService {
     if (dto.email) data.email = this.normalizarEmail(dto.email);
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
     if (dto.link !== undefined) data.qrcode = null;
-    if (dto.comissaoPercent !== undefined) data.comissaoPercent = Math.min(dto.comissaoPercent, 100);
+    if (dto.comissaoPercent !== undefined) {
+      data.comissaoPercent = this.normalizarComissao(dto.comissaoPercent);
+    }
 
     const usuarioData: Prisma.UsuarioUpdateInput = {};
     if (dto.cpf) usuarioData.cpf = this.normalizarCpf(dto.cpf);
