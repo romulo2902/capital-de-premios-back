@@ -66,8 +66,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     } else if (usuario.perfil === 'VENDEDOR') {
       const vend = await this.prisma.vendedor.findFirst({
         where: { usuarioId: usuario.id },
-        select: { id: true },
+        select: { id: true, distribuidor: { select: { status: true } } },
       });
+      // Rede inativa derruba o vendedor junto: inativar o distribuidor sem
+      // isso deixava a rede inteira vendendo, porque cada login validava
+      // apenas o próprio usuário. Sem consulta extra — o dado vem no mesmo
+      // findFirst que já resolvia o vendedorId.
+      if (vend?.distribuidor?.status === 'INATIVO') {
+        throw new UnauthorizedException('Distribuidor da rede está inativo');
+      }
       if (vend) user.vendedorId = vend.id;
     }
 

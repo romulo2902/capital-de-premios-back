@@ -114,6 +114,12 @@ interface CreateVendaOptions {
   skipGateway?: boolean;
   origemParticipacao?: OrigemParticipacao;
   requireGateway?: boolean;
+  /**
+   * Maquininha em que a venda foi passada. Só o canal POS informa — por isso
+   * vive aqui e não no `CreateVendaDto`: nos demais canais o campo não é
+   * alcançável e a coluna fica null.
+   */
+  maquininhaId?: string;
 }
 
 const RECONCILIACAO_POS_COOLDOWN_PADRAO_SEGUNDOS = 300;
@@ -294,6 +300,7 @@ export class VendasService {
             status: StatusVenda.APROVADO,
             origemParticipacao,
             tipoPagamento: tipoPagamentoResolvido,
+            maquininhaId: options?.maquininhaId ?? null,
             ...(dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0
               ? {
                   gatewayPayload: {
@@ -345,6 +352,7 @@ export class VendasService {
         status: StatusVenda.PENDENTE,
         origemParticipacao,
         tipoPagamento: tipoPagamentoResolvido,
+        maquininhaId: options?.maquininhaId ?? null,
         ...(dto.cartelasSelecionadas && dto.cartelasSelecionadas.length > 0
           ? {
               gatewayPayload: {

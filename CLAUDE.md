@@ -107,6 +107,12 @@ DISTRIBUIDOR → cadastra → VENDEDOR
 CLIENTE → auto-cadastro por CPF (independente)
 ```
 
+O `DISTRIBUIDOR` cadastra, edita e inativa vendedores em duas superfícies:
+`POST/PATCH/DELETE /admin/vendedores` (painel) e `POST /pos/vendedores`
+(terminal). Em ambas o `distribuidorId` **vem do token** — o campo do corpo é
+descartado, e vendedor de outra rede responde 404 (nunca 403: responder
+diferente entregaria a existência do cadastro alheio a quem chutar UUID).
+
 - Todo `Vendedor` pertence obrigatoriamente a um `Distribuidor` (FK `distribuidorId`)
 - `Cliente` acessa a loja ou compra com um Vendedor. Ao ser cadastrado no checkout ou via Admin (`POST /admin/vendas`), o backend **garante** pelo Token JWT (`@CurrentUser`) o vínculo da comissão ao `vendedorId` ou `distribuidorId` logado. Nunca confiar no frontend para ID de vendedor.
 - **Cliente é criado automaticamente quando o pagamento é aprovado** (webhook do gateway). O checkout coleta: CPF, Nome, E-mail, Celular. O `VendasService` faz `upsert` do cliente.
@@ -119,6 +125,46 @@ const cliente = await prisma.cliente.upsert({
   create: { cpf: dto.cpf, nome: dto.nome, email: dto.email, telefone: dto.telefone },
 });
 ```
+
+### Inativação de Vendedor e Distribuidor
+
+Inativar é **lógico**, nunca `DELETE` físico: o registro fica e o histórico de
+vendas e comissões continua intacto.
+
+O status precisa cair em **duas tabelas na mesma transação** — `Vendedor`/
+`Distribuidor` **e** `Usuario`. O login do painel (`POST /auth/login`) e o
+`JwtStrategy` validam `Usuario.status`; mexer só na tabela de perfil deixa o
+inativado autenticando normalmente. O canal POS não tinha esse furo porque
+valida o status do próprio vendedor.
+
+Reativar segue o mesmo caminho, pelo `PATCH` com `status: ATIVO`.
+
+---
+
+## Maquininhas de Cartão
+
+Cada `Maquininha` pertence a **um** distribuidor e opera com **no máximo um**
+vendedor. `vendedorId` nulo significa "no estoque do distribuidor" — estado
+válido, inclusive porque o próprio distribuidor lança venda.
+
+`numeroSerie` é único global e normalizado (sem espaços, caixa alta): um
+aparelho físico existe uma vez só, então uma rede não cadastra a maquininha que
+já está em outra.
+
+Duas superfícies, com o recorte sempre vindo do token:
+
+| Perfil | Enxerga | Cadastra/edita |
+|--------|---------|----------------|
+| `ADMIN` | todas, filtra por rede | sim, escolhendo a rede (`distribuidorId` obrigatório) |
+| `DISTRIBUIDOR` | só a própria rede | sim, sempre na própria rede |
+| `VENDEDOR` | só o aparelho dele (POS) | não |
+
+`Venda.maquininhaId` e `VendaSena.maquininhaId` são **exclusivos do canal POS**.
+A garantia é estrutural, não convenção: o campo trafega por `CreateVendaOptions`
+e não existe nos DTOs de venda do admin e da loja, então nesses canais a coluna
+fica nula por construção.
+
+---
 
 ### Compras e Combos
 - **Compra Rápida**: Apenas a propriedade `quantidade` é requerida. O sistema travará bilhetes sequenciais não reservados. Caso não haja cartelas especificadas, utiliza `UMA_CHANCE` por padrão ou falha de forma graciosa retornando strings vazias ou nulas pelo service (ex: ao invés de lançar erro 400).

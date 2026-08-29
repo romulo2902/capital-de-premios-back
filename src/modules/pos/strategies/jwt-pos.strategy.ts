@@ -70,8 +70,12 @@ export class JwtPosStrategy extends PassportStrategy(Strategy, 'jwt-pos') {
     } else if (usuario.perfil === 'VENDEDOR') {
       const vend = await this.prisma.vendedor.findFirst({
         where: { usuarioId: usuario.id },
-        select: { id: true },
+        select: { id: true, distribuidor: { select: { status: true } } },
       });
+      // Mesma regra do painel: rede inativa não opera o terminal.
+      if (vend?.distribuidor?.status === 'INATIVO') {
+        throw new UnauthorizedException('Distribuidor da rede está inativo');
+      }
       if (vend) user.vendedorId = vend.id;
     }
 

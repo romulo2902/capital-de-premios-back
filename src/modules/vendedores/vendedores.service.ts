@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -34,6 +35,17 @@ export class VendedoresService {
 
   private normalizarEmail(email: string): string {
     return email.trim().toLowerCase();
+  }
+
+  /**
+   * Comissão presa entre 0 e 100.
+   *
+   * O DTO já valida, mas o clamp antigo só limitava o teto — percentual
+   * negativo entrava e era gravado. Mantido no service para valer também em
+   * chamada direta, que não passa pelo ValidationPipe.
+   */
+  private normalizarComissao(percentual: number): number {
+    return Math.min(Math.max(percentual, 0), 100);
   }
 
   private gerarSenhaPadraoPorCpf(cpf: string): string {
@@ -116,7 +128,40 @@ export class VendedoresService {
     }
   }
 
-  async create(dto: CreateVendedorDto) {
+  /**
+   * Define em qual rede o vendedor nasce.
+   *
+   * DISTRIBUIDOR nunca escolhe: a rede sai do token e o `distribuidorId` do
+   * corpo é ignorado, senão bastaria mandar o UUID de outra rede para cadastrar
+   * vendedor no time alheio. ADMIN continua escolhendo livremente.
+   */
+  private resolverDistribuidorAlvo(
+    distribuidorIdDto: string | undefined,
+    user?: RequestUser,
+  ): string {
+    if (user?.perfil === 'DISTRIBUIDOR') {
+      if (!user.distribuidorId) {
+        throw new ForbiddenException(
+          'Usuário distribuidor sem vínculo válido para cadastrar vendedores',
+        );
+      }
+      return user.distribuidorId;
+    }
+
+    if (!distribuidorIdDto) {
+      throw new BadRequestException(
+        'distribuidorId é obrigatório para o perfil ADMIN',
+      );
+    }
+
+    return distribuidorIdDto;
+  }
+
+  async create(dto: CreateVendedorDto, user?: RequestUser) {
+    const distribuidorIdAlvo = this.resolverDistribuidorAlvo(
+      dto.distribuidorId,
+      user,
+    );
     const cpf = this.normalizarCpf(dto.cpf);
     const email = this.normalizarEmail(dto.email);
 
@@ -126,7 +171,7 @@ export class VendedoresService {
     ]);
 
     const distribuidor = await this.prisma.distribuidor.findUnique({
-      where: { id: dto.distribuidorId },
+      where: { id: distribuidorIdAlvo },
     });
     if (!distribuidor)
       throw new NotFoundException('Distribuidor não encontrado');
@@ -151,7 +196,7 @@ export class VendedoresService {
         data: {
           ...(dto.codigo ? { codigo: dto.codigo } : {}),
           usuarioId: usuario.id,
-          distribuidorId: dto.distribuidorId,
+          distribuidorId: distribuidorIdAlvo,
           nome: dto.nome,
           cpf,
           nomeRecebedor: dto.nomeRecebedor ?? dto.nome,
@@ -168,7 +213,10 @@ export class VendedoresService {
           estado: dto.estado,
           tipoChavePix: dto.tipoChavePix,
           chavePix: dto.chavePix,
-          comissaoPercent: dto.comissaoPercent !== undefined ? Math.min(dto.comissaoPercent, 100) : 0,
+          comissaoPercent:
+            dto.comissaoPercent !== undefined
+              ? this.normalizarComissao(dto.comissaoPercent)
+              : 0,
           link: dto.link,
           status: StatusUsuario.ATIVO,
         },
@@ -263,9 +311,12 @@ export class VendedoresService {
     return vendedor;
   }
 
-  async update(id: string, dto: UpdateVendedorDto) {
-    const vendedorAtual = await this.prisma.vendedor.findUnique({
-      where: { id },
+  async update(id: string, dto: UpdateVendedorDto, user?: RequestUser) {
+    // O recorte de hierarquia entra já na busca: para o DISTRIBUIDOR, vendedor
+    // de outra rede simplesmente não existe (404), em vez de 403 — responder
+    // diferente entregaria a existência do cadastro alheio a quem chutar UUID.
+    const vendedorAtual = await this.prisma.vendedor.findFirst({
+      where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
       select: { id: true, usuarioId: true },
     });
 
@@ -291,15 +342,23 @@ export class VendedoresService {
     const data: Record<string, unknown> = { ...dto };
     delete data.senha;
     delete data.codigo;
+    // Transferir vendedor entre redes é privilégio do ADMIN.
+    if (user?.perfil === 'DISTRIBUIDOR') delete data.distribuidorId;
     if (dto.cpf) data.cpf = this.normalizarCpf(dto.cpf);
     if (dto.email) data.email = this.normalizarEmail(dto.email);
     if (dto.dataNascimento) data.dataNascimento = new Date(dto.dataNascimento);
     if (dto.link !== undefined) data.qrcode = null;
-    if (dto.comissaoPercent !== undefined) data.comissaoPercent = Math.min(dto.comissaoPercent, 100);
+    if (dto.comissaoPercent !== undefined) {
+      data.comissaoPercent = this.normalizarComissao(dto.comissaoPercent);
+    }
 
     const usuarioData: Prisma.UsuarioUpdateInput = {};
     if (dto.cpf) usuarioData.cpf = this.normalizarCpf(dto.cpf);
     if (dto.email) usuarioData.email = this.normalizarEmail(dto.email);
+    // Status precisa acompanhar o Usuario: o login do painel valida
+    // `Usuario.status`, então mexer só no Vendedor deixaria um inativo
+    // autenticando normalmente.
+    if (dto.status) usuarioData.status = dto.status;
 
     if (dto.senha) {
       usuarioData.senhaHash = await bcrypt.hash(dto.senha, 10);
@@ -318,11 +377,23 @@ export class VendedoresService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
-    return this.prisma.vendedor.update({
-      where: { id },
-      data: { status: StatusUsuario.INATIVO },
+  async remove(id: string, user?: RequestUser) {
+    // `findOne` já aplica `buildHierarchyWhere`: para o DISTRIBUIDOR, vendedor
+    // de outra rede responde 404 antes de qualquer escrita.
+    const vendedor = await this.findOne(id, user);
+
+    // As duas linhas caem juntas: o login do painel valida `Usuario.status`, e
+    // inativar só o Vendedor deixaria o acesso de pé.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.usuario.update({
+        where: { id: vendedor.usuarioId },
+        data: { status: StatusUsuario.INATIVO },
+      });
+
+      return tx.vendedor.update({
+        where: { id },
+        data: { status: StatusUsuario.INATIVO },
+      });
     });
   }
 

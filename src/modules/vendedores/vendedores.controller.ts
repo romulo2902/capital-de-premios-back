@@ -36,10 +36,14 @@ export class VendedoresController {
   constructor(private readonly vendedoresService: VendedoresService) {}
 
   @Post()
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Criar vendedor (ADMIN)' })
-  create(@Body() dto: CreateVendedorDto) {
-    return this.vendedoresService.create(dto);
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({
+    summary: 'Criar vendedor (ADMIN + DISTRIBUIDOR)',
+    description:
+      'ADMIN escolhe a rede pelo `distribuidorId` do corpo, que é obrigatório para esse perfil. DISTRIBUIDOR cadastra sempre na própria rede: o `distribuidorId` do corpo é ignorado e substituído pelo vínculo do token.',
+  })
+  create(@Body() dto: CreateVendedorDto, @CurrentUser() user: RequestUser) {
+    return this.vendedoresService.create(dto, user);
   }
 
   @Get()
@@ -102,19 +106,31 @@ export class VendedoresController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Atualizar vendedor (ADMIN)' })
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({
+    summary: 'Atualizar vendedor (ADMIN + DISTRIBUIDOR)',
+    description:
+      'DISTRIBUIDOR só alcança vendedor da própria rede — os demais respondem 404 — e não consegue transferir o vendedor para outra rede: o `distribuidorId` do corpo é descartado. ADMIN edita qualquer vendedor, transferência inclusa.',
+  })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateVendedorDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.vendedoresService.update(id, dto);
+    return this.vendedoresService.update(id, dto, user);
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Inativar vendedor' })
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.vendedoresService.remove(id);
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({
+    summary: 'Inativar vendedor (ADMIN + DISTRIBUIDOR)',
+    description:
+      'Inativação lógica: o vendedor passa a `INATIVO`, o registro é preservado e o histórico de vendas e comissões continua intacto. DISTRIBUIDOR só alcança vendedor da própria rede — os demais respondem 404.',
+  })
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendedoresService.remove(id, user);
   }
 }

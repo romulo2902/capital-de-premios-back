@@ -6,7 +6,10 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
+  Max,
+  Min,
   MinLength,
 } from 'class-validator';
 import { TipoChavePix } from '@prisma/client';
@@ -20,12 +23,14 @@ export class CreateVendedorDto {
   @IsInt()
   codigo?: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'uuid-do-distribuidor',
-    description: 'ID UUID do distribuidor responsável por este vendedor.',
+    description:
+      'ID UUID do distribuidor responsável por este vendedor. Obrigatório para ADMIN. Ignorado para DISTRIBUIDOR — nesse caso a rede vem do token.',
   })
-  @IsString()
-  distribuidorId: string;
+  @IsOptional()
+  @IsUUID('4')
+  distribuidorId?: string;
 
   @ApiProperty({
     example: 'Maria da Silva',
@@ -133,6 +138,8 @@ export class CreateVendedorDto {
   })
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(100)
   comissaoPercent?: number;
 
   @ApiPropertyOptional({

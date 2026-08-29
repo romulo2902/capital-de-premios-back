@@ -60,11 +60,12 @@ export class DashboardController {
   }
 
   @Get('edicoes')
-  @Roles('DISTRIBUIDOR', 'VENDEDOR')
+  @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({
-    summary: 'Listar edições disponíveis para filtro do dashboard',
+    summary:
+      'Listar edições disponíveis para filtro do dashboard (ADMIN + DISTRIBUIDOR + VENDEDOR)',
     description:
-      'Retorna somente id, número, nome, status e datas das edições com vendas aprovadas vinculadas ao usuário autenticado.',
+      'Retorna somente id, número, nome, status e datas das edições com vendas aprovadas. ADMIN vê todas as edições que tiveram venda aprovada; DISTRIBUIDOR e VENDEDOR veem apenas aquelas em que a própria operação vendeu.',
   })
   @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getEdicoesDisponiveis(

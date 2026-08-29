@@ -256,6 +256,32 @@ export class DashboardService {
     );
 
     if (modo === 'SENA') {
+      // ADMIN não tem rede: a edição entra na lista se teve qualquer venda
+      // aprovada, sem recorte por distribuidor ou vendedor.
+      if (user.perfil === Perfil.ADMIN) {
+        const edicoes = await this.prisma.edicaoSena.findMany({
+          where: { vendas: { some: { status: StatusVendaSena.APROVADO } } },
+          orderBy: [{ dataSorteioMegaSena: 'desc' }, { numero: 'desc' }],
+          select: {
+            id: true,
+            numero: true,
+            status: true,
+            dataSorteioMegaSena: true,
+            dataEncerramento: true,
+          },
+        });
+
+        return edicoes.map((edicao) =>
+          this.mapEdicaoFiltro({
+            id: edicao.id,
+            numero: edicao.numero,
+            status: edicao.status,
+            dataSorteio: edicao.dataSorteioMegaSena,
+            dataEncerramento: edicao.dataEncerramento,
+          }),
+        );
+      }
+
       if (user.perfil === Perfil.DISTRIBUIDOR) {
         const edicoes = await this.prisma.edicaoSena.findMany({
           where: {
@@ -319,6 +345,22 @@ export class DashboardService {
           dataEncerramento: edicao.dataEncerramento,
         }),
       );
+    }
+
+    if (user.perfil === Perfil.ADMIN) {
+      const edicoes = await this.prisma.edicao.findMany({
+        where: { vendas: { some: { status: StatusVenda.APROVADO } } },
+        orderBy: [{ dataSorteio: 'desc' }, { numero: 'desc' }],
+        select: {
+          id: true,
+          numero: true,
+          status: true,
+          dataSorteio: true,
+          dataEncerramento: true,
+        },
+      });
+
+      return edicoes.map((edicao) => this.mapEdicaoFiltro(edicao));
     }
 
     if (user.perfil === Perfil.DISTRIBUIDOR) {
