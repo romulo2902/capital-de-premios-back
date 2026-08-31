@@ -329,14 +329,16 @@ export class PosService {
 
   criarVendaSena(dto: CreatePosVendaSenaDto, user: RequestUser) {
     this.validarDadosPagamento(dto.tipoPagamento);
+    const tipoPagamento = dto.tipoPagamento ?? TipoPagamento.PIX;
     const vendaDto: CreateVendaSenaDto = {
       ...dto,
-      tipoPagamento: TipoPagamento.PIX,
+      tipoPagamento,
     };
     aplicarVinculoDoToken(vendaDto, user);
     return this.vendasSenaService.create(vendaDto, user, {
       origemParticipacao: OrigemParticipacao.POS,
-      requireGateway: true,
+      // MANUAL nasce aprovado e não passa pelo gateway, igual ao Prêmios.
+      requireGateway: tipoPagamento === TipoPagamento.PIX,
     });
   }
 

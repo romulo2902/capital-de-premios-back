@@ -364,4 +364,59 @@ describe('PosService', () => {
       service.consultarStatusPagamento('venda-1', vendedor),
     ).rejects.toThrow(ForbiddenException);
   });
+  describe('criarVendaSena — forma de pagamento', () => {
+    const base = {
+      edicaoSenaId: 'ed-sena-1',
+      cpf: '1',
+      nome: 'X',
+      telefone: '1',
+      dataNascimento: '1990-01-01',
+      modoSelecao: 'MANUAL',
+      numeros: [{ numeros: [1, 2, 3, 4, 5, 6], bola_extra: 7 }],
+    };
+
+    it('usa PIX quando o tipo é omitido, e exige gateway', async () => {
+      mockVendasSena.create.mockResolvedValue({ data: { id: 'venda-1' } });
+
+      await service.criarVendaSena({ ...base } as never, vendedor);
+
+      const [dtoEnviado, , options] = mockVendasSena.create.mock.calls[0] as [
+        Record<string, unknown>,
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(dtoEnviado.tipoPagamento).toBe(TipoPagamento.PIX);
+      expect(options.requireGateway).toBe(true);
+    });
+
+    it('MANUAL passa adiante e dispensa o gateway', async () => {
+      mockVendasSena.create.mockResolvedValue({ data: { id: 'venda-1' } });
+
+      await service.criarVendaSena(
+        { ...base, tipoPagamento: TipoPagamento.MANUAL } as never,
+        vendedor,
+      );
+
+      const [dtoEnviado, , options] = mockVendasSena.create.mock.calls[0] as [
+        Record<string, unknown>,
+        unknown,
+        Record<string, unknown>,
+      ];
+      // Antes o service sobrescrevia com PIX e forçava requireGateway.
+      expect(dtoEnviado.tipoPagamento).toBe(TipoPagamento.MANUAL);
+      expect(options.requireGateway).toBe(false);
+    });
+
+    it('CARTAO continua recusado no POS', () => {
+      // `criarVendaSena` não é async: a validação lança antes de qualquer
+      // await, então o erro é síncrono e não uma promise rejeitada.
+      expect(() =>
+        service.criarVendaSena(
+          { ...base, tipoPagamento: TipoPagamento.CARTAO } as never,
+          vendedor,
+        ),
+      ).toThrow(BadRequestException);
+      expect(mockVendasSena.create).not.toHaveBeenCalled();
+    });
+  });
 });
