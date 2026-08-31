@@ -2,15 +2,22 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import {
   ModoSelecaoSena,
+  OrigemParticipacao,
   Prisma,
   StatusEdicaoSena,
   StatusVendaSena,
+  TipoPagamento,
 } from '@prisma/client';
 import { VendasSenaService } from './vendas-sena.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
 
 type ServicePrivado = VendasSenaService & {
+  resolverTipoPagamento(
+    tipo: TipoPagamento,
+    user?: { perfil: string },
+    options?: { origemParticipacao?: OrigemParticipacao },
+  ): TipoPagamento;
   validarNumerosDaVenda(
     itens: {
       numeros: number[];
@@ -110,6 +117,47 @@ describe('VendasSenaService', () => {
     service = module.get<VendasSenaService>(
       VendasSenaService,
     ) as ServicePrivado;
+  });
+
+  // ─── resolverTipoPagamento ───────────────────────────────
+
+  describe('resolverTipoPagamento', () => {
+    it('recusa MANUAL sem usuário e sem origem POS', () => {
+      // Este é o caminho da loja pública: POST /capital-sena/comprar não tem
+      // autenticação e chama o service sem user e sem options. Antes da
+      // guarda, o corpo pedia MANUAL e saía cartela APROVADA sem pagamento.
+      expect(() =>
+        service.resolverTipoPagamento(TipoPagamento.MANUAL),
+      ).toThrow(BadRequestException);
+    });
+
+    it('recusa MANUAL para CLIENTE autenticado na loja', () => {
+      expect(() =>
+        service.resolverTipoPagamento(TipoPagamento.MANUAL, {
+          perfil: 'CLIENTE',
+        }),
+      ).toThrow(BadRequestException);
+    });
+
+    it('aceita MANUAL no canal POS', () => {
+      expect(
+        service.resolverTipoPagamento(TipoPagamento.MANUAL, undefined, {
+          origemParticipacao: OrigemParticipacao.POS,
+        }),
+      ).toBe(TipoPagamento.MANUAL);
+    });
+
+    it('ADMIN sempre resolve para MANUAL', () => {
+      expect(
+        service.resolverTipoPagamento(TipoPagamento.PIX, { perfil: 'ADMIN' }),
+      ).toBe(TipoPagamento.MANUAL);
+    });
+
+    it('PIX da loja pública segue passando', () => {
+      expect(service.resolverTipoPagamento(TipoPagamento.PIX)).toBe(
+        TipoPagamento.PIX,
+      );
+    });
   });
 
   // ─── validarNumerosDaVenda ───────────────────────────────
