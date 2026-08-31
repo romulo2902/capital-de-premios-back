@@ -18,6 +18,7 @@ import {
   normalizePagination,
 } from '../../common/utils/pagination.util';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
+import { buildBuscaPorTexto } from '../../common/utils/busca-cadastro.util';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @Injectable()
@@ -253,11 +254,7 @@ export class VendedoresService {
 
     if (distribuidorId) filtersWhere.distribuidorId = distribuidorId;
     if (search) {
-      filtersWhere.OR = [
-        { nome: { contains: search, mode: 'insensitive' } },
-        { cpf: { contains: search } },
-        { email: { contains: search, mode: 'insensitive' } },
-      ];
+      filtersWhere.OR = buildBuscaPorTexto(search);
     }
 
     const where = this.mergeWhere(
