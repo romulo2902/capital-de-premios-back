@@ -33,6 +33,7 @@ import type {
   ClienteRelatorioPdfRow,
   ClienteRelatorioRow,
   DistribuidorRelatorioRow,
+  FaixaGanhadoresSena,
   FiltrosRelatorioClientes,
   FiltrosRelatorioDistribuidores,
   FiltrosRelatorioVendedores,
@@ -118,6 +119,87 @@ export class RelatoriosService {
       'Content-Disposition',
       `attachment; filename=vendas-${Date.now()}.xlsx`,
     );
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  async exportarVendasSenaXlsx(
+    res: Response,
+    filtros: { dataInicio?: string; dataFim?: string; edicaoSenaId?: string },
+  ): Promise<void> {
+    this.logger.log('Gerando relatório XLSX de vendas Sena');
+
+    const where: Record<string, unknown> = {};
+    if (filtros.edicaoSenaId) where.edicaoSenaId = filtros.edicaoSenaId;
+    this.aplicarFiltroPeriodoCadastro(
+      where,
+      filtros.dataInicio,
+      filtros.dataFim,
+    );
+
+    const vendas = await this.prisma.vendaSena.findMany({
+      where,
+      include: {
+        cliente: true,
+        vendedor: { select: { nome: true } },
+        edicaoSena: { select: { numero: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Capital de Prêmios';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Vendas Sena');
+    sheet.columns = [
+      { header: 'ID', key: 'id', width: 38 },
+      { header: 'Edição', key: 'edicao', width: 12 },
+      { header: 'Data', key: 'data', width: 20 },
+      { header: 'Cliente', key: 'cliente', width: 30 },
+      { header: 'CPF', key: 'cpf', width: 18 },
+      { header: 'Telefone', key: 'telefone', width: 18 },
+      { header: 'Vendedor', key: 'vendedor', width: 26 },
+      { header: 'Qtd Cartelas', key: 'quantidade', width: 14 },
+      { header: 'Total (R$)', key: 'total', width: 14 },
+      { header: 'Status', key: 'status', width: 14 },
+      { header: 'Pagamento', key: 'pagamento', width: 14 },
+      { header: 'Onde Comprou', key: 'ondeComprou', width: 16 },
+    ];
+
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2E4057' },
+    };
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    this.aplicarFormatoTextoColunas(sheet, [
+      'id',
+      'edicao',
+      'cpf',
+      'telefone',
+    ]);
+
+    for (const venda of vendas) {
+      sheet.addRow({
+        id: this.valorPlanilhaTexto(venda.id),
+        edicao: this.valorPlanilhaTexto(venda.edicaoSena.numero),
+        data: this.formatarDataHora(venda.createdAt),
+        cliente: venda.cliente.nome,
+        cpf: this.valorPlanilhaTexto(this.formatarCpf(venda.cliente.cpf)),
+        telefone: this.valorPlanilhaTexto(venda.cliente.telefone),
+        vendedor: venda.vendedor?.nome ?? '-',
+        quantidade: venda.quantidade,
+        total: Number(venda.total).toFixed(2),
+        status: venda.status,
+        pagamento: venda.tipoPagamento,
+        ondeComprou: this.resolverOndeComprouGanhadorSena(venda),
+      });
+    }
+
+    const nomeArquivo = `vendas_sena_${this.formatarDataNomeArquivo(new Date())}.xlsx`;
+
+    this.configurarRespostaXlsx(res, nomeArquivo);
     await workbook.xlsx.write(res);
     res.end();
   }
@@ -704,7 +786,9 @@ export class RelatoriosService {
           '/relatorios/clientes/pdf',
           '/relatorios/vendas/cdp',
           '/relatorios/vendas/sena',
+          '/relatorios/vendas/sena/xlsx',
           '/relatorios/vendas/sena/ganhadores',
+          '/relatorios/vendas/sena/ganhadores/xlsx',
         ],
       },
     };
@@ -900,6 +984,98 @@ export class RelatoriosService {
       `Gerando relatório de ganhadores Sena para edição ${edicaoSenaId}`,
     );
 
+    const { edicao, faixas } = await this.buscarGanhadoresSena(edicaoSenaId);
+
+    const blocos = faixas.map((faixa) => {
+      const linhasFaixa = [`Premio: ${faixa.titulo}`];
+
+      if (faixa.ganhadores.length === 0) {
+        linhasFaixa.push('Nenhum ganhador');
+      } else {
+        for (const ganhador of faixa.ganhadores) {
+          linhasFaixa.push(
+            [
+              ganhador.nome,
+              ganhador.telefone,
+              ganhador.cpf,
+              ganhador.email,
+              ganhador.ondeComprou,
+              ganhador.vendedor,
+            ].join(', '),
+          );
+        }
+      }
+
+      return linhasFaixa.join('\r\n');
+    });
+
+    const conteudo = blocos.join('\r\n\r\n');
+    const nomeArquivo = `ganhadores_sena_${edicao.numero}_${this.formatarDataNomeArquivo(new Date())}.txt`;
+
+    this.configurarRespostaTxt(res, nomeArquivo);
+    res.send(conteudo);
+  }
+
+  async exportarGanhadoresSenaXlsx(
+    res: Response,
+    edicaoSenaId: string,
+  ): Promise<void> {
+    this.logger.log(
+      `Gerando relatório XLSX de ganhadores Sena para edição ${edicaoSenaId}`,
+    );
+
+    const { edicao, faixas } = await this.buscarGanhadoresSena(edicaoSenaId);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Capital de Prêmios';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Ganhadores Sena');
+    sheet.columns = [
+      { header: 'Prêmio', key: 'premio', width: 14 },
+      { header: 'Cliente', key: 'nome', width: 30 },
+      { header: 'Telefone', key: 'telefone', width: 18 },
+      { header: 'CPF', key: 'cpf', width: 18 },
+      { header: 'E-mail', key: 'email', width: 30 },
+      { header: 'Onde Comprou', key: 'ondeComprou', width: 16 },
+      { header: 'Vendedor', key: 'vendedor', width: 26 },
+    ];
+
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2E4057' },
+    };
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    this.aplicarFormatoTextoColunas(sheet, ['telefone', 'cpf', 'email']);
+
+    // A planilha lista só ganhadores reais: uma linha "Nenhum ganhador" como
+    // existe no TXT quebraria filtro e ordenação de quem abre no Excel.
+    for (const faixa of faixas) {
+      for (const ganhador of faixa.ganhadores) {
+        sheet.addRow({
+          premio: ganhador.premio,
+          nome: ganhador.nome,
+          telefone: this.valorPlanilhaTexto(ganhador.telefone),
+          cpf: this.valorPlanilhaTexto(ganhador.cpf),
+          email: this.valorPlanilhaTexto(ganhador.email),
+          ondeComprou: ganhador.ondeComprou,
+          vendedor: ganhador.vendedor,
+        });
+      }
+    }
+
+    const nomeArquivo = `ganhadores_sena_${edicao.numero}_${this.formatarDataNomeArquivo(new Date())}.xlsx`;
+
+    this.configurarRespostaXlsx(res, nomeArquivo);
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  private async buscarGanhadoresSena(edicaoSenaId: string): Promise<{
+    edicao: { numero: string };
+    faixas: FaixaGanhadoresSena[];
+  }> {
     const edicao = await this.prisma.edicaoSena.findUniqueOrThrow({
       where: { id: edicaoSenaId },
       select: { numero: true },
@@ -932,50 +1108,34 @@ export class RelatoriosService {
       orderBy: [{ status: 'desc' }, { vendaSena: { createdAt: 'asc' } }],
     });
 
-    const faixas: { status: StatusCartelaSena; titulo: string }[] = [
+    const faixasPremio: { status: StatusCartelaSena; titulo: string }[] = [
       { status: StatusCartelaSena.SENA_BONUS, titulo: 'Bola Extra' },
       { status: StatusCartelaSena.SENA, titulo: 'Sena' },
       { status: StatusCartelaSena.QUINA, titulo: 'Quina' },
       { status: StatusCartelaSena.QUADRA, titulo: 'Quadra' },
     ];
 
-    const blocos: string[] = [];
-
-    for (const faixa of faixas) {
-      const ganhadoresFaixa = cartelas.filter((c) => c.status === faixa.status);
-
-      const linhasFaixa = [`Premio: ${faixa.titulo}`];
-
-      if (ganhadoresFaixa.length === 0) {
-        linhasFaixa.push('Nenhum ganhador');
-      } else {
-        for (const cartela of ganhadoresFaixa) {
+    const faixas = faixasPremio.map((faixa) => ({
+      titulo: faixa.titulo,
+      ganhadores: cartelas
+        .filter((cartela) => cartela.status === faixa.status)
+        .map((cartela) => {
           const venda = cartela.vendaSena;
           const cliente = venda.cliente;
-          const ondeComprou = this.resolverOndeComprouGanhadorSena(venda);
-          const vendedor = venda.vendedor?.nome ?? '-';
 
-          linhasFaixa.push(
-            [
-              cliente.nome,
-              cliente.telefone,
-              formatarCpfUtil(cliente.cpf),
-              cliente.email ?? '-',
-              ondeComprou,
-              vendedor,
-            ].join(', '),
-          );
-        }
-      }
+          return {
+            premio: faixa.titulo,
+            nome: cliente.nome,
+            telefone: cliente.telefone,
+            cpf: formatarCpfUtil(cliente.cpf),
+            email: cliente.email ?? '-',
+            ondeComprou: this.resolverOndeComprouGanhadorSena(venda),
+            vendedor: venda.vendedor?.nome ?? '-',
+          };
+        }),
+    }));
 
-      blocos.push(linhasFaixa.join('\r\n'));
-    }
-
-    const conteudo = blocos.join('\r\n\r\n');
-    const nomeArquivo = `ganhadores_sena_${edicao.numero}_${this.formatarDataNomeArquivo(new Date())}.txt`;
-
-    this.configurarRespostaTxt(res, nomeArquivo);
-    res.send(conteudo);
+    return { edicao, faixas };
   }
 
   private resolverOndeComprouGanhadorSena(venda: {
@@ -991,6 +1151,20 @@ export class RelatoriosService {
     }
 
     return 'Digital';
+  }
+
+  private configurarRespostaXlsx(res: Response, nomeArquivo: string): void {
+    const nomeArquivoCodificado = encodeURIComponent(nomeArquivo);
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${nomeArquivo}"; filename*=UTF-8''${nomeArquivoCodificado}`,
+    );
+    res.setHeader('X-Filename', nomeArquivo);
   }
 
   private configurarRespostaTxt(res: Response, nomeArquivo: string): void {
