@@ -4,9 +4,42 @@ import {
   OrigemParticipacao,
   StatusCartelaSena,
   StatusVendaSena,
+  TipoPagamento,
 } from '@prisma/client';
+import * as ExcelJS from 'exceljs';
+import { PassThrough } from 'stream';
 import { RelatoriosService } from './relatorios.service';
 import { PrismaService } from '../../prisma/prisma.service';
+
+/**
+ * O `res` do Nest é um Writable de verdade nos exports XLSX: o ExcelJS faz
+ * pipe da planilha nele. Um jest.fn() não serve — daí o PassThrough.
+ */
+function criarResponseXlsx() {
+  const stream = new PassThrough();
+  const chunks: Buffer[] = [];
+  stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+  const finalizado = new Promise<Buffer>((resolve) =>
+    stream.on('end', () => resolve(Buffer.concat(chunks))),
+  );
+  const res = Object.assign(stream, { setHeader: jest.fn() });
+  return { res, finalizado };
+}
+
+async function lerPlanilha(buffer: Buffer): Promise<ExcelJS.Worksheet> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+  return workbook.worksheets[0];
+}
+
+function linhasDaPlanilha(sheet: ExcelJS.Worksheet): string[][] {
+  const linhas: string[][] = [];
+  sheet.eachRow((row) => {
+    const valores = row.values as unknown[];
+    linhas.push(valores.slice(1).map((valor) => String(valor ?? '')));
+  });
+  return linhas;
+}
 
 describe('RelatoriosService', () => {
   let service: RelatoriosService;
@@ -37,6 +70,9 @@ describe('RelatoriosService', () => {
       findUniqueOrThrow: jest.fn(),
     },
     cartelaSena: {
+      findMany: jest.fn(),
+    },
+    vendaSena: {
       findMany: jest.fn(),
     },
   };
@@ -76,7 +112,9 @@ describe('RelatoriosService', () => {
         '/relatorios/clientes/pdf',
         '/relatorios/vendas/cdp',
         '/relatorios/vendas/sena',
+        '/relatorios/vendas/sena/xlsx',
         '/relatorios/vendas/sena/ganhadores',
+        '/relatorios/vendas/sena/ganhadores/xlsx',
       ],
     });
   });
@@ -683,5 +721,164 @@ describe('RelatoriosService', () => {
       'Jair Rodrigues, +5561999999999, 067.903.191-07, -, POS, -',
     );
     expect(conteudo).toContain('Premio: Quadra');
+  });
+  it('exporta vendas Sena em XLSX filtrando por edição', async () => {
+    mockPrisma.vendaSena.findMany.mockResolvedValue([
+      {
+        id: '4e1d1b0e-0000-4000-8000-000000000001',
+        quantidade: 3,
+        total: 30,
+        status: StatusVendaSena.APROVADO,
+        tipoPagamento: TipoPagamento.PIX,
+        origemParticipacao: OrigemParticipacao.POS,
+        gatewayPayload: null,
+        createdAt: new Date('2026-06-09T13:45:00Z'),
+        cliente: {
+          nome: 'Jair Rodrigues',
+          cpf: '06790319107',
+          telefone: '+5561999999999',
+        },
+        vendedor: { nome: 'Brunna costa' },
+        edicaoSena: { numero: '12' },
+      },
+    ]);
+
+    const { res, finalizado } = criarResponseXlsx();
+
+    await service.exportarVendasSenaXlsx(res as never, {
+      edicaoSenaId: 'edicao-sena-1',
+    });
+
+    expect(mockPrisma.vendaSena.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { edicaoSenaId: 'edicao-sena-1' } }),
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+
+    const sheet = await lerPlanilha(await finalizado);
+    const linhas = linhasDaPlanilha(sheet);
+
+    expect(linhas[0]).toEqual([
+      'ID',
+      'Edição',
+      'Data',
+      'Cliente',
+      'CPF',
+      'Telefone',
+      'Vendedor',
+      'Qtd Cartelas',
+      'Total (R$)',
+      'Status',
+      'Pagamento',
+      'Onde Comprou',
+    ]);
+    const [
+      id,
+      edicao,
+      data,
+      cliente,
+      cpf,
+      telefone,
+      vendedor,
+      quantidade,
+      total,
+      status,
+      pagamento,
+      ondeComprou,
+    ] = linhas[1];
+
+    expect(id).toBe('4e1d1b0e-0000-4000-8000-000000000001');
+    expect(edicao).toBe('12');
+    // Só o formato: a hora exata depende do fuso da máquina que roda o teste.
+    expect(data).toMatch(/^09\/06\/2026, \d{2}:\d{2}:\d{2}$/);
+    expect(cliente).toBe('Jair Rodrigues');
+    expect(cpf).toBe('067.903.191-07');
+    expect(telefone).toBe('+5561999999999');
+    expect(vendedor).toBe('Brunna costa');
+    expect(quantidade).toBe('3');
+    expect(total).toBe('30.00');
+    expect(status).toBe('APROVADO');
+    expect(pagamento).toBe('PIX');
+    expect(ondeComprou).toBe('POS');
+  });
+
+  it('exporta ganhadores Sena em XLSX com uma linha por ganhador', async () => {
+    // Sem fake timers aqui: o ExcelJS escreve o zip de forma assíncrona e o
+    // relógio congelado trava o stream.
+    mockPrisma.edicaoSena.findUniqueOrThrow.mockResolvedValue({ numero: '12' });
+    mockPrisma.cartelaSena.findMany.mockResolvedValue([
+      {
+        status: StatusCartelaSena.SENA_BONUS,
+        vendaSena: {
+          origemParticipacao: OrigemParticipacao.DIGITAL,
+          gatewayPayload: null,
+          cliente: {
+            nome: 'Andreia Cristina Moreira',
+            telefone: '+5561995094000',
+            cpf: '09392814115',
+            email: 'andreia@test.com',
+          },
+          vendedor: { nome: 'Brunna costa' },
+        },
+      },
+      {
+        status: StatusCartelaSena.QUINA,
+        vendaSena: {
+          origemParticipacao: OrigemParticipacao.POS,
+          gatewayPayload: null,
+          cliente: {
+            nome: 'Jair Rodrigues',
+            telefone: '+5561999999999',
+            cpf: '06790319107',
+            email: null,
+          },
+          vendedor: null,
+        },
+      },
+    ]);
+
+    const { res, finalizado } = criarResponseXlsx();
+
+    await service.exportarGanhadoresSenaXlsx(res as never, 'edicao-sena-1');
+
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'X-Filename',
+      expect.stringMatching(/^ganhadores_sena_12_\d{8}\.xlsx$/),
+    );
+
+    const sheet = await lerPlanilha(await finalizado);
+    const linhas = linhasDaPlanilha(sheet);
+
+    expect(linhas[0]).toEqual([
+      'Prêmio',
+      'Cliente',
+      'Telefone',
+      'CPF',
+      'E-mail',
+      'Onde Comprou',
+      'Vendedor',
+    ]);
+    // Faixas sem ganhador (Sena e Quadra) não viram linha.
+    expect(linhas).toHaveLength(3);
+    expect(linhas[1]).toEqual([
+      'Bola Extra',
+      'Andreia Cristina Moreira',
+      '+5561995094000',
+      '093.928.141-15',
+      'andreia@test.com',
+      'Digital',
+      'Brunna costa',
+    ]);
+    expect(linhas[2]).toEqual([
+      'Quina',
+      'Jair Rodrigues',
+      '+5561999999999',
+      '067.903.191-07',
+      '-',
+      'POS',
+      '-',
+    ]);
   });
 });

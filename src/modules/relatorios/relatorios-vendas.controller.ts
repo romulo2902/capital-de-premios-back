@@ -128,6 +128,43 @@ export class RelatoriosVendasController {
     );
   }
 
+  @Get('sena/xlsx')
+  @ApiOperation({
+    summary: 'Exportar relatório de vendas do Capital Sena em XLSX (ADMIN)',
+  })
+  @ApiProduces(
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  @ApiQuery({
+    name: 'edicaoSenaId',
+    required: false,
+    description: 'Filtra por edição Sena. Sem ele, traz todas as edições.',
+  })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    description: 'Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-01',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    description: 'Use ISO, preferencialmente YYYY-MM-DD.',
+    example: '2026-03-31',
+  })
+  async exportarSenaXlsx(
+    @Res() res: Response,
+    @Query('edicaoSenaId') edicaoSenaId?: string,
+    @Query('dataInicio') dataInicio?: string,
+    @Query('dataFim') dataFim?: string,
+  ) {
+    return this.relatoriosService.exportarVendasSenaXlsx(res, {
+      edicaoSenaId,
+      dataInicio,
+      dataFim,
+    });
+  }
+
   @Get('sena/ganhadores')
   @ApiOperation({
     summary:
@@ -161,5 +198,31 @@ export class RelatoriosVendasController {
       res,
       edicaoSenaId,
     );
+  }
+
+  @Get('sena/ganhadores/xlsx')
+  @ApiOperation({
+    summary:
+      'Exportar relatório de ganhadores do Sena em XLSX por edição (ADMIN)',
+  })
+  @ApiProduces(
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  @ApiOkResponse({
+    description:
+      'Planilha ganhadores_sena_{numeroEdicao}_YYYYMMDD.xlsx com uma linha por ganhador ' +
+      '(coluna Prêmio identifica a faixa: Bola Extra, Sena, Quina ou Quadra). ' +
+      'Faixa sem ganhador simplesmente não gera linha.',
+  })
+  @ApiQuery({
+    name: 'edicaoSenaId',
+    required: true,
+    description: 'ID da edição Sena',
+  })
+  async exportarGanhadoresSenaXlsx(
+    @Res() res: Response,
+    @Query('edicaoSenaId') edicaoSenaId: string,
+  ) {
+    return this.relatoriosService.exportarGanhadoresSenaXlsx(res, edicaoSenaId);
   }
 }
