@@ -61,6 +61,19 @@ export class EdicoesController {
     return this.edicoesService.findUltima();
   }
 
+  // Precisa vir ANTES de `@Get(':id')`: o Nest casa as rotas na ordem de
+  // declaração, e depois do parametrizado o path 'simples' seria capturado
+  // como um id, morrendo no ParseUUIDPipe com 400 em vez de chegar aqui.
+  @Get('simples')
+  @ApiOperation({
+    summary: 'Listar edições de forma simplificada (ADMIN apenas)',
+    description:
+      'Retorna apenas id, número, status e data do sorteio — sem detalhes, combos, prêmios ou estoque. Feito para popular seletores de edição (filtro de relatórios, ranking do dashboard).',
+  })
+  findAllSimples() {
+    return this.edicoesService.findAllSimples();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Buscar edição por ID (ADMIN)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
