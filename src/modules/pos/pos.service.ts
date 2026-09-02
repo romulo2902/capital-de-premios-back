@@ -237,17 +237,19 @@ export class PosService {
 
   async criarVenda(dto: CreatePosVendaDto, user: RequestUser) {
     this.validarDadosPagamento(dto.tipoPagamento);
+    const tipoPagamento = dto.tipoPagamento ?? TipoPagamento.PIX;
     await this.garantirReservasSelecionadas(dto, user);
     // Fora do dto de venda de propósito: `maquininhaId` é campo do canal POS e
     // não existe no CreateVendaDto compartilhado com admin e loja.
     const { maquininhaId: maquininhaSolicitada, ...dadosVenda } = dto;
     const maquininhaId = await this.resolverMaquininha(
       maquininhaSolicitada,
+      tipoPagamento,
       user,
     );
     const vendaDto: CreateVendaDto = {
       ...dadosVenda,
-      tipoPagamento: dto.tipoPagamento ?? TipoPagamento.PIX,
+      tipoPagamento,
     };
     // Mesma política dos controllers: o vínculo vem do token, e um operador
     // com perfil de venda mas sem vínculo é recusado em vez de gerar uma venda
@@ -255,8 +257,7 @@ export class PosService {
     aplicarVinculoDoToken(vendaDto, user);
     const result = await this.vendasService.create(vendaDto, user, {
       origemParticipacao: OrigemParticipacao.POS,
-      requireGateway:
-        (dto.tipoPagamento ?? TipoPagamento.PIX) === TipoPagamento.PIX,
+      requireGateway: tipoPagamento === TipoPagamento.PIX,
       maquininhaId,
     });
     await this.estenderReservasSelecionadas(dto, user);
@@ -350,6 +351,7 @@ export class PosService {
     const { maquininhaId: maquininhaSolicitada, ...dadosVenda } = dto;
     const maquininhaId = await this.resolverMaquininha(
       maquininhaSolicitada,
+      tipoPagamento,
       user,
     );
     const vendaDto: CreateVendaSenaDto = {
@@ -473,9 +475,28 @@ export class PosService {
    */
   private async resolverMaquininha(
     maquininhaId: string | undefined,
+    tipoPagamento: TipoPagamento,
     user: RequestUser,
   ): Promise<string | undefined> {
-    if (!maquininhaId) return undefined;
+    if (!maquininhaId) {
+      // No POS, MANUAL é por definição venda já passada no aparelho — e é ela
+      // que debita o crédito. Aceitar sem `maquininhaId` deixava o controle
+      // inteiro de fora: a venda nascia APROVADA, com cartela alocada, sem
+      // consumir limite nenhum, e as travas de rede, aparelho inativo e limite
+      // não configurado nunca chegavam a rodar, porque todas dependem de um id
+      // informado.
+      //
+      // O PIX continua livre de maquininha: ali quem liquida é o gateway, não
+      // o crédito da casa. E o canal do ADMIN não passa por aqui — lá a venda
+      // MANUAL sem aparelho é legítima.
+      if (tipoPagamento === TipoPagamento.MANUAL) {
+        throw new BadRequestException(
+          'Venda MANUAL exige o id da maquininha em que ela foi passada',
+        );
+      }
+
+      return undefined;
+    }
 
     return this.maquininhasService.garantirMaquininhaDoOperador(
       maquininhaId,

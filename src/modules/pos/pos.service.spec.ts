@@ -141,6 +141,7 @@ describe('PosService', () => {
 
   it('cria venda manual no POS sem exigir gateway', async () => {
     mockVendas.create.mockResolvedValue({ data: { id: 'venda-manual-1' } });
+    mockMaquininhas.garantirMaquininhaDoOperador.mockResolvedValue('maq-1');
 
     await service.criarVenda(
       {
@@ -150,6 +151,7 @@ describe('PosService', () => {
         telefone: '1',
         dataNascimento: '1990-01-01',
         tipoPagamento: TipoPagamento.MANUAL,
+        maquininhaId: 'maq-1',
       } as never,
       vendedor,
     );
@@ -163,8 +165,30 @@ describe('PosService', () => {
       {
         origemParticipacao: OrigemParticipacao.POS,
         requireGateway: false,
+        maquininhaId: 'maq-1',
       },
     );
+  });
+
+  it('recusa venda MANUAL sem maquininha, sem criar a venda', async () => {
+    await expect(
+      service.criarVenda(
+        {
+          edicaoId: 'ed-1',
+          cpf: '1',
+          nome: 'X',
+          telefone: '1',
+          dataNascimento: '1990-01-01',
+          tipoPagamento: TipoPagamento.MANUAL,
+        } as never,
+        vendedor,
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    // O ponto do teste: sem esta trava a venda nascia APROVADA, com cartela
+    // alocada e sem consumir crédito nenhum — o controle inteiro ficava de
+    // fora, porque as demais checagens só rodam depois de um id informado.
+    expect(mockVendas.create).not.toHaveBeenCalled();
   });
 
   it('busca cliente por CPF em toda a base para autofill do POS', async () => {
@@ -608,9 +632,14 @@ describe('PosService', () => {
 
     it('MANUAL passa adiante e dispensa o gateway', async () => {
       mockVendasSena.create.mockResolvedValue({ data: { id: 'venda-1' } });
+      mockMaquininhas.garantirMaquininhaDoOperador.mockResolvedValue('maq-1');
 
       await service.criarVendaSena(
-        { ...baseSena, tipoPagamento: TipoPagamento.MANUAL } as never,
+        {
+          ...baseSena,
+          tipoPagamento: TipoPagamento.MANUAL,
+          maquininhaId: 'maq-1',
+        } as never,
         vendedor,
       );
 
@@ -622,6 +651,17 @@ describe('PosService', () => {
       // Antes o service sobrescrevia com PIX e forçava requireGateway.
       expect(dtoEnviado.tipoPagamento).toBe(TipoPagamento.MANUAL);
       expect(options.requireGateway).toBe(false);
+    });
+
+    it('recusa MANUAL sem maquininha, sem criar a venda', async () => {
+      await expect(
+        service.criarVendaSena(
+          { ...baseSena, tipoPagamento: TipoPagamento.MANUAL } as never,
+          vendedor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockVendasSena.create).not.toHaveBeenCalled();
     });
 
     it('CARTAO continua recusado no POS', async () => {
