@@ -159,10 +159,90 @@ Duas superfícies, com o recorte sempre vindo do token:
 | `DISTRIBUIDOR` | só a própria rede | sim, sempre na própria rede |
 | `VENDEDOR` | só o aparelho dele (POS) | não |
 
+### Exclusão de Maquininha
+
+`DELETE /admin/maquininhas/:id` é **ADMIN apenas** e a exclusão é **lógica**
+(`deletedAt`). É estado distinto de `status: INATIVA`: inativa é aparelho fora
+de operação que segue na frota e o DISTRIBUIDOR reativa; excluída sai da frota e
+some de toda listagem, inclusive do seletor do POS.
+
+Nunca há `DELETE` físico: `MovimentoCreditoMaquininha` referencia a maquininha
+com `ON DELETE RESTRICT`, e o razão é a fonte da verdade do saldo — apagar a
+linha levaria o histórico de crédito junto.
+
+O filtro `deletedAt: null` mora **só** em `buildEscopoDoOperador`, por onde toda
+leitura passa. Consulta nova que não use o escopo é a forma mais fácil de uma
+excluída reaparecer.
+
+Duas travas:
+
+- **Aparelho com saldo não é excluído** (409). Sumir da listagem levando o
+  crédito junto prenderia o dinheiro sem tela para recuperá-lo; retirar antes é
+  um `AJUSTE_DEBITO`, que fica no extrato.
+- **`numeroSerie` segue único global, incluindo excluídas.** Um aparelho físico
+  existe uma vez só, e liberar a série daria dois históricos de crédito ao mesmo
+  aparelho. Recadastrar responde 409 com mensagem própria.
+
+---
+
 `Venda.maquininhaId` e `VendaSena.maquininhaId` são **exclusivos do canal POS**.
 A garantia é estrutural, não convenção: o campo trafega por `CreateVendaOptions`
 e não existe nos DTOs de venda do admin e da loja, então nesses canais a coluna
 fica nula por construção.
+
+### Crédito da Maquininha
+
+O aparelho carrega um limite em reais concedido pelo ADMIN. Venda **MANUAL**
+com `maquininhaId` debita o `total` do `saldoCredito`; cancelar a venda
+devolve. Não cobre venda PIX — ali o gateway já liquida.
+
+Aparelho novo nasce **operante**: `MaquininhasService.create` grava o teto no
+máximo, **R$ 5.000** (`LIMITE_CREDITO_MAXIMO`), e credita **R$ 2.000** de saldo
+(`CREDITO_INICIAL_MAQUININHA`). O saldo é menor que o teto de propósito — o
+aparelho já sai vendendo e ainda sobra espaço de recarga; nascer com saldo igual
+ao teto travaria qualquer recarga até o vendedor gastar. O máximo existe para
+que um zero a mais na digitação não ponha milhares a mais na mão de um
+vendedor.
+
+O crédito de abertura entra como `RECARGA` no razão, **no mesmo commit do
+cadastro** — não como `DEFAULT` de coluna. `saldoCredito` é a materialização do
+razão: saldo que nasce sem movimento por trás quebraria a identidade
+`saldo = Σ movimentos` já no cadastro, e o extrato abriria com um valor que
+ninguém explica. Dar só o teto sem o saldo também não serve: o aparelho teria
+limite e nada para gastar, e a primeira venda MANUAL morreria em "crédito
+insuficiente".
+
+`limiteCredito = 0` significa **não configurado**, e aparelho não configurado
+**não vende no MANUAL** — a venda é recusada com 409. Vender sem teto seria
+adiantar dinheiro da casa sem limite nenhum, que é o que o controle existe para
+impedir. Com o default de 2.000, esse estado só é alcançado por decisão
+explícita de quem zera o limite. Para travar um aparelho que já opera, use
+`status: INATIVA`.
+
+Toda alteração de saldo nasce de uma linha em `MovimentoCreditoMaquininha`,
+com `saldoAnterior` e `saldoPosterior` congelados — o razão é a fonte da
+verdade e `saldoCredito` é a materialização dele. `valor` é **sempre
+positivo**: o sinal vem do `tipo` (`RECARGA`, `CONSUMO`, `ESTORNO`,
+`AJUSTE_CREDITO`, `AJUSTE_DEBITO`).
+
+Três invariantes que não são convenção:
+
+- **Débito e venda no mesmo commit.** `debitarVenda` e `estornarVenda` recebem
+  o `tx` de quem chama e nunca abrem transação própria. Crédito insuficiente
+  derruba a transação inteira: a venda não nasce e nenhuma cartela fica
+  alocada.
+- **A checagem de saldo mora dentro do UPDATE** (`updateMany` com
+  `saldoCredito: { gte: valor }`). Ler o saldo e depois decrementar deixaria
+  duas vendas simultâneas passarem com crédito para uma só.
+- **`@@unique([vendaId, tipo])` e `@@unique([vendaSenaId, tipo])`** impedem
+  débito ou estorno duplicado no banco, não no código. O estorno é guiado pelo
+  razão ("existe CONSUMO sem ESTORNO?"), não pelo status da venda — venda
+  MANUAL nasce APROVADO e nunca passa por PENDENTE.
+
+Só o ADMIN concede limite (`PATCH /admin/maquininhas/:id/limite`) e lança
+recarga ou ajuste (`POST /admin/maquininhas/:id/creditos`); `CONSUMO` e
+`ESTORNO` não são aceitos nessa rota, porque nascem da venda. DISTRIBUIDOR lê
+o extrato da própria rede (`GET /admin/maquininhas/:id/creditos`).
 
 ---
 

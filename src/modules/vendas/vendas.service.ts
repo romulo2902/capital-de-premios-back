@@ -48,6 +48,7 @@ import {
 import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
 import { calcularQuantidadeCartelasDaVenda } from './vendas-quantidade.util';
 import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
+import { CreditosMaquininhaService } from '../maquininhas/creditos-maquininha.service';
 import {
   parseEValidarDataNascimento,
   validarMaioridade,
@@ -135,6 +136,7 @@ export class VendasService {
     private readonly configuracaoComissaoService: ConfiguracaoComissaoService,
     private readonly emailService: EmailService,
     private readonly config: ConfigService,
+    private readonly creditosMaquininhaService: CreditosMaquininhaService,
   ) {}
 
   // ─── CREATE ────────────────────────────────────────────
@@ -316,6 +318,19 @@ export class VendasService {
             vendedor: true,
           },
         });
+
+        // Débito do crédito da maquininha, na MESMA transação da venda: se a
+        // aprovação abaixo falhar, o crédito não fica consumido para trás.
+        // Crédito insuficiente derruba a transação inteira e a venda não
+        // nasce — é o bloqueio, não um aviso.
+        if (options?.maquininhaId) {
+          await this.creditosMaquininhaService.debitarVenda(tx, {
+            maquininhaId: options.maquininhaId,
+            vendaId: venda.id,
+            valor: venda.total,
+            criadoPorId,
+          });
+        }
 
         return this.processarAprovacaoDaVenda(tx, venda, {
           origem: 'ADMIN',
@@ -955,7 +970,22 @@ export class VendasService {
         });
       }
 
-      // 3. Cancelar cobrança no gateway
+      // 3. Devolver o crédito consumido na maquininha
+      //
+      // O gatilho é o razão, não o status: estorna se existe um CONSUMO desta
+      // venda ainda sem ESTORNO. Venda que não consumiu crédito — aparelho sem
+      // limite, ou venda de outro canal — passa direto sem movimento.
+      if (venda.maquininhaId) {
+        await this.creditosMaquininhaService.estornarVenda(tx, {
+          maquininhaId: venda.maquininhaId,
+          vendaId: venda.id,
+          motivo: motivo
+            ? `Cancelamento da venda: ${motivo}`
+            : 'Estorno por cancelamento da venda',
+        });
+      }
+
+      // 4. Cancelar cobrança no gateway
       if (venda.gatewayId) {
         try {
           const gateway = this.paymentGatewayFactory.getGatewayParaConsulta(
@@ -970,7 +1000,7 @@ export class VendasService {
         }
       }
 
-      // 4. Atualizar status da venda
+      // 5. Atualizar status da venda
       await tx.venda.update({
         where: { id: venda.id },
         data: {

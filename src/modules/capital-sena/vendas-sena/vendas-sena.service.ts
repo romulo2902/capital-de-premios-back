@@ -22,6 +22,7 @@ import {
   normalizePagination,
 } from '../../../common/utils/pagination.util';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
+import { CreditosMaquininhaService } from '../../maquininhas/creditos-maquininha.service';
 import { CreateVendaSenaDto } from './dto/create-venda-sena.dto';
 import { FiltroVendasSenaDto } from './dto/filtro-vendas-sena.dto';
 import type { RequestUser } from '../../auth/strategies/jwt.strategy';
@@ -104,6 +105,7 @@ export class VendasSenaService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
+    private readonly creditosMaquininhaService: CreditosMaquininhaService,
   ) {}
 
   // ─── CREATE ────────────────────────────────────────────
@@ -279,6 +281,17 @@ export class VendasSenaService {
             maquininhaId: options?.maquininhaId ?? null,
           },
         });
+        // Débito do crédito da maquininha na MESMA transação da venda:
+        // crédito insuficiente derruba tudo e a venda não nasce.
+        if (options?.maquininhaId) {
+          await this.creditosMaquininhaService.debitarVenda(tx, {
+            maquininhaId: options.maquininhaId,
+            vendaSenaId: venda.id,
+            valor: venda.total,
+            criadoPorId: user?.id ?? null,
+          });
+        }
+
         const cartelasGeradas = await this.criarCartelasRecebidas(
           tx,
           venda.id,
@@ -594,6 +607,18 @@ export class VendasSenaService {
           data: { saldo: { decrement: venda.comissaoSena.valor } },
         });
         await tx.comissaoSena.delete({ where: { id: venda.comissaoSena.id } });
+      }
+
+      // Devolver o crédito consumido na maquininha. O gatilho é o razão: só
+      // estorna se existe um CONSUMO desta venda ainda sem ESTORNO.
+      if (venda.maquininhaId) {
+        await this.creditosMaquininhaService.estornarVenda(tx, {
+          maquininhaId: venda.maquininhaId,
+          vendaSenaId: venda.id,
+          motivo: motivo
+            ? `Cancelamento da venda: ${motivo}`
+            : 'Estorno por cancelamento da venda',
+        });
       }
 
       // Cancelar no gateway

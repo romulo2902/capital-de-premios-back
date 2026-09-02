@@ -52,6 +52,20 @@ export class EdicoesSenaController {
     return this.edicoesSenaService.findAll(pagination.page, pagination.limit);
   }
 
+  // Antes de `@Get(':id')` de propósito: o Nest casa na ordem de declaração,
+  // e depois do parametrizado 'simples' viraria um id inválido (400).
+  @Get('simples')
+  @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
+  @ApiOperation({
+    summary:
+      'Listar edições Sena de forma simplificada (ADMIN + DISTRIBUIDOR + VENDEDOR)',
+    description:
+      'Retorna apenas id, número, status e data do sorteio da Mega-Sena. Feito para popular seletores de edição, sem carregar combos e prêmios.',
+  })
+  findAllSimples() {
+    return this.edicoesSenaService.findAllSimples();
+  }
+
   @Get(':id')
   @Roles('ADMIN', 'DISTRIBUIDOR', 'VENDEDOR')
   @ApiOperation({ summary: 'Detalhar edição Sena por ID' })

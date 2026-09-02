@@ -805,6 +805,13 @@ Cria a venda com origem **POS**. O vendedor/distribuidor é definido pelo token
 retornando \`pixCopiaECola\`/QR Code em \`pagamento\`.
 **Pagamento MANUAL:** aprova a venda imediatamente, sem passar pelo gateway.
 
+**Crédito da maquininha:** quando a venda é MANUAL e traz \`maquininhaId\`, o
+total é debitado do \`saldoCredito\` do aparelho na mesma transação da venda.
+Saldo que não cobre o total responde **409** e a venda **não é criada** —
+nenhuma cartela fica alocada. Aparelho com \`limiteCredito: "0"\` está **sem
+limite configurado** e por isso NÃO aceita venda MANUAL — tambem 409. Cancelar
+a venda devolve o valor ao aparelho.
+
 Guarde o \`id\` retornado: ele pode ser usado para consultar status em
 \`GET /pos/vendas/{id}/pagamento\`. O terminal deve fazer polling a cada
 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`, \`RECUSADO\`,
@@ -876,6 +883,15 @@ Guarde o \`id\` retornado: ele pode ser usado para consultar status em
     description: 'Edição inativa ou dados inválidos.',
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada, inativa ou de outra rede.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Crédito insuficiente na maquininha para o total da venda MANUAL. A venda não é criada.',
+  })
   criarVenda(@Body() dto: CreatePosVendaDto, @CurrentUser() user: RequestUser) {
     return this.posService.criarVenda(dto, user);
   }
@@ -1045,6 +1061,15 @@ PIX: no MANUAL a venda já sai \`APROVADO\`. Chame a cada 3–5 segundos até
     description: 'Edição inativa ou cartelas inválidas.',
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada, inativa ou de outra rede.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Crédito insuficiente na maquininha para o total da venda MANUAL. A venda não é criada.',
+  })
   criarVendaSena(
     @Body() dto: CreatePosVendaSenaDto,
     @CurrentUser() user: RequestUser,
@@ -1336,6 +1361,11 @@ O recorte sai do token e muda com o perfil:
 
 É desta lista que o terminal monta o seletor de \`maquininhaId\` na tela de
 venda. Não existe filtro por rede na query.
+
+Cada aparelho traz \`limiteCredito\` e \`saldoCredito\` em reais, para o terminal
+mostrar quanto ainda dá para vender no MANUAL antes de o crédito acabar.
+\`limiteCredito: "0"\` significa aparelho **sem limite configurado**, que não
+aceita venda MANUAL até o ADMIN conceder um limite.
     `.trim(),
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -1406,6 +1436,10 @@ existência de um aparelho de outra rede a quem tentar adivinhar a série.
 
 O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
 \`POST /pos/vendas\` e \`POST /pos/capital-sena/vendas\`.
+
+A resposta traz \`saldoCredito\` e \`limiteCredito\`: dá para conferir se o
+aparelho tem crédito antes de lançar uma venda MANUAL, que responde **409**
+quando o saldo não cobre o total.
     `.trim(),
   })
   @ApiQuery({
@@ -1428,7 +1462,11 @@ O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
           apelido: 'Maquininha do balcão',
           operadora: 'PagBank',
           status: 'ATIVA',
-          vendedor: { id: 'a1b2c3d4-...', nome: 'Maria da Silva', codigo: 4933 },
+          vendedor: {
+            id: 'a1b2c3d4-...',
+            nome: 'Maria da Silva',
+            codigo: 4933,
+          },
         },
       },
     },
@@ -1447,10 +1485,7 @@ O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
     @Query() dto: ValidarMaquininhaDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.maquininhasService.validarPorNumeroSerie(
-      dto.numeroSerie,
-      user,
-    );
+    return this.maquininhasService.validarPorNumeroSerie(dto.numeroSerie, user);
   }
 
   @Patch('maquininhas/:id')
@@ -1459,8 +1494,7 @@ O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
   @ApiBearerAuth()
   @ApiTags(POS_MAQUININHAS_TAG)
   @ApiOperation({
-    summary:
-      '17. 🔒 Atualizar maquininha e seu vendedor (DISTRIBUIDOR apenas)',
+    summary: '17. 🔒 Atualizar maquininha e seu vendedor (DISTRIBUIDOR apenas)',
     description: `
 Edita os dados do aparelho, inativa/reativa e **redefine quem usa**.
 
