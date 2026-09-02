@@ -154,6 +154,17 @@ enum StatusMaquininha {
   INATIVA
 }
 
+// Sinal do movimento vem do tipo, nunca do valor: `valor` é sempre positivo.
+// Somar o extrato por tipo fica direto, e o DTO valida com @IsPositive sem
+// ambiguidade sobre o que um número negativo significaria.
+enum TipoMovimentoCredito {
+  RECARGA // + ADMIN concede crédito ao aparelho
+  CONSUMO // - venda MANUAL passada na maquininha
+  ESTORNO // + cancelamento da venda devolve o crédito
+  AJUSTE_CREDITO // + correção manual do ADMIN
+  AJUSTE_DEBITO // - correção manual do ADMIN
+}
+
 model Usuario {
   id                 String        @id @default(uuid())
   cpf                String?       @unique
@@ -165,6 +176,8 @@ model Usuario {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   vendasCriadas      Venda[]       @relation("VendaCriadaPor")
+
+  movimentosCredito MovimentoCreditoMaquininha[] @relation("MovimentoCreditoCriadoPor")
 }
 
 model Distribuidor {
@@ -350,7 +363,7 @@ model MatrizRange {
 }
 
 model Venda {
-  id                   String                @id @default(uuid())
+  id                   String                       @id @default(uuid())
   edicaoId             String
   clienteId            String
   vendedorId           String?
@@ -359,21 +372,22 @@ model Venda {
   quantidade           Int
   tipoCartela          TipoCartela?
   total                Decimal
-  status               StatusVenda           @default(PENDENTE)
-  origemParticipacao   OrigemParticipacao    @default(DIGITAL)
+  status               StatusVenda                  @default(PENDENTE)
+  origemParticipacao   OrigemParticipacao           @default(DIGITAL)
   tipoPagamento        TipoPagamento
   maquininhaId         String?
   gatewayId            String?
   gatewayPayload       Json?
-  createdAt            DateTime              @default(now())
-  edicao               Edicao                @relation(fields: [edicaoId], references: [id])
-  cliente              Cliente               @relation(fields: [clienteId], references: [id])
-  vendedor             Vendedor?             @relation(fields: [vendedorId], references: [id])
-  maquininha           Maquininha?           @relation(fields: [maquininhaId], references: [id])
-  criadoPor            Usuario?              @relation("VendaCriadaPor", fields: [criadoPorId], references: [id])
+  createdAt            DateTime                     @default(now())
+  edicao               Edicao                       @relation(fields: [edicaoId], references: [id])
+  cliente              Cliente                      @relation(fields: [clienteId], references: [id])
+  vendedor             Vendedor?                    @relation(fields: [vendedorId], references: [id])
+  maquininha           Maquininha?                  @relation(fields: [maquininhaId], references: [id])
+  criadoPor            Usuario?                     @relation("VendaCriadaPor", fields: [criadoPorId], references: [id])
   bilhetes             Bilhete[]
   comissao             Comissao?
   comissaoDistribuidor ComissaoDistribuidor?
+  movimentosCredito    MovimentoCreditoMaquininha[]
 
   @@index([criadoPorId])
 }
@@ -573,13 +587,14 @@ model VendaSena {
   gatewayPayload     Json?
   createdAt          DateTime           @default(now())
 
-  edicaoSena               EdicaoSena                @relation(fields: [edicaoSenaId], references: [id])
-  cliente                  Cliente                   @relation(fields: [clienteId], references: [id])
-  vendedor                 Vendedor?                 @relation(fields: [vendedorId], references: [id])
-  maquininha               Maquininha?               @relation(fields: [maquininhaId], references: [id])
+  edicaoSena               EdicaoSena                   @relation(fields: [edicaoSenaId], references: [id])
+  cliente                  Cliente                      @relation(fields: [clienteId], references: [id])
+  vendedor                 Vendedor?                    @relation(fields: [vendedorId], references: [id])
+  maquininha               Maquininha?                  @relation(fields: [maquininhaId], references: [id])
   cartelas                 CartelaSena[]
   comissaoSena             ComissaoSena?
   comissaoDistribuidorSena ComissaoDistribuidorSena?
+  movimentosCredito        MovimentoCreditoMaquininha[]
 
   @@index([edicaoSenaId])
   @@index([clienteId])
@@ -679,13 +694,57 @@ model Maquininha {
   apelido        String?
   operadora      String?
   status         StatusMaquininha @default(ATIVA)
+  // Crédito do aparelho, em reais. `limiteCredito` é o teto concedido pelo
+  // ADMIN e `saldoCredito` é o que resta agora — a venda MANUAL debita, o
+  // cancelamento estorna.
+  //
+  // `limiteCredito` zero significa SEM CONTROLE, não "bloqueado". É o que
+  // permite ligar o controle sem parar a operação: aparelho já cadastrado
+  // entra com zero e continua vendendo até o ADMIN conceder um limite. Para
+  // travar um aparelho de vez existe `status: INATIVA`.
+  limiteCredito  Decimal          @default(0) @db.Decimal(12, 2)
+  saldoCredito   Decimal          @default(0) @db.Decimal(12, 2)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
-  distribuidor   Distribuidor     @relation(fields: [distribuidorId], references: [id])
-  vendedor       Vendedor?        @relation(fields: [vendedorId], references: [id])
-  vendas         Venda[]
-  vendasSena     VendaSena[]
+
+  distribuidor      Distribuidor                 @relation(fields: [distribuidorId], references: [id])
+  vendedor          Vendedor?                    @relation(fields: [vendedorId], references: [id])
+  vendas            Venda[]
+  vendasSena        VendaSena[]
+  movimentosCredito MovimentoCreditoMaquininha[]
 
   @@index([distribuidorId, status])
   @@index([vendedorId])
+}
+
+// Razão do crédito da maquininha: toda alteração de `saldoCredito` nasce de uma
+// linha aqui, com o saldo antes e depois congelados no momento do lançamento.
+// O extrato é reconstituível sem depender do estado atual do aparelho.
+//
+// Os dois @@unique são a garantia ESTRUTURAL contra débito ou estorno
+// duplicado — no Postgres NULL não conflita com NULL, então as linhas de
+// RECARGA e AJUSTE (que não têm venda) passam livres, mas uma venda não
+// consegue gerar dois CONSUMO nem dois ESTORNO.
+model MovimentoCreditoMaquininha {
+  id             String               @id @default(uuid())
+  maquininhaId   String
+  tipo           TipoMovimentoCredito
+  valor          Decimal              @db.Decimal(12, 2)
+  saldoAnterior  Decimal              @db.Decimal(12, 2)
+  saldoPosterior Decimal              @db.Decimal(12, 2)
+  vendaId        String?
+  vendaSenaId    String?
+  criadoPorId    String?
+  motivo         String?
+  createdAt      DateTime             @default(now())
+
+  maquininha Maquininha @relation(fields: [maquininhaId], references: [id])
+  venda      Venda?     @relation(fields: [vendaId], references: [id])
+  vendaSena  VendaSena? @relation(fields: [vendaSenaId], references: [id])
+  criadoPor  Usuario?   @relation("MovimentoCreditoCriadoPor", fields: [criadoPorId], references: [id])
+
+  @@unique([vendaId, tipo])
+  @@unique([vendaSenaId, tipo])
+  @@index([maquininhaId, createdAt])
+  @@index([tipo, createdAt])
 }

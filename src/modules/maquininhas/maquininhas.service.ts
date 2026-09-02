@@ -23,6 +23,8 @@ const MAQUININHA_SELECT = {
   apelido: true,
   operadora: true,
   status: true,
+  limiteCredito: true,
+  saldoCredito: true,
   distribuidorId: true,
   vendedorId: true,
   createdAt: true,
@@ -255,6 +257,30 @@ export class MaquininhasService {
     this.logger.log(`Maquininha atualizada: ${maquininha.numeroSerie}`);
 
     return { message: 'Maquininha atualizada com sucesso', data: maquininha };
+  }
+
+  /**
+   * Confirma que o aparelho está ao alcance do operador e devolve o id.
+   *
+   * Diferente do `garantirMaquininhaDoOperador`, não exige status ATIVA: é
+   * usado para leitura (extrato de crédito), e o histórico de um aparelho
+   * inativado continua consultável. Mesma política de 404 para o que está
+   * fora do escopo.
+   */
+  async garantirAcessoAoAparelho(
+    maquininhaId: string,
+    user: RequestUser,
+  ): Promise<string> {
+    const maquininha = await this.prisma.maquininha.findFirst({
+      where: { ...this.buildEscopoDoOperador(user), id: maquininhaId },
+      select: { id: true },
+    });
+
+    if (!maquininha) {
+      throw new NotFoundException('Maquininha não encontrada');
+    }
+
+    return maquininha.id;
   }
 
   /**

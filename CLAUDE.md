@@ -164,6 +164,41 @@ A garantia é estrutural, não convenção: o campo trafega por `CreateVendaOpti
 e não existe nos DTOs de venda do admin e da loja, então nesses canais a coluna
 fica nula por construção.
 
+### Crédito da Maquininha
+
+O aparelho carrega um limite em reais concedido pelo ADMIN. Venda **MANUAL**
+com `maquininhaId` debita o `total` do `saldoCredito`; cancelar a venda
+devolve. Não cobre venda PIX — ali o gateway já liquida.
+
+`limiteCredito = 0` significa **sem controle**, não "bloqueado". É o estado em
+que todo aparelho já cadastrado entrou, e o que permitiu ligar o controle sem
+parar a operação. Para travar um aparelho use `status: INATIVA`.
+
+Toda alteração de saldo nasce de uma linha em `MovimentoCreditoMaquininha`,
+com `saldoAnterior` e `saldoPosterior` congelados — o razão é a fonte da
+verdade e `saldoCredito` é a materialização dele. `valor` é **sempre
+positivo**: o sinal vem do `tipo` (`RECARGA`, `CONSUMO`, `ESTORNO`,
+`AJUSTE_CREDITO`, `AJUSTE_DEBITO`).
+
+Três invariantes que não são convenção:
+
+- **Débito e venda no mesmo commit.** `debitarVenda` e `estornarVenda` recebem
+  o `tx` de quem chama e nunca abrem transação própria. Crédito insuficiente
+  derruba a transação inteira: a venda não nasce e nenhuma cartela fica
+  alocada.
+- **A checagem de saldo mora dentro do UPDATE** (`updateMany` com
+  `saldoCredito: { gte: valor }`). Ler o saldo e depois decrementar deixaria
+  duas vendas simultâneas passarem com crédito para uma só.
+- **`@@unique([vendaId, tipo])` e `@@unique([vendaSenaId, tipo])`** impedem
+  débito ou estorno duplicado no banco, não no código. O estorno é guiado pelo
+  razão ("existe CONSUMO sem ESTORNO?"), não pelo status da venda — venda
+  MANUAL nasce APROVADO e nunca passa por PENDENTE.
+
+Só o ADMIN concede limite (`PATCH /admin/maquininhas/:id/limite`) e lança
+recarga ou ajuste (`POST /admin/maquininhas/:id/creditos`); `CONSUMO` e
+`ESTORNO` não são aceitos nessa rota, porque nascem da venda. DISTRIBUIDOR lê
+o extrato da própria rede (`GET /admin/maquininhas/:id/creditos`).
+
 ---
 
 ### Compras e Combos

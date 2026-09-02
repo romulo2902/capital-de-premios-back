@@ -5,9 +5,11 @@ import {
   Prisma,
   StatusEdicaoSena,
   StatusVendaSena,
+  TipoPagamento,
 } from '@prisma/client';
 import { VendasSenaService } from './vendas-sena.service';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CreditosMaquininhaService } from '../../maquininhas/creditos-maquininha.service';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
 
 type ServicePrivado = VendasSenaService & {
@@ -93,6 +95,11 @@ describe('VendasSenaService', () => {
 
   const mockPaymentGatewayFactory = { getGateway: jest.fn() };
 
+  const mockCreditosMaquininhaService = {
+    debitarVenda: jest.fn(),
+    estornarVenda: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -103,6 +110,10 @@ describe('VendasSenaService', () => {
         {
           provide: PaymentGatewayFactory,
           useValue: mockPaymentGatewayFactory,
+        },
+        {
+          provide: CreditosMaquininhaService,
+          useValue: mockCreditosMaquininhaService,
         },
       ],
     }).compile();
@@ -686,6 +697,69 @@ describe('VendasSenaService', () => {
           numeros: [{ numeros: [1, 2, 3, 4, 5, 6], bola_extra: 7 }],
         } as never),
       ).rejects.toThrow('Seller não encontrado');
+    });
+  });
+
+  // ─── crédito da maquininha ────────────────────────────────
+
+  describe('cancelar — crédito da maquininha', () => {
+    const txMock = {
+      cartelaSena: { deleteMany: jest.fn() },
+      vendedor: { update: jest.fn() },
+      comissaoSena: { delete: jest.fn() },
+      vendaSena: { update: jest.fn().mockResolvedValue({}) },
+    };
+
+    beforeEach(() => {
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
+    });
+
+    it('devolve o crédito consumido ao cancelar a venda Sena', async () => {
+      mockPrisma.vendaSena.findUnique.mockResolvedValue({
+        id: 'venda-sena-1',
+        status: StatusVendaSena.APROVADO,
+        tipoPagamento: TipoPagamento.MANUAL,
+        maquininhaId: 'maq-1',
+        gatewayId: null,
+        gatewayPayload: {},
+        vendedorId: 'vendedor-1',
+        cartelas: [],
+        comissaoSena: null,
+      });
+
+      await service.cancelar('venda-sena-1', 'cliente desistiu');
+
+      expect(mockCreditosMaquininhaService.estornarVenda).toHaveBeenCalledWith(
+        txMock,
+        {
+          maquininhaId: 'maq-1',
+          vendaSenaId: 'venda-sena-1',
+          motivo: 'Cancelamento da venda: cliente desistiu',
+        },
+      );
+    });
+
+    it('não chama o estorno quando a venda não passou por maquininha', async () => {
+      mockPrisma.vendaSena.findUnique.mockResolvedValue({
+        id: 'venda-sena-2',
+        status: StatusVendaSena.APROVADO,
+        tipoPagamento: TipoPagamento.PIX,
+        maquininhaId: null,
+        gatewayId: null,
+        gatewayPayload: {},
+        vendedorId: null,
+        cartelas: [],
+        comissaoSena: null,
+      });
+
+      await service.cancelar('venda-sena-2');
+
+      expect(
+        mockCreditosMaquininhaService.estornarVenda,
+      ).not.toHaveBeenCalled();
     });
   });
 });

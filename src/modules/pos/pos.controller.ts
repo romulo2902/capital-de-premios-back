@@ -784,6 +784,12 @@ Cria a venda com origem **POS**. O vendedor/distribuidor é definido pelo token
 retornando \`pixCopiaECola\`/QR Code em \`pagamento\`.
 **Pagamento MANUAL:** aprova a venda imediatamente, sem passar pelo gateway.
 
+**Crédito da maquininha:** quando a venda é MANUAL e traz \`maquininhaId\`, o
+total é debitado do \`saldoCredito\` do aparelho na mesma transação da venda.
+Saldo que não cobre o total responde **409** e a venda **não é criada** —
+nenhuma cartela fica alocada. Aparelho com \`limiteCredito: "0"\` está sem
+controle e vende sem consumir crédito. Cancelar a venda devolve o valor.
+
 Guarde o \`id\` retornado: ele pode ser usado para consultar status em
 \`GET /pos/vendas/{id}/pagamento\`. O terminal deve fazer polling a cada
 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`, \`RECUSADO\`,
@@ -855,6 +861,15 @@ Guarde o \`id\` retornado: ele pode ser usado para consultar status em
     description: 'Edição inativa ou dados inválidos.',
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada, inativa ou de outra rede.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Crédito insuficiente na maquininha para o total da venda MANUAL. A venda não é criada.',
+  })
   criarVenda(@Body() dto: CreatePosVendaDto, @CurrentUser() user: RequestUser) {
     return this.posService.criarVenda(dto, user);
   }
@@ -1016,6 +1031,15 @@ cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
     description: 'Edição inativa ou cartelas inválidas.',
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada, inativa ou de outra rede.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Crédito insuficiente na maquininha para o total da venda MANUAL. A venda não é criada.',
+  })
   criarVendaSena(
     @Body() dto: CreatePosVendaSenaDto,
     @CurrentUser() user: RequestUser,
@@ -1307,6 +1331,11 @@ O recorte sai do token e muda com o perfil:
 
 É desta lista que o terminal monta o seletor de \`maquininhaId\` na tela de
 venda. Não existe filtro por rede na query.
+
+Cada aparelho traz \`limiteCredito\` e \`saldoCredito\` em reais, para o terminal
+mostrar quanto ainda dá para vender no MANUAL antes de o crédito acabar.
+\`limiteCredito: "0"\` significa aparelho **sem controle de crédito** — vende
+sem consumir nada.
     `.trim(),
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -1377,6 +1406,10 @@ existência de um aparelho de outra rede a quem tentar adivinhar a série.
 
 O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
 \`POST /pos/vendas\` e \`POST /pos/capital-sena/vendas\`.
+
+A resposta traz \`saldoCredito\` e \`limiteCredito\`: dá para conferir se o
+aparelho tem crédito antes de lançar uma venda MANUAL, que responde **409**
+quando o saldo não cobre o total.
     `.trim(),
   })
   @ApiQuery({

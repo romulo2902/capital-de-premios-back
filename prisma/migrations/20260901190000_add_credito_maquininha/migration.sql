@@ -1,0 +1,76 @@
+-- Crédito por maquininha.
+--
+-- O aparelho ganha um limite em reais concedido pelo ADMIN. Venda MANUAL
+-- passada nele debita o saldo; cancelar a venda devolve. Cada alteração de
+-- saldo nasce de uma linha em `MovimentoCreditoMaquininha`, com o saldo antes
+-- e depois congelados — o extrato é reconstituível sem depender do estado
+-- atual do aparelho.
+--
+-- `limiteCredito = 0` significa SEM CONTROLE, não "bloqueado". É o que deixa
+-- esta migration entrar sem parar a operação: todo aparelho já cadastrado
+-- recebe zero pelo DEFAULT e continua vendendo até o ADMIN conceder um limite.
+
+-- CreateEnum
+-- O sinal do movimento vem do tipo, nunca do valor: `valor` é sempre positivo.
+CREATE TYPE "TipoMovimentoCredito" AS ENUM ('RECARGA', 'CONSUMO', 'ESTORNO', 'AJUSTE_CREDITO', 'AJUSTE_DEBITO');
+
+-- AlterTable
+-- DEFAULT não volátil não reescreve a tabela (PG 11+), então o ACCESS
+-- EXCLUSIVE dura o tempo de mexer no catálogo, não de varrer as linhas.
+ALTER TABLE "Maquininha" ADD COLUMN     "limiteCredito" DECIMAL(12,2) NOT NULL DEFAULT 0,
+ADD COLUMN     "saldoCredito" DECIMAL(12,2) NOT NULL DEFAULT 0;
+
+-- CreateTable
+CREATE TABLE "MovimentoCreditoMaquininha" (
+    "id" TEXT NOT NULL,
+    "maquininhaId" TEXT NOT NULL,
+    "tipo" "TipoMovimentoCredito" NOT NULL,
+    "valor" DECIMAL(12,2) NOT NULL,
+    "saldoAnterior" DECIMAL(12,2) NOT NULL,
+    "saldoPosterior" DECIMAL(12,2) NOT NULL,
+    "vendaId" TEXT,
+    "vendaSenaId" TEXT,
+    "criadoPorId" TEXT,
+    "motivo" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "MovimentoCreditoMaquininha_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+-- Extrato do aparelho, que é sempre "movimentos desta maquininha, mais
+-- recentes primeiro". Pelo prefixo também cobre o filtro só por maquininhaId.
+CREATE INDEX "MovimentoCreditoMaquininha_maquininhaId_createdAt_idx" ON "MovimentoCreditoMaquininha"("maquininhaId", "createdAt");
+
+-- CreateIndex
+-- Relatório consolidado por tipo e período (quanto foi recarregado, consumido
+-- e estornado no mês) sem varrer a tabela inteira.
+CREATE INDEX "MovimentoCreditoMaquininha_tipo_createdAt_idx" ON "MovimentoCreditoMaquininha"("tipo", "createdAt");
+
+-- CreateIndex
+--
+-- Estes dois índices são a garantia ESTRUTURAL contra débito ou estorno
+-- duplicado: uma venda não consegue gerar dois CONSUMO nem dois ESTORNO, e a
+-- recusa vem do banco, não da ordem em que o código roda. Cobre retry de
+-- request, cancelamento chamado duas vezes e corrida entre dois operadores.
+--
+-- No Postgres NULL não conflita com NULL, então as linhas de RECARGA e
+-- AJUSTE — que não têm venda vinculada — passam livres.
+CREATE UNIQUE INDEX "MovimentoCreditoMaquininha_vendaId_tipo_key" ON "MovimentoCreditoMaquininha"("vendaId", "tipo");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MovimentoCreditoMaquininha_vendaSenaId_tipo_key" ON "MovimentoCreditoMaquininha"("vendaSenaId", "tipo");
+
+-- AddForeignKey
+-- RESTRICT na maquininha: aparelho com histórico de crédito não some do banco.
+-- Tabela nova e vazia, então validar agora não custa varredura.
+ALTER TABLE "MovimentoCreditoMaquininha" ADD CONSTRAINT "MovimentoCreditoMaquininha_maquininhaId_fkey" FOREIGN KEY ("maquininhaId") REFERENCES "Maquininha"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MovimentoCreditoMaquininha" ADD CONSTRAINT "MovimentoCreditoMaquininha_vendaId_fkey" FOREIGN KEY ("vendaId") REFERENCES "Venda"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MovimentoCreditoMaquininha" ADD CONSTRAINT "MovimentoCreditoMaquininha_vendaSenaId_fkey" FOREIGN KEY ("vendaSenaId") REFERENCES "VendaSena"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MovimentoCreditoMaquininha" ADD CONSTRAINT "MovimentoCreditoMaquininha_criadoPorId_fkey" FOREIGN KEY ("criadoPorId") REFERENCES "Usuario"("id") ON DELETE SET NULL ON UPDATE CASCADE;
