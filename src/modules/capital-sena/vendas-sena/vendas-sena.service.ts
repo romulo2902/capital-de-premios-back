@@ -245,7 +245,11 @@ export class VendasSenaService {
         : (dto.distribuidorId ?? null);
 
     // 7. Calcular total
-    const tipoPagamento = this.resolverTipoPagamento(dto.tipoPagamento, user);
+    const tipoPagamento = this.resolverTipoPagamento(
+      dto.tipoPagamento,
+      user,
+      options,
+    );
     const origemParticipacao =
       options?.origemParticipacao ?? OrigemParticipacao.DIGITAL;
 
@@ -987,11 +991,32 @@ export class VendasSenaService {
     );
   }
 
+  /**
+   * MANUAL cria a venda já APROVADA, sem passar pelo gateway — então quem
+   * pode usá-lo precisa ser restrito.
+   *
+   * Sem esta guarda, `POST /capital-sena/comprar`, que é rota pública e sem
+   * autenticação, aceitava `tipoPagamento: MANUAL` do corpo e emitia cartela
+   * aprovada sem nenhum pagamento. O fluxo de Prêmios já barrava assim; a Sena
+   * não.
+   */
   private resolverTipoPagamento(
     tipo: TipoPagamento,
     user?: RequestUser,
+    options?: CreateVendaSenaOptions,
   ): TipoPagamento {
     if (user?.perfil === 'ADMIN') return TipoPagamento.MANUAL;
+
+    if (tipo === TipoPagamento.MANUAL) {
+      if (options?.origemParticipacao === OrigemParticipacao.POS) {
+        return TipoPagamento.MANUAL;
+      }
+
+      throw new BadRequestException(
+        'tipoPagamento MANUAL é permitido apenas para venda direta do ADMIN ou no canal POS',
+      );
+    }
+
     return tipo;
   }
 

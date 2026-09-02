@@ -116,7 +116,12 @@ const POS_PREMIOS_VENDA_MANUAL_REQUEST_EXAMPLE = {
   dataNascimento: '1985-04-11',
 };
 
-const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
+// Atenção ao duplo sentido de "MANUAL" na Sena: `modoSelecao: 'MANUAL'` é o
+// cliente escolhendo os números a dedo, e `tipoPagamento: 'MANUAL'` é a venda
+// já paga no balcão. Os nomes destas constantes seguem o eixo do PAGAMENTO,
+// igual aos exemplos de Prêmios — o exemplo abaixo é PIX apesar de selecionar
+// os números à mão.
+const POS_SENA_VENDA_PIX_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
   tipoPagamento: 'PIX',
   modoSelecao: 'MANUAL',
@@ -130,6 +135,22 @@ const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
   nome: 'Maria Cliente',
   telefone: '(11) 99999-9999',
   email: 'maria.cliente@email.com',
+  dataNascimento: '1985-04-11',
+};
+
+const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
+  edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
+  tipoPagamento: 'MANUAL',
+  modoSelecao: 'MANUAL',
+  numeros: [
+    {
+      numeros: [3, 12, 24, 37, 45, 58],
+      bola_extra: 7,
+    },
+  ],
+  cpf: '98765432100',
+  nome: 'Maria Cliente',
+  telefone: '(11) 99999-9999',
   dataNascimento: '1985-04-11',
 };
 
@@ -962,17 +983,21 @@ Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`, \`RECUSADO\` ou
     summary:
       '11. 🔒 Criar venda POS e gerar cobrança — Sena (VENDEDOR + DISTRIBUIDOR)',
     description: `
-Cria a venda Sena com origem **POS**, status **PENDENTE** e cobrança no gateway
-pela própria API.
-Informe \`numeros\` com as cartelas já escolhidas pelo frontend
-e \`modoSelecao\` uma única vez para a venda. Cada item tem 6 números +
-\`bola_extra\`. Opcionalmente, informe \`comboSenaId\`. O vendedor/distribuidor vem
-do token.
+Cria a venda Sena com origem **POS**. O vendedor/distribuidor vem do token.
+
+Informe \`numeros\` com as cartelas já escolhidas pelo frontend e
+\`modoSelecao\` uma única vez para a venda. Cada item tem 6 números +
+\`bola_extra\`. Opcionalmente, informe \`comboSenaId\`.
+
+**Pagamento PIX:** a venda nasce \`PENDENTE\`, a API cria a cobrança no gateway
+e o webhook confirma.
+**Pagamento MANUAL:** aprova a venda imediatamente e gera as cartelas, sem
+passar pelo gateway — é a venda já paga no balcão.
 
 Guarde o \`id\` para consultar status em
-\`GET /pos/capital-sena/vendas/{id}/pagamento\`. O terminal deve fazer polling a
-cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
-\`RECUSADO\`, \`CANCELADO\` }.
+\`GET /pos/capital-sena/vendas/{id}/pagamento\`. O polling só faz sentido no
+PIX: no MANUAL a venda já sai \`APROVADO\`. Chame a cada 3–5 segundos até
+\`pago=true\` ou \`status\` ∈ { \`APROVADO\`, \`RECUSADO\`, \`CANCELADO\` }.
     `.trim(),
   })
   @ApiBody({
@@ -980,19 +1005,23 @@ cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
     description:
       'Request da venda POS do Capital Sena. Não envie vendedorId, distribuidorId nem seller_id; a API resolve pelo token POS.',
     examples: {
-      vendaManual: {
-        summary: 'Venda manual com números escolhidos',
+      vendaPix: {
+        summary: 'PIX, com números escolhidos à mão',
+        value: POS_SENA_VENDA_PIX_REQUEST_EXAMPLE,
+      },
+      vendaPagaNoBalcao: {
+        summary: 'MANUAL — já paga no balcão, aprova na hora',
         value: POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE,
       },
       vendaComboSurpresinha: {
-        summary: 'Venda combo com números enviados pelo frontend',
+        summary: 'PIX, combo com números enviados pelo frontend',
         value: POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE,
       },
     },
   })
   @ApiResponse({
     status: 201,
-    description: 'Venda Sena criada (PENDENTE).',
+    description: 'Venda Sena criada. PENDENTE no PIX, APROVADO no MANUAL.',
     schema: {
       example: {
         statusCode: 201,
