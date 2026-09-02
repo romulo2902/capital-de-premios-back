@@ -694,14 +694,28 @@ model Maquininha {
   apelido        String?
   operadora      String?
   status         StatusMaquininha @default(ATIVA)
+  // Exclusão é lógica e só o ADMIN faz. É estado distinto de `INATIVA`:
+  // inativa é aparelho fora de operação que segue na frota e o distribuidor
+  // pode reativar; excluída sai da frota e some de toda listagem.
+  //
+  // O registro fica porque `MovimentoCreditoMaquininha` aponta para ele com
+  // ON DELETE RESTRICT — apagar de verdade quebraria o razão de crédito.
+  deletedAt      DateTime?
   // Crédito do aparelho, em reais. `limiteCredito` é o teto concedido pelo
   // ADMIN e `saldoCredito` é o que resta agora — a venda MANUAL debita, o
   // cancelamento estorna.
   //
-  // `limiteCredito` zero significa SEM CONTROLE, não "bloqueado". É o que
-  // permite ligar o controle sem parar a operação: aparelho já cadastrado
-  // entra com zero e continua vendendo até o ADMIN conceder um limite. Para
-  // travar um aparelho de vez existe `status: INATIVA`.
+  // Aparelho nasce operante: `MaquininhasService.create` grava o teto inicial
+  // e credita o mesmo valor pelo razão (`CREDITO_INICIAL_MAQUININHA`, R$
+  // 2.000), ajustável pelo ADMIN até `LIMITE_CREDITO_MAXIMO` (R$ 5.000).
+  //
+  // O DEFAULT fica em zero de propósito: o valor inicial é regra de negócio e
+  // mora no service, junto do lançamento que o explica no extrato. Um DEFAULT
+  // de 2.000 aqui criaria saldo sem movimento por trás em qualquer INSERT que
+  // não passasse pelo service.
+  //
+  // `limiteCredito` zero significa NÃO CONFIGURADO e bloqueia a venda MANUAL.
+  // Para travar um aparelho que tem limite existe `status: INATIVA`.
   limiteCredito  Decimal          @default(0) @db.Decimal(12, 2)
   saldoCredito   Decimal          @default(0) @db.Decimal(12, 2)
   createdAt      DateTime         @default(now())
@@ -715,6 +729,9 @@ model Maquininha {
 
   @@index([distribuidorId, status])
   @@index([vendedorId])
+  // Toda listagem filtra por `deletedAt: null`; sem isto o filtro vira
+  // varredura na tabela inteira conforme a frota cresce.
+  @@index([deletedAt])
 }
 
 // Razão do crédito da maquininha: toda alteração de `saldoCredito` nasce de uma

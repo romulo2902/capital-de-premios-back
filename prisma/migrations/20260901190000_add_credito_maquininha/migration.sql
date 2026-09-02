@@ -6,9 +6,14 @@
 -- e depois congelados — o extrato é reconstituível sem depender do estado
 -- atual do aparelho.
 --
--- `limiteCredito = 0` significa SEM CONTROLE, não "bloqueado". É o que deixa
--- esta migration entrar sem parar a operação: todo aparelho já cadastrado
--- recebe zero pelo DEFAULT e continua vendendo até o ADMIN conceder um limite.
+-- O DEFAULT fica em zero: quem dá teto e crédito ao aparelho novo é o
+-- `MaquininhasService.create`, que grava o limite inicial e lança a RECARGA de
+-- abertura no mesmo commit. Assim o saldo sempre tem um movimento que o
+-- explica, em vez de nascer de um DEFAULT que o extrato não consegue mostrar.
+--
+-- `limiteCredito = 0` significa NÃO CONFIGURADO e bloqueia a venda MANUAL — é
+-- o estado dos aparelhos que já existiam quando esta migration entrar, e eles
+-- precisam receber limite antes de operar no MANUAL.
 
 -- CreateEnum
 -- O sinal do movimento vem do tipo, nunca do valor: `valor` é sempre positivo.

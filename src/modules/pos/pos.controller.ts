@@ -808,8 +808,9 @@ retornando \`pixCopiaECola\`/QR Code em \`pagamento\`.
 **Crédito da maquininha:** quando a venda é MANUAL e traz \`maquininhaId\`, o
 total é debitado do \`saldoCredito\` do aparelho na mesma transação da venda.
 Saldo que não cobre o total responde **409** e a venda **não é criada** —
-nenhuma cartela fica alocada. Aparelho com \`limiteCredito: "0"\` está sem
-controle e vende sem consumir crédito. Cancelar a venda devolve o valor.
+nenhuma cartela fica alocada. Aparelho com \`limiteCredito: "0"\` está **sem
+limite configurado** e por isso NÃO aceita venda MANUAL — tambem 409. Cancelar
+a venda devolve o valor ao aparelho.
 
 Guarde o \`id\` retornado: ele pode ser usado para consultar status em
 \`GET /pos/vendas/{id}/pagamento\`. O terminal deve fazer polling a cada
@@ -1363,8 +1364,8 @@ venda. Não existe filtro por rede na query.
 
 Cada aparelho traz \`limiteCredito\` e \`saldoCredito\` em reais, para o terminal
 mostrar quanto ainda dá para vender no MANUAL antes de o crédito acabar.
-\`limiteCredito: "0"\` significa aparelho **sem controle de crédito** — vende
-sem consumir nada.
+\`limiteCredito: "0"\` significa aparelho **sem limite configurado**, que não
+aceita venda MANUAL até o ADMIN conceder um limite.
     `.trim(),
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -1461,7 +1462,11 @@ quando o saldo não cobre o total.
           apelido: 'Maquininha do balcão',
           operadora: 'PagBank',
           status: 'ATIVA',
-          vendedor: { id: 'a1b2c3d4-...', nome: 'Maria da Silva', codigo: 4933 },
+          vendedor: {
+            id: 'a1b2c3d4-...',
+            nome: 'Maria da Silva',
+            codigo: 4933,
+          },
         },
       },
     },
@@ -1480,10 +1485,7 @@ quando o saldo não cobre o total.
     @Query() dto: ValidarMaquininhaDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.maquininhasService.validarPorNumeroSerie(
-      dto.numeroSerie,
-      user,
-    );
+    return this.maquininhasService.validarPorNumeroSerie(dto.numeroSerie, user);
   }
 
   @Patch('maquininhas/:id')
@@ -1492,8 +1494,7 @@ quando o saldo não cobre o total.
   @ApiBearerAuth()
   @ApiTags(POS_MAQUININHAS_TAG)
   @ApiOperation({
-    summary:
-      '17. 🔒 Atualizar maquininha e seu vendedor (DISTRIBUIDOR apenas)',
+    summary: '17. 🔒 Atualizar maquininha e seu vendedor (DISTRIBUIDOR apenas)',
     description: `
 Edita os dados do aparelho, inativa/reativa e **redefine quem usa**.
 

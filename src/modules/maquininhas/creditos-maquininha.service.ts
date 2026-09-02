@@ -100,8 +100,9 @@ export class CreditosMaquininhaService {
    * trava a linha durante o UPDATE e segura até o commit, então a segunda
    * transação enxerga o saldo já debitado e não encontra linha para atualizar.
    *
-   * Aparelho com `limiteCredito` zero está sem controle de crédito: não debita
-   * e não registra movimento. É o estado de quem ainda não recebeu limite.
+   * Aparelho sem limite definido NÃO vende no MANUAL. `limiteCredito` zero
+   * significa "ainda não configurado", e vender ali seria adiantar dinheiro da
+   * casa sem teto nenhum — justamente o que o controle existe para impedir.
    */
   async debitarVenda(
     tx: Prisma.TransactionClient,
@@ -119,7 +120,11 @@ export class CreditosMaquininhaService {
     }
 
     if (maquininha.limiteCredito.lte(0)) {
-      return;
+      throw new ConflictException(
+        `A maquininha ${maquininha.numeroSerie} não tem limite de crédito ` +
+          'definido e não pode receber venda MANUAL. Defina o limite em ' +
+          'PATCH /admin/maquininhas/:id/limite antes de vender.',
+      );
     }
 
     // Venda de valor zero (ou negativo, que não deveria existir) não move
@@ -207,6 +212,39 @@ export class CreditosMaquininhaService {
     this.logger.log(
       `Crédito estornado: R$ ${consumo.valor.toFixed(2)} para a maquininha ${consumo.maquininhaId}`,
     );
+  }
+
+  /**
+   * Crédito de abertura do aparelho recém-cadastrado.
+   *
+   * Entra como `RECARGA` no razão em vez de virar um DEFAULT de coluna porque
+   * `saldoCredito` é a MATERIALIZAÇÃO do razão, não um número solto: um saldo
+   * que nasce sem movimento por trás quebraria a identidade
+   * `saldo = Σ movimentos` já no cadastro, e o extrato abriria com um valor
+   * que ninguém consegue explicar.
+   *
+   * Recebe o `tx` de quem chama — o crédito e a maquininha nascem no mesmo
+   * commit, ou nenhum dos dois nasce.
+   */
+  async creditarAbertura(
+    tx: Prisma.TransactionClient,
+    dados: { maquininhaId: string; valor: number; criadoPorId?: string | null },
+  ): Promise<void> {
+    const valor = new Prisma.Decimal(dados.valor);
+    if (valor.lte(0)) return;
+
+    await tx.maquininha.update({
+      where: { id: dados.maquininhaId },
+      data: { saldoCredito: { increment: valor } },
+    });
+
+    await this.registrarMovimento(tx, {
+      maquininhaId: dados.maquininhaId,
+      tipo: TipoMovimentoCredito.RECARGA,
+      valor,
+      motivo: 'Crédito inicial do cadastro',
+      criadoPorId: dados.criadoPorId,
+    });
   }
 
   /**

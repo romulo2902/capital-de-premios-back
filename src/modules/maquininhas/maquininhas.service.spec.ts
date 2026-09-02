@@ -5,9 +5,10 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { StatusMaquininha } from '@prisma/client';
+import { Prisma, StatusMaquininha } from '@prisma/client';
 import { MaquininhasService } from './maquininhas.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreditosMaquininhaService } from './creditos-maquininha.service';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 describe('MaquininhasService', () => {
@@ -21,9 +22,15 @@ describe('MaquininhasService', () => {
       count: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
     },
     vendedor: { findFirst: jest.fn() },
+    $transaction: jest.fn(),
   };
+
+  // O cadastro credita a abertura pelo razão; aqui só interessa que foi
+  // chamado com o valor certo, não o efeito no saldo.
+  const mockCreditos = { creditarAbertura: jest.fn() };
 
   const distribuidor: RequestUser = {
     id: 'user-1',
@@ -53,10 +60,14 @@ describe('MaquininhasService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.$transaction.mockImplementation(
+      (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma),
+    );
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MaquininhasService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: CreditosMaquininhaService, useValue: mockCreditos },
       ],
     }).compile();
 
@@ -67,6 +78,10 @@ describe('MaquininhasService', () => {
     it('normaliza a série e usa o distribuidor do token', async () => {
       mockPrisma.maquininha.findUnique.mockResolvedValue(null);
       mockPrisma.maquininha.create.mockResolvedValue({ id: 'maq-1' });
+      mockPrisma.maquininha.findUniqueOrThrow.mockResolvedValue({
+        id: 'maq-1',
+        numeroSerie: '80123ABC',
+      });
 
       await service.create({ numeroSerie: '  80123abc ' }, distribuidor);
 
@@ -78,6 +93,12 @@ describe('MaquininhasService', () => {
       ];
       expect(argumentos.data.numeroSerie).toBe('80123ABC');
       expect(argumentos.data.distribuidorId).toBe('dist-1');
+      // Nasce com o teto no máximo e saldo menor: sobra espaço de recarga.
+      expect(argumentos.data.limiteCredito).toBe(5000);
+      expect(mockCreditos.creditarAbertura).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({ maquininhaId: 'maq-1', valor: 2000 }),
+      );
     });
 
     it('recusa série já cadastrada, mesmo em outra rede', async () => {
@@ -113,6 +134,10 @@ describe('MaquininhasService', () => {
     it('ADMIN cadastra na rede que informar', async () => {
       mockPrisma.maquininha.findUnique.mockResolvedValue(null);
       mockPrisma.maquininha.create.mockResolvedValue({ id: 'maq-1' });
+      mockPrisma.maquininha.findUniqueOrThrow.mockResolvedValue({
+        id: 'maq-1',
+        numeroSerie: '8012345678',
+      });
 
       await service.create(
         { numeroSerie: '8012345678', distribuidorId: 'dist-escolhida' },
@@ -390,6 +415,64 @@ describe('MaquininhasService', () => {
       await expect(
         service.validarPorNumeroSerie('serie-alheia', vendedor),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('remove — exclusão lógica', () => {
+    it('marca deletedAt em vez de apagar a linha', async () => {
+      mockPrisma.maquininha.findFirst.mockResolvedValue({
+        id: 'maq-1',
+        numeroSerie: 'POS123',
+        saldoCredito: new Prisma.Decimal(0),
+      });
+      mockPrisma.maquininha.update.mockResolvedValue({ id: 'maq-1' });
+
+      const resultado = await service.remove('maq-1', admin);
+
+      // Nunca `delete`: o razão de crédito aponta para esta linha com
+      // ON DELETE RESTRICT, e apagar levaria o histórico junto.
+      expect(mockPrisma.maquininha.update).toHaveBeenCalledWith({
+        where: { id: 'maq-1' },
+        data: { deletedAt: expect.any(Date) as unknown },
+      });
+      expect(resultado.message).toBe('Maquininha excluída com sucesso');
+    });
+
+    it('recusa excluir aparelho que ainda tem crédito', async () => {
+      mockPrisma.maquininha.findFirst.mockResolvedValue({
+        id: 'maq-1',
+        numeroSerie: 'POS123',
+        saldoCredito: new Prisma.Decimal(250),
+      });
+
+      await expect(service.remove('maq-1', admin)).rejects.toThrow(
+        /ainda tem R\$ 250\.00 de crédito/,
+      );
+      expect(mockPrisma.maquininha.update).not.toHaveBeenCalled();
+    });
+
+    it('responde 404 para aparelho fora do escopo do operador', async () => {
+      mockPrisma.maquininha.findFirst.mockResolvedValue(null);
+
+      await expect(service.remove('maq-alheia', admin)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('escopo esconde as excluídas', () => {
+    it('filtra deletedAt em toda leitura, para os três perfis', async () => {
+      mockPrisma.maquininha.findMany.mockResolvedValue([]);
+      mockPrisma.maquininha.count.mockResolvedValue(0);
+
+      for (const operador of [admin, distribuidor, vendedor]) {
+        mockPrisma.maquininha.findMany.mockClear();
+        await service.findAll({}, operador);
+        const [chamada] = mockPrisma.maquininha.findMany.mock.calls[0] as [
+          { where: Record<string, unknown> },
+        ];
+        expect(chamada.where.deletedAt).toBeNull();
+      }
     });
   });
 });

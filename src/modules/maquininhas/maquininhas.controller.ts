@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -131,6 +132,27 @@ export class MaquininhasController {
     return this.maquininhasService.update(id, dto, user);
   }
 
+  @Delete(':id')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Excluir maquininha (ADMIN apenas)',
+    description:
+      'Exclusão **lógica**: o registro é preservado e o aparelho some de toda listagem, inclusive do seletor do POS. Não é o mesmo que `status: INATIVA` — inativa é aparelho fora de operação que segue na frota e o DISTRIBUIDOR reativa; excluída sai da frota e não volta.\n\nO registro nunca é apagado de verdade porque o razão de crédito (`MovimentoCreditoMaquininha`) referencia a maquininha; um DELETE físico levaria o histórico junto.\n\nAparelho com saldo de crédito responde **409**: zere com um `AJUSTE_DEBITO` antes, para a retirada ficar no extrato em vez do dinheiro sumir junto com o aparelho.\n\nA série continua ocupada depois da exclusão e não pode ser recadastrada.',
+  })
+  @ApiResponse({ status: 200, description: 'Maquininha excluída.' })
+  @ApiResponse({ status: 403, description: 'Perfil sem permissão.' })
+  @ApiResponse({ status: 404, description: 'Maquininha não encontrada.' })
+  @ApiResponse({
+    status: 409,
+    description: 'Aparelho ainda tem saldo de crédito.',
+  })
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.maquininhasService.remove(id, user);
+  }
+
   // ─── Crédito do aparelho ──────────────────────────────────────────
 
   @Patch(':id/limite')
@@ -138,10 +160,13 @@ export class MaquininhasController {
   @ApiOperation({
     summary: 'Definir limite de crédito da maquininha (ADMIN apenas)',
     description:
-      'Define o teto de crédito do aparelho em reais. `limiteCredito: 0` DESLIGA o controle: a maquininha volta a vender sem consumir crédito — é o estado em que todo aparelho já cadastrado entrou. Para travar o aparelho de vez use `PATCH /admin/maquininhas/:id` com `status: INATIVA`.\n\nBaixar o limite não confisca saldo já concedido: o saldo atual fica onde está e apenas para de aceitar recarga até consumir a diferença. Para retirar crédito da mão do vendedor, lance um `AJUSTE_DEBITO` — assim a retirada fica no extrato.\n\nRota separada do `PATCH /admin/maquininhas/:id` porque aquele aceita DISTRIBUIDOR, e o limite é decisão da matriz.',
+      'Define o teto de crédito do aparelho em reais, entre 0 e **10.000**. Aparelho novo já nasce com R$ 2.000,00, então esta rota serve para ajustar. `limiteCredito: 0` significa NÃO CONFIGURADO e faz o aparelho **recusar venda MANUAL** com 409. Para travar um aparelho que já opera use `PATCH /admin/maquininhas/:id` com `status: INATIVA`.\n\nBaixar o limite não confisca saldo já concedido: o saldo atual fica onde está e apenas para de aceitar recarga até consumir a diferença. Para retirar crédito da mão do vendedor, lance um `AJUSTE_DEBITO` — assim a retirada fica no extrato.\n\nRota separada do `PATCH /admin/maquininhas/:id` porque aquele aceita DISTRIBUIDOR, e o limite é decisão da matriz.',
   })
   @ApiResponse({ status: 200, description: 'Limite atualizado.' })
-  @ApiResponse({ status: 400, description: 'Limite negativo ou malformado.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Limite negativo, acima de R$ 10.000,00 ou malformado.',
+  })
   @ApiResponse({ status: 403, description: 'Perfil sem permissão.' })
   @ApiResponse({ status: 404, description: 'Maquininha não encontrada.' })
   atualizarLimite(

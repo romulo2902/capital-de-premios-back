@@ -132,20 +132,22 @@ describe('CreditosMaquininhaService', () => {
       expect(mockTx.movimentoCreditoMaquininha.create).not.toHaveBeenCalled();
     });
 
-    it('não debita nem registra movimento quando o limite é zero', async () => {
-      // Limite zero = controle desligado. É o estado de todo aparelho que já
-      // existia quando a migration entrou — precisa continuar vendendo.
+    it('recusa a venda quando o aparelho não tem limite definido', async () => {
+      // Limite zero = ainda não configurado. Vender ali seria adiantar dinheiro
+      // da casa sem teto nenhum, que é o que o controle existe para impedir.
       mockTx.maquininha.findUnique.mockResolvedValue({
         id: 'maq-1',
         numeroSerie: 'POS123',
         limiteCredito: decimal(0),
       });
 
-      await service.debitarVenda(tx(), {
-        maquininhaId: 'maq-1',
-        vendaId: 'venda-1',
-        valor: decimal(300),
-      });
+      await expect(
+        service.debitarVenda(tx(), {
+          maquininhaId: 'maq-1',
+          vendaId: 'venda-1',
+          valor: decimal(300),
+        }),
+      ).rejects.toThrow(/não tem limite de crédito/);
 
       expect(mockTx.maquininha.updateMany).not.toHaveBeenCalled();
       expect(mockTx.movimentoCreditoMaquininha.create).not.toHaveBeenCalled();
