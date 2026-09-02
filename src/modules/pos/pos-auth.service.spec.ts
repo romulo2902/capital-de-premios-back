@@ -50,6 +50,7 @@ describe('PosAuthService', () => {
       cpf: '12345678900',
       status: StatusUsuario.ATIVO,
       distribuidorId: 'dist-1',
+      distribuidor: { status: StatusUsuario.ATIVO },
     });
 
     const result = await service.login({ cpf: '123.456.789-00' });
@@ -111,5 +112,22 @@ describe('PosAuthService', () => {
     await expect(service.login({ cpf: '98765432100' })).rejects.toThrow(
       UnauthorizedException,
     );
+  });
+
+  it('recusa vendedor cuja rede está inativa', async () => {
+    mockPrisma.vendedor.findUnique.mockResolvedValue({
+      id: 'vend-1',
+      usuarioId: 'user-1',
+      nome: 'Vendedor Um',
+      cpf: '12345678900',
+      status: StatusUsuario.ATIVO,
+      distribuidorId: 'dist-1',
+      distribuidor: { status: StatusUsuario.INATIVO },
+    });
+
+    await expect(service.login({ cpf: '123.456.789-00' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(mockJwt.sign).not.toHaveBeenCalled();
   });
 });

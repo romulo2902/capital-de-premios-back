@@ -9,6 +9,8 @@ import { PosService } from './pos.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
 import { VendasSenaService } from '../capital-sena/vendas-sena/vendas-sena.service';
+import { VendedoresService } from '../vendedores/vendedores.service';
+import { MaquininhasService } from '../maquininhas/maquininhas.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { RedisService } from '../../common/redis/redis.service';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
@@ -42,9 +44,34 @@ describe('PosService', () => {
     }),
   };
 
+  const mockVendedores = {
+    create: jest.fn(),
+    findAll: jest.fn(),
+  };
+
+  const mockMaquininhas = {
+    garantirMaquininhaDoOperador: jest.fn(),
+  };
+
   const mockRedisService = {
     isConfigured: jest.fn().mockReturnValue(false),
     client: null,
+  };
+
+  const distribuidor: RequestUser = {
+    id: 'user-2',
+    email: null,
+    cpf: '98765432100',
+    perfil: 'DISTRIBUIDOR',
+    status: 'ATIVO',
+    distribuidorId: 'dist-1',
+  };
+
+  const novoVendedorDto = {
+    nome: 'Maria da Silva',
+    cpf: '008.016.371-80',
+    telefone: '(61) 99233-9525',
+    email: 'maria.vendedora@email.com',
   };
 
   const vendedor: RequestUser = {
@@ -69,6 +96,8 @@ describe('PosService', () => {
         { provide: VendasSenaService, useValue: mockVendasSena },
         { provide: PaymentGatewayFactory, useValue: mockPaymentGatewayFactory },
         { provide: RedisService, useValue: mockRedisService },
+        { provide: VendedoresService, useValue: mockVendedores },
+        { provide: MaquininhasService, useValue: mockMaquininhas },
       ],
     }).compile();
 
@@ -364,8 +393,196 @@ describe('PosService', () => {
       service.consultarStatusPagamento('venda-1', vendedor),
     ).rejects.toThrow(ForbiddenException);
   });
+  describe('cadastrarVendedor', () => {
+    it('força o distribuidorId do token ao cadastrar o vendedor', async () => {
+      mockVendedores.create.mockResolvedValue({
+        id: 'vend-novo',
+        codigo: 4933,
+        nome: 'Maria da Silva',
+      });
+
+      const resultado = await service.cadastrarVendedor(
+        novoVendedorDto as never,
+        distribuidor,
+      );
+
+      expect(mockVendedores.create).toHaveBeenCalledWith({
+        ...novoVendedorDto,
+        distribuidorId: 'dist-1',
+      });
+      expect(resultado.data).toEqual(
+        expect.objectContaining({ id: 'vend-novo' }),
+      );
+    });
+
+    it('sobrescreve distribuidorId que venha no corpo pelo do token', async () => {
+      mockVendedores.create.mockResolvedValue({ id: 'vend-novo', codigo: 1 });
+
+      await service.cadastrarVendedor(
+        { ...novoVendedorDto, distribuidorId: 'rede-alheia' } as never,
+        distribuidor,
+      );
+
+      const [dtoEnviado] = mockVendedores.create.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(dtoEnviado.distribuidorId).toBe('dist-1');
+    });
+
+    it('bloqueia o perfil VENDEDOR', async () => {
+      await expect(
+        service.cadastrarVendedor(novoVendedorDto as never, vendedor),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockVendedores.create).not.toHaveBeenCalled();
+    });
+
+    it('bloqueia distribuidor sem vínculo de rede no token', async () => {
+      await expect(
+        service.cadastrarVendedor(novoVendedorDto as never, {
+          ...distribuidor,
+          distribuidorId: undefined,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockVendedores.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listarVendedoresDaRede', () => {
+    it('lista sem aceitar filtro de rede, delegando o recorte ao token', async () => {
+      mockVendedores.findAll.mockResolvedValue({ data: [], meta: {} });
+
+      await service.listarVendedoresDaRede(
+        { page: 2, limit: 10, search: 'Maria' },
+        distribuidor,
+      );
+
+      expect(mockVendedores.findAll).toHaveBeenCalledWith(
+        2,
+        10,
+        'Maria',
+        undefined,
+        distribuidor,
+      );
+    });
+
+    it('bloqueia o perfil VENDEDOR', async () => {
+      await expect(
+        service.listarVendedoresDaRede({}, vendedor),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockVendedores.findAll).not.toHaveBeenCalled();
+    });
+  });
+  describe('maquininha na venda POS', () => {
+    it('valida a maquininha e repassa o id por options, fora do dto', async () => {
+      mockVendas.create.mockResolvedValue({ data: { id: 'venda-1' } });
+      mockMaquininhas.garantirMaquininhaDoOperador.mockResolvedValue('maq-1');
+
+      await service.criarVenda(
+        {
+          edicaoId: 'ed-1',
+          cpf: '1',
+          nome: 'X',
+          telefone: '1',
+          dataNascimento: '1990-01-01',
+          tipoPagamento: TipoPagamento.PIX,
+          maquininhaId: 'maq-1',
+        } as never,
+        vendedor,
+      );
+
+      expect(mockMaquininhas.garantirMaquininhaDoOperador).toHaveBeenCalledWith(
+        'maq-1',
+        vendedor,
+      );
+
+      const [dtoEnviado, , options] = mockVendas.create.mock.calls[0] as [
+        Record<string, unknown>,
+        unknown,
+        Record<string, unknown>,
+      ];
+      // O campo é do canal POS: não pode vazar para o dto compartilhado.
+      expect(dtoEnviado.maquininhaId).toBeUndefined();
+      expect(options.maquininhaId).toBe('maq-1');
+    });
+
+    it('venda sem maquininha não consulta o service nem manda o campo', async () => {
+      mockVendas.create.mockResolvedValue({ data: { id: 'venda-1' } });
+
+      await service.criarVenda(
+        {
+          edicaoId: 'ed-1',
+          cpf: '1',
+          nome: 'X',
+          telefone: '1',
+          dataNascimento: '1990-01-01',
+          tipoPagamento: TipoPagamento.PIX,
+        } as never,
+        vendedor,
+      );
+
+      expect(
+        mockMaquininhas.garantirMaquininhaDoOperador,
+      ).not.toHaveBeenCalled();
+      const [, , options] = mockVendas.create.mock.calls[0] as [
+        unknown,
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(options.maquininhaId).toBeUndefined();
+    });
+
+    it('propaga a recusa da maquininha sem criar a venda', async () => {
+      mockMaquininhas.garantirMaquininhaDoOperador.mockRejectedValue(
+        new NotFoundException('Maquininha não encontrada'),
+      );
+
+      await expect(
+        service.criarVenda(
+          {
+            edicaoId: 'ed-1',
+            cpf: '1',
+            nome: 'X',
+            telefone: '1',
+            dataNascimento: '1990-01-01',
+            tipoPagamento: TipoPagamento.PIX,
+            maquininhaId: 'maq-alheia',
+          } as never,
+          vendedor,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockVendas.create).not.toHaveBeenCalled();
+    });
+
+    it('vale também para a venda Sena', async () => {
+      mockVendasSena.create.mockResolvedValue({ data: { id: 'venda-sena-1' } });
+      mockMaquininhas.garantirMaquininhaDoOperador.mockResolvedValue('maq-1');
+
+      await service.criarVendaSena(
+        {
+          edicaoSenaId: 'ed-sena-1',
+          cpf: '1',
+          nome: 'X',
+          telefone: '1',
+          dataNascimento: '1990-01-01',
+          modoSelecao: 'MANUAL',
+          numeros: [{ numeros: [1, 2, 3, 4, 5, 6], bola_extra: 7 }],
+          maquininhaId: 'maq-1',
+        } as never,
+        vendedor,
+      );
+
+      const [dtoEnviado, , options] = mockVendasSena.create.mock.calls[0] as [
+        Record<string, unknown>,
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(dtoEnviado.maquininhaId).toBeUndefined();
+      expect(options.maquininhaId).toBe('maq-1');
+    });
+  });
+
   describe('criarVendaSena — forma de pagamento', () => {
-    const base = {
+    const baseSena = {
       edicaoSenaId: 'ed-sena-1',
       cpf: '1',
       nome: 'X',
@@ -378,7 +595,7 @@ describe('PosService', () => {
     it('usa PIX quando o tipo é omitido, e exige gateway', async () => {
       mockVendasSena.create.mockResolvedValue({ data: { id: 'venda-1' } });
 
-      await service.criarVendaSena({ ...base } as never, vendedor);
+      await service.criarVendaSena({ ...baseSena } as never, vendedor);
 
       const [dtoEnviado, , options] = mockVendasSena.create.mock.calls[0] as [
         Record<string, unknown>,
@@ -393,7 +610,7 @@ describe('PosService', () => {
       mockVendasSena.create.mockResolvedValue({ data: { id: 'venda-1' } });
 
       await service.criarVendaSena(
-        { ...base, tipoPagamento: TipoPagamento.MANUAL } as never,
+        { ...baseSena, tipoPagamento: TipoPagamento.MANUAL } as never,
         vendedor,
       );
 
@@ -407,15 +624,16 @@ describe('PosService', () => {
       expect(options.requireGateway).toBe(false);
     });
 
-    it('CARTAO continua recusado no POS', () => {
-      // `criarVendaSena` não é async: a validação lança antes de qualquer
-      // await, então o erro é síncrono e não uma promise rejeitada.
-      expect(() =>
+    it('CARTAO continua recusado no POS', async () => {
+      // `rejects`, e não `expect(() => ...).toThrow`: com a develop mesclada,
+      // `criarVendaSena` é async (resolve a maquininha), então a recusa chega
+      // como promise rejeitada mesmo a validação lançando antes do await.
+      await expect(
         service.criarVendaSena(
-          { ...base, tipoPagamento: TipoPagamento.CARTAO } as never,
+          { ...baseSena, tipoPagamento: TipoPagamento.CARTAO } as never,
           vendedor,
         ),
-      ).toThrow(BadRequestException);
+      ).rejects.toThrow(BadRequestException);
       expect(mockVendasSena.create).not.toHaveBeenCalled();
     });
   });

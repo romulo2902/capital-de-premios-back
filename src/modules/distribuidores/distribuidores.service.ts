@@ -16,6 +16,7 @@ import {
   normalizePagination,
 } from '../../common/utils/pagination.util';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
+import { buildBuscaPorTexto } from '../../common/utils/busca-cadastro.util';
 
 @Injectable()
 export class DistribuidoresService {
@@ -150,15 +151,7 @@ export class DistribuidoresService {
 
   async findAll(page = 1, limit = 20, search?: string) {
     const pagination = normalizePagination(page, limit);
-    const where = search
-      ? {
-          OR: [
-            { nome: { contains: search, mode: 'insensitive' as const } },
-            { cpf: { contains: search } },
-            { email: { contains: search, mode: 'insensitive' as const } },
-          ],
-        }
-      : {};
+    const where = search ? { OR: buildBuscaPorTexto(search) } : {};
 
     const [data, total] = await Promise.all([
       this.prisma.distribuidor.findMany({
@@ -243,6 +236,8 @@ export class DistribuidoresService {
     const usuarioData: Prisma.UsuarioUpdateInput = {};
     if (dto.cpf) usuarioData.cpf = this.normalizarCpf(dto.cpf);
     if (dto.email) usuarioData.email = this.normalizarEmail(dto.email);
+    // Mesmo motivo do Vendedor: o login do painel valida `Usuario.status`.
+    if (dto.status) usuarioData.status = dto.status;
 
     if (dto.senha) {
       usuarioData.senhaHash = await bcrypt.hash(dto.senha, 10);
@@ -262,10 +257,20 @@ export class DistribuidoresService {
   }
 
   async remove(id: string) {
-    await this.findOne(id);
-    return this.prisma.distribuidor.update({
-      where: { id },
-      data: { status: StatusUsuario.INATIVO },
+    const distribuidor = await this.findOne(id);
+
+    // As duas linhas caem juntas: inativar só o Distribuidor deixaria o login
+    // do painel de pé, porque ele valida `Usuario.status`.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.usuario.update({
+        where: { id: distribuidor.usuarioId },
+        data: { status: StatusUsuario.INATIVO },
+      });
+
+      return tx.distribuidor.update({
+        where: { id },
+        data: { status: StatusUsuario.INATIVO },
+      });
     });
   }
 

@@ -59,6 +59,12 @@ interface CreateVendaSenaOptions {
   skipGateway?: boolean;
   origemParticipacao?: OrigemParticipacao;
   requireGateway?: boolean;
+  /**
+   * Maquininha em que a venda foi passada. Só o canal POS informa — por isso
+   * vive aqui e não no `CreateVendaSenaDto`: nos demais canais o campo não é
+   * alcançável e a coluna fica null.
+   */
+  maquininhaId?: string;
 }
 
 interface NumerosSenaRecebidos {
@@ -270,6 +276,7 @@ export class VendasSenaService {
             status: StatusVendaSena.APROVADO,
             tipoPagamento,
             origemParticipacao,
+            maquininhaId: options?.maquininhaId ?? null,
           },
         });
         const cartelasGeradas = await this.criarCartelasRecebidas(
@@ -310,6 +317,7 @@ export class VendasSenaService {
         status: StatusVendaSena.PENDENTE,
         tipoPagamento,
         origemParticipacao,
+        maquininhaId: options?.maquininhaId ?? null,
         // Guardar cartelas no payload para criar após confirmação
         gatewayPayload: {
           modoSelecao: dto.modoSelecao,

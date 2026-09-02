@@ -1,6 +1,6 @@
 import { ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { TipoPagamento } from '@prisma/client';
-import { IsEnum, IsIn, IsOptional } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsUUID } from 'class-validator';
 import { CreateVendaSenaDto } from '../../capital-sena/vendas-sena/dto/create-venda-sena.dto';
 
 /**
@@ -27,4 +27,13 @@ export class CreatePosVendaSenaDto extends OmitType(CreateVendaSenaDto, [
     message: 'O POS aceita apenas tipoPagamento PIX ou MANUAL',
   })
   tipoPagamento?: TipoPagamento;
+
+  @ApiPropertyOptional({
+    example: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+    description:
+      'Maquininha em que a venda foi passada. Precisa estar ATIVA e vinculada ao operador (do distribuidor logado, ou atribuída ao vendedor logado). Exclusivo do POS — nos demais canais a venda fica sem maquininha.',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  maquininhaId?: string;
 }

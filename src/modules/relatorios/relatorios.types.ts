@@ -22,6 +22,21 @@ export type FiltrosRelatorioClientes = {
   ordenarPor?: string;
 };
 
+export type GanhadorSenaRow = {
+  premio: string;
+  nome: string;
+  telefone: string;
+  cpf: string;
+  email: string;
+  ondeComprou: string;
+  vendedor: string;
+};
+
+export type FaixaGanhadoresSena = {
+  titulo: string;
+  ganhadores: GanhadorSenaRow[];
+};
+
 export type VendedorRelatorioRow = {
   codigo: number;
   createdAt: Date;

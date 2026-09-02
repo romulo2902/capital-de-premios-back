@@ -31,6 +31,7 @@ import { RedisThrottlerStorageService } from './common/throttler/redis-throttler
 import { WhatsappApiModule } from './modules/whatsapp-api/whatsapp-api.module';
 import { CapitalSenaModule } from './modules/capital-sena/capital-sena.module';
 import { PosModule } from './modules/pos/pos.module';
+import { MaquininhasModule } from './modules/maquininhas/maquininhas.module';
 import { ConfiguracaoComissaoModule } from './modules/configuracao-comissao/configuracao-comissao.module';
 import { BannersModule } from './modules/banners/banners.module';
 import { EmailModule } from './common/email/email.module';
@@ -103,6 +104,7 @@ const envFilePathByEnvironment: Record<string, string[]> = {
     ConfiguracaoComissaoModule,
     BannersModule,
     PosModule,
+    MaquininhasModule,
     EmailModule,
   ],
 })
