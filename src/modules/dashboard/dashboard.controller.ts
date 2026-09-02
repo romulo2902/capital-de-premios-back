@@ -26,9 +26,16 @@ export class DashboardController {
   @ApiOperation({
     summary: 'Visão geral com totais do sistema (ADMIN)',
     description:
-      'Endpoint de uso exclusivo do Admin. Retorna contadores globais sem qualquer limite de rede ou hierarquia.',
+      'Endpoint de uso exclusivo do Admin. Retorna contadores globais sem qualquer limite de rede ou hierarquia. O ranking de vendedores pode ser filtrado por edição via edicaoIds.',
   })
   @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
+  @ApiQuery({
+    name: 'edicaoIds',
+    required: false,
+    type: String,
+    description:
+      'Array ou string separada por vírgula de IDs de edições para filtrar o ranking de vendedores.',
+  })
   getAdminVisaoGeral(@Query() filtros: DashboardFilterDto) {
     return this.dashboardService.getAdminVisaoGeral(filtros);
   }
