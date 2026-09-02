@@ -73,7 +73,12 @@ const POS_PREMIOS_VENDA_MANUAL_REQUEST_EXAMPLE = {
   dataNascimento: '1985-04-11',
 };
 
-const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
+// Atenção ao duplo sentido de "MANUAL" na Sena: `modoSelecao: 'MANUAL'` é o
+// cliente escolhendo os números a dedo, e `tipoPagamento: 'MANUAL'` é a venda
+// já paga no balcão. Os nomes destas constantes seguem o eixo do PAGAMENTO,
+// igual aos exemplos de Prêmios — o exemplo abaixo é PIX apesar de selecionar
+// os números à mão.
+const POS_SENA_VENDA_PIX_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
   tipoPagamento: 'PIX',
   modoSelecao: 'MANUAL',
@@ -90,7 +95,7 @@ const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
   dataNascimento: '1985-04-11',
 };
 
-const POS_SENA_VENDA_PAGA_REQUEST_EXAMPLE = {
+const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
   tipoPagamento: 'MANUAL',
   modoSelecao: 'MANUAL',
@@ -945,11 +950,11 @@ PIX: no MANUAL a venda já sai \`APROVADO\`. Chame a cada 3–5 segundos até
     examples: {
       vendaPix: {
         summary: 'PIX, com números escolhidos à mão',
-        value: POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE,
+        value: POS_SENA_VENDA_PIX_REQUEST_EXAMPLE,
       },
       vendaPagaNoBalcao: {
         summary: 'MANUAL — já paga no balcão, aprova na hora',
-        value: POS_SENA_VENDA_PAGA_REQUEST_EXAMPLE,
+        value: POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE,
       },
       vendaComboSurpresinha: {
         summary: 'PIX, combo com números enviados pelo frontend',
@@ -959,8 +964,7 @@ PIX: no MANUAL a venda já sai \`APROVADO\`. Chame a cada 3–5 segundos até
   })
   @ApiResponse({
     status: 201,
-    description:
-      'Venda Sena criada. PENDENTE no PIX, APROVADO no MANUAL.',
+    description: 'Venda Sena criada. PENDENTE no PIX, APROVADO no MANUAL.',
     schema: {
       example: {
         statusCode: 201,
