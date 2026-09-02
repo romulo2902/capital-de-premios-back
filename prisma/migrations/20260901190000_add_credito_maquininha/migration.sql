@@ -79,3 +79,44 @@ ALTER TABLE "MovimentoCreditoMaquininha" ADD CONSTRAINT "MovimentoCreditoMaquini
 
 -- AddForeignKey
 ALTER TABLE "MovimentoCreditoMaquininha" ADD CONSTRAINT "MovimentoCreditoMaquininha_criadoPorId_fkey" FOREIGN KEY ("criadoPorId") REFERENCES "Usuario"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Backfill dos aparelhos que já estavam cadastrados.
+--
+-- Sem isto, todo aparelho existente ficaria com limite e saldo zero — e, pela
+-- regra de que aparelho sem limite não vende no MANUAL, a frota inteira pararia
+-- no instante do deploy. Recuperar exigiria dois passos manuais por aparelho
+-- (conceder limite e recarregar), porque só o limite não basta: com saldo zero
+-- a venda ainda cai em "crédito insuficiente".
+--
+-- Recebem o mesmo tratamento do cadastro novo: teto no máximo (R$ 5.000) e
+-- saldo de abertura (R$ 2.000). Inclui os INATIVA de propósito — deixá-los em
+-- zero criaria uma armadilha silenciosa para quem reativasse depois.
+UPDATE "Maquininha" SET "limiteCredito" = 5000, "saldoCredito" = 2000;
+
+-- O crédito acima precisa de um movimento que o explique: `saldoCredito` é a
+-- materialização do razão, e saldo sem lançamento por trás quebraria a
+-- identidade `saldo = soma dos movimentos` logo na primeira leitura do extrato.
+--
+-- `criadoPorId` fica nulo porque não houve operador: quem concedeu foi a
+-- migração, e é o `motivo` que conta essa história no extrato.
+--
+-- `gen_random_uuid()` é nativa a partir do PostgreSQL 13 (aqui roda em 16); em
+-- versão anterior seria preciso `CREATE EXTENSION pgcrypto` antes.
+INSERT INTO "MovimentoCreditoMaquininha" (
+    "id",
+    "maquininhaId",
+    "tipo",
+    "valor",
+    "saldoAnterior",
+    "saldoPosterior",
+    "motivo"
+)
+SELECT
+    gen_random_uuid()::text,
+    "id",
+    'RECARGA',
+    2000,
+    0,
+    2000,
+    'Crédito de abertura concedido na migração do controle de crédito'
+FROM "Maquininha";
