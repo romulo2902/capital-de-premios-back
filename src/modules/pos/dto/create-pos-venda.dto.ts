@@ -31,7 +31,7 @@ export class CreatePosVendaDto extends OmitType(CreateVendaDto, [
   @ApiPropertyOptional({
     example: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
     description:
-      'Maquininha em que a venda foi passada. Precisa estar ATIVA e vinculada ao operador (do distribuidor logado, ou atribuída ao vendedor logado). Exclusivo do POS — nos demais canais a venda fica sem maquininha.',
+      'Maquininha em que a venda foi passada. Precisa estar ATIVA e vinculada ao operador (do distribuidor logado, ou atribuída ao vendedor logado). OBRIGATÓRIO quando tipoPagamento é MANUAL, porque é essa venda que debita o crédito do aparelho; no PIX é opcional, já que quem liquida é o gateway. Exclusivo do POS — nos demais canais a venda fica sem maquininha.',
   })
   @IsOptional()
   @IsUUID('4')

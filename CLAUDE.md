@@ -196,6 +196,15 @@ O aparelho carrega um limite em reais concedido pelo ADMIN. Venda **MANUAL**
 com `maquininhaId` debita o `total` do `saldoCredito`; cancelar a venda
 devolve. Não cobre venda PIX — ali o gateway já liquida.
 
+No POS, `maquininhaId` é **obrigatório** na venda MANUAL (400 sem ele). O
+débito é condicional ao campo, então omiti-lo contornava o controle inteiro:
+a venda nascia APROVADA, com cartela alocada, sem consumir limite — e as
+travas de rede, aparelho inativo, excluído e limite não configurado nem
+chegavam a rodar, porque todas dependem de um id informado. A exigência mora
+em `PosService.resolverMaquininha`, e não no serviço de venda, porque o canal
+do ADMIN também lança MANUAL e ali a ausência de aparelho é legítima — o
+admin não consome crédito de maquininha nenhuma.
+
 Aparelho novo nasce **operante**: `MaquininhasService.create` grava o teto no
 máximo, **R$ 5.000** (`LIMITE_CREDITO_MAXIMO`), e credita **R$ 2.000** de saldo
 (`CREDITO_INICIAL_MAQUININHA`). O saldo é menor que o teto de propósito — o
