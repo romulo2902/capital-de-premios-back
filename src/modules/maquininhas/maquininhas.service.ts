@@ -16,6 +16,11 @@ import type { RequestUser } from '../auth/strategies/jwt.strategy';
 import { CreateMaquininhaDto } from './dto/create-maquininha.dto';
 import { UpdateMaquininhaDto } from './dto/update-maquininha.dto';
 import { FiltroMaquininhasDto } from './dto/filtro-maquininhas.dto';
+import { CreditosMaquininhaService } from './creditos-maquininha.service';
+import {
+  CREDITO_INICIAL_MAQUININHA,
+  LIMITE_CREDITO_MAXIMO,
+} from './dto/atualizar-limite-credito.dto';
 
 const MAQUININHA_SELECT = {
   id: true,
@@ -23,6 +28,8 @@ const MAQUININHA_SELECT = {
   apelido: true,
   operadora: true,
   status: true,
+  limiteCredito: true,
+  saldoCredito: true,
   distribuidorId: true,
   vendedorId: true,
   createdAt: true,
@@ -42,7 +49,10 @@ const MAQUININHA_SELECT = {
 export class MaquininhasService {
   private readonly logger = new Logger(MaquininhasService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly creditosService: CreditosMaquininhaService,
+  ) {}
 
   /** Série é comparada sempre normalizada: sem espaços e em caixa alta. */
   private normalizarSerie(numeroSerie: string): string {
@@ -111,27 +121,57 @@ export class MaquininhasService {
     );
     const numeroSerie = this.normalizarSerie(dto.numeroSerie);
 
+    // A série é única GLOBAL, incluindo as excluídas: um aparelho físico existe
+    // uma vez só, e reaproveitar a série de uma excluída daria dois históricos
+    // de crédito ao mesmo aparelho. Por isso a mensagem separa os dois casos —
+    // "já cadastrado" manda procurar na rede, "excluído" diz que não volta.
     const jaCadastrada = await this.prisma.maquininha.findUnique({
       where: { numeroSerie },
-      select: { id: true },
+      select: { id: true, deletedAt: true },
     });
     if (jaCadastrada) {
-      throw new ConflictException('Número de série já cadastrado');
+      throw new ConflictException(
+        jaCadastrada.deletedAt
+          ? 'Número de série pertence a uma maquininha excluída e não pode ser recadastrado'
+          : 'Número de série já cadastrado',
+      );
     }
 
     if (dto.vendedorId) {
       await this.garantirVendedorDaRede(dto.vendedorId, distribuidorId);
     }
 
-    const maquininha = await this.prisma.maquininha.create({
-      data: {
-        distribuidorId,
-        vendedorId: dto.vendedorId ?? null,
-        numeroSerie,
-        apelido: dto.apelido,
-        operadora: dto.operadora,
-      },
-      select: MAQUININHA_SELECT,
+    // Aparelho entra operante com teto no máximo (R$ 5.000) e saldo de
+    // abertura menor (R$ 2.000): já sai vendendo e ainda sobra espaço para o
+    // ADMIN recarregar. Nascer com saldo igual ao teto travaria a recarga até
+    // o vendedor gastar, e nascer só com teto o deixaria sem nada para gastar
+    // — a primeira venda MANUAL morreria em "crédito insuficiente".
+    //
+    // O crédito vai pelo razão, no mesmo commit do cadastro — ou nascem os
+    // dois, ou nenhum.
+    const maquininha = await this.prisma.$transaction(async (tx) => {
+      const criada = await tx.maquininha.create({
+        data: {
+          distribuidorId,
+          vendedorId: dto.vendedorId ?? null,
+          numeroSerie,
+          apelido: dto.apelido,
+          operadora: dto.operadora,
+          limiteCredito: LIMITE_CREDITO_MAXIMO,
+        },
+        select: { id: true },
+      });
+
+      await this.creditosService.creditarAbertura(tx, {
+        maquininhaId: criada.id,
+        valor: CREDITO_INICIAL_MAQUININHA,
+        criadoPorId: user.id,
+      });
+
+      return tx.maquininha.findUniqueOrThrow({
+        where: { id: criada.id },
+        select: MAQUININHA_SELECT,
+      });
     });
 
     this.logger.log(
@@ -258,6 +298,73 @@ export class MaquininhasService {
   }
 
   /**
+   * Exclusão lógica do aparelho — privilégio do ADMIN, garantido pelo `@Roles`.
+   *
+   * Não é `status: INATIVA`: inativa é aparelho fora de operação que segue na
+   * frota e o distribuidor reativa; excluída sai da frota e some de toda
+   * listagem, inclusive do seletor do POS.
+   *
+   * Nunca apaga a linha. `MovimentoCreditoMaquininha` aponta para ela com
+   * ON DELETE RESTRICT, e o razão de crédito é a fonte da verdade do saldo —
+   * um DELETE físico levaria o histórico junto.
+   */
+  async remove(id: string, user: RequestUser) {
+    const maquininha = await this.prisma.maquininha.findFirst({
+      where: { ...this.buildEscopoDoOperador(user), id },
+      select: { id: true, numeroSerie: true, saldoCredito: true },
+    });
+
+    if (!maquininha) {
+      throw new NotFoundException('Maquininha não encontrada');
+    }
+
+    // Excluir com saldo deixaria o crédito preso: o aparelho some das
+    // listagens levando o dinheiro junto, sem tela nenhuma para recuperá-lo.
+    // Retirar antes é um AJUSTE_DEBITO, que fica registrado no extrato.
+    if (maquininha.saldoCredito.gt(0)) {
+      throw new ConflictException(
+        `A maquininha ${maquininha.numeroSerie} ainda tem R$ ${maquininha.saldoCredito.toFixed(2)} ` +
+          'de crédito. Zere o saldo com um AJUSTE_DEBITO antes de excluir.',
+      );
+    }
+
+    await this.prisma.maquininha.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+
+    this.logger.log(
+      `Maquininha excluída: ${maquininha.numeroSerie} por ${user.id}`,
+    );
+
+    return { message: 'Maquininha excluída com sucesso', data: { id } };
+  }
+
+  /**
+   * Confirma que o aparelho está ao alcance do operador e devolve o id.
+   *
+   * Diferente do `garantirMaquininhaDoOperador`, não exige status ATIVA: é
+   * usado para leitura (extrato de crédito), e o histórico de um aparelho
+   * inativado continua consultável. Mesma política de 404 para o que está
+   * fora do escopo.
+   */
+  async garantirAcessoAoAparelho(
+    maquininhaId: string,
+    user: RequestUser,
+  ): Promise<string> {
+    const maquininha = await this.prisma.maquininha.findFirst({
+      where: { ...this.buildEscopoDoOperador(user), id: maquininhaId },
+      select: { id: true },
+    });
+
+    if (!maquininha) {
+      throw new NotFoundException('Maquininha não encontrada');
+    }
+
+    return maquininha.id;
+  }
+
+  /**
    * Resolve a maquininha que o operador pode usar numa venda do POS.
    *
    * Um 404 cobre tanto "não existe" quanto "não é sua": responder diferente
@@ -313,11 +420,18 @@ export class MaquininhasService {
     return { message: 'Maquininha validada com sucesso', data: maquininha };
   }
 
+  /**
+   * Recorte de quem consulta — e o único lugar que exclui as apagadas.
+   *
+   * Toda leitura de maquininha passa por aqui, então o `deletedAt: null` mora
+   * neste ponto em vez de repetido em cada consulta: uma leitura nova que
+   * esqueça o filtro é a forma mais fácil de uma excluída reaparecer.
+   */
   private buildEscopoDoOperador(
     user: RequestUser,
   ): Prisma.MaquininhaWhereInput {
     if (user.perfil === 'ADMIN') {
-      return {};
+      return { deletedAt: null };
     }
 
     if (user.perfil === 'DISTRIBUIDOR') {
@@ -326,7 +440,7 @@ export class MaquininhasService {
           'Operador distribuidor sem vínculo válido para acessar maquininhas',
         );
       }
-      return { distribuidorId: user.distribuidorId };
+      return { distribuidorId: user.distribuidorId, deletedAt: null };
     }
 
     if (user.perfil === 'VENDEDOR') {
@@ -335,7 +449,7 @@ export class MaquininhasService {
           'Operador vendedor sem vínculo válido para acessar maquininhas',
         );
       }
-      return { vendedorId: user.vendedorId };
+      return { vendedorId: user.vendedorId, deletedAt: null };
     }
 
     throw new ForbiddenException('Perfil sem acesso às maquininhas');

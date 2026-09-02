@@ -4,11 +4,14 @@ import { VendasService } from './vendas.service';
 import { VendasPosReconciliacaoService } from './vendas-pos-reconciliacao.service';
 import { PagamentosModule } from '../pagamentos/pagamentos.module';
 import { ConfiguracaoComissaoModule } from '../configuracao-comissao/configuracao-comissao.module';
+import { MaquininhasModule } from '../maquininhas/maquininhas.module';
 
 @Module({
   imports: [
     forwardRef(() => PagamentosModule),
     ConfiguracaoComissaoModule,
+    // Sem forwardRef: MaquininhasModule só depende do PrismaModule.
+    MaquininhasModule,
   ],
   controllers: [VendasController],
   providers: [VendasService, VendasPosReconciliacaoService],

@@ -116,7 +116,12 @@ const POS_PREMIOS_VENDA_MANUAL_REQUEST_EXAMPLE = {
   dataNascimento: '1985-04-11',
 };
 
-const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
+// Atenção ao duplo sentido de "MANUAL" na Sena: `modoSelecao: 'MANUAL'` é o
+// cliente escolhendo os números a dedo, e `tipoPagamento: 'MANUAL'` é a venda
+// já paga no balcão. Os nomes destas constantes seguem o eixo do PAGAMENTO,
+// igual aos exemplos de Prêmios — o exemplo abaixo é PIX apesar de selecionar
+// os números à mão.
+const POS_SENA_VENDA_PIX_REQUEST_EXAMPLE = {
   edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
   tipoPagamento: 'PIX',
   modoSelecao: 'MANUAL',
@@ -130,6 +135,22 @@ const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
   nome: 'Maria Cliente',
   telefone: '(11) 99999-9999',
   email: 'maria.cliente@email.com',
+  dataNascimento: '1985-04-11',
+};
+
+const POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE = {
+  edicaoSenaId: 'be5ec4b0-3d4e-46f0-9a6c-7bb85b99a111',
+  tipoPagamento: 'MANUAL',
+  modoSelecao: 'MANUAL',
+  numeros: [
+    {
+      numeros: [3, 12, 24, 37, 45, 58],
+      bola_extra: 7,
+    },
+  ],
+  cpf: '98765432100',
+  nome: 'Maria Cliente',
+  telefone: '(11) 99999-9999',
   dataNascimento: '1985-04-11',
 };
 
@@ -784,6 +805,13 @@ Cria a venda com origem **POS**. O vendedor/distribuidor é definido pelo token
 retornando \`pixCopiaECola\`/QR Code em \`pagamento\`.
 **Pagamento MANUAL:** aprova a venda imediatamente, sem passar pelo gateway.
 
+**Crédito da maquininha:** quando a venda é MANUAL e traz \`maquininhaId\`, o
+total é debitado do \`saldoCredito\` do aparelho na mesma transação da venda.
+Saldo que não cobre o total responde **409** e a venda **não é criada** —
+nenhuma cartela fica alocada. Aparelho com \`limiteCredito: "0"\` está **sem
+limite configurado** e por isso NÃO aceita venda MANUAL — tambem 409. Cancelar
+a venda devolve o valor ao aparelho.
+
 Guarde o \`id\` retornado: ele pode ser usado para consultar status em
 \`GET /pos/vendas/{id}/pagamento\`. O terminal deve fazer polling a cada
 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`, \`RECUSADO\`,
@@ -855,6 +883,15 @@ Guarde o \`id\` retornado: ele pode ser usado para consultar status em
     description: 'Edição inativa ou dados inválidos.',
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada, inativa ou de outra rede.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Crédito insuficiente na maquininha para o total da venda MANUAL. A venda não é criada.',
+  })
   criarVenda(@Body() dto: CreatePosVendaDto, @CurrentUser() user: RequestUser) {
     return this.posService.criarVenda(dto, user);
   }
@@ -962,17 +999,21 @@ Pare quando \`pago=true\` ou quando \`status\` for \`APROVADO\`, \`RECUSADO\` ou
     summary:
       '11. 🔒 Criar venda POS e gerar cobrança — Sena (VENDEDOR + DISTRIBUIDOR)',
     description: `
-Cria a venda Sena com origem **POS**, status **PENDENTE** e cobrança no gateway
-pela própria API.
-Informe \`numeros\` com as cartelas já escolhidas pelo frontend
-e \`modoSelecao\` uma única vez para a venda. Cada item tem 6 números +
-\`bola_extra\`. Opcionalmente, informe \`comboSenaId\`. O vendedor/distribuidor vem
-do token.
+Cria a venda Sena com origem **POS**. O vendedor/distribuidor vem do token.
+
+Informe \`numeros\` com as cartelas já escolhidas pelo frontend e
+\`modoSelecao\` uma única vez para a venda. Cada item tem 6 números +
+\`bola_extra\`. Opcionalmente, informe \`comboSenaId\`.
+
+**Pagamento PIX:** a venda nasce \`PENDENTE\`, a API cria a cobrança no gateway
+e o webhook confirma.
+**Pagamento MANUAL:** aprova a venda imediatamente e gera as cartelas, sem
+passar pelo gateway — é a venda já paga no balcão.
 
 Guarde o \`id\` para consultar status em
-\`GET /pos/capital-sena/vendas/{id}/pagamento\`. O terminal deve fazer polling a
-cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
-\`RECUSADO\`, \`CANCELADO\` }.
+\`GET /pos/capital-sena/vendas/{id}/pagamento\`. O polling só faz sentido no
+PIX: no MANUAL a venda já sai \`APROVADO\`. Chame a cada 3–5 segundos até
+\`pago=true\` ou \`status\` ∈ { \`APROVADO\`, \`RECUSADO\`, \`CANCELADO\` }.
     `.trim(),
   })
   @ApiBody({
@@ -980,19 +1021,23 @@ cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
     description:
       'Request da venda POS do Capital Sena. Não envie vendedorId, distribuidorId nem seller_id; a API resolve pelo token POS.',
     examples: {
-      vendaManual: {
-        summary: 'Venda manual com números escolhidos',
+      vendaPix: {
+        summary: 'PIX, com números escolhidos à mão',
+        value: POS_SENA_VENDA_PIX_REQUEST_EXAMPLE,
+      },
+      vendaPagaNoBalcao: {
+        summary: 'MANUAL — já paga no balcão, aprova na hora',
         value: POS_SENA_VENDA_MANUAL_REQUEST_EXAMPLE,
       },
       vendaComboSurpresinha: {
-        summary: 'Venda combo com números enviados pelo frontend',
+        summary: 'PIX, combo com números enviados pelo frontend',
         value: POS_SENA_VENDA_COMBO_REQUEST_EXAMPLE,
       },
     },
   })
   @ApiResponse({
     status: 201,
-    description: 'Venda Sena criada (PENDENTE).',
+    description: 'Venda Sena criada. PENDENTE no PIX, APROVADO no MANUAL.',
     schema: {
       example: {
         statusCode: 201,
@@ -1016,6 +1061,15 @@ cada 3–5 segundos até \`pago=true\` ou \`status\` ∈ { \`APROVADO\`,
     description: 'Edição inativa ou cartelas inválidas.',
   })
   @ApiResponse({ status: 401, description: 'Token inválido.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada, inativa ou de outra rede.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Crédito insuficiente na maquininha para o total da venda MANUAL. A venda não é criada.',
+  })
   criarVendaSena(
     @Body() dto: CreatePosVendaSenaDto,
     @CurrentUser() user: RequestUser,
@@ -1307,6 +1361,11 @@ O recorte sai do token e muda com o perfil:
 
 É desta lista que o terminal monta o seletor de \`maquininhaId\` na tela de
 venda. Não existe filtro por rede na query.
+
+Cada aparelho traz \`limiteCredito\` e \`saldoCredito\` em reais, para o terminal
+mostrar quanto ainda dá para vender no MANUAL antes de o crédito acabar.
+\`limiteCredito: "0"\` significa aparelho **sem limite configurado**, que não
+aceita venda MANUAL até o ADMIN conceder um limite.
     `.trim(),
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -1377,6 +1436,10 @@ existência de um aparelho de outra rede a quem tentar adivinhar a série.
 
 O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
 \`POST /pos/vendas\` e \`POST /pos/capital-sena/vendas\`.
+
+A resposta traz \`saldoCredito\` e \`limiteCredito\`: dá para conferir se o
+aparelho tem crédito antes de lançar uma venda MANUAL, que responde **409**
+quando o saldo não cobre o total.
     `.trim(),
   })
   @ApiQuery({
@@ -1399,7 +1462,11 @@ O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
           apelido: 'Maquininha do balcão',
           operadora: 'PagBank',
           status: 'ATIVA',
-          vendedor: { id: 'a1b2c3d4-...', nome: 'Maria da Silva', codigo: 4933 },
+          vendedor: {
+            id: 'a1b2c3d4-...',
+            nome: 'Maria da Silva',
+            codigo: 4933,
+          },
         },
       },
     },
@@ -1418,10 +1485,7 @@ O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
     @Query() dto: ValidarMaquininhaDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.maquininhasService.validarPorNumeroSerie(
-      dto.numeroSerie,
-      user,
-    );
+    return this.maquininhasService.validarPorNumeroSerie(dto.numeroSerie, user);
   }
 
   @Patch('maquininhas/:id')
@@ -1430,8 +1494,7 @@ O \`id\` retornado é o que deve ser usado como \`maquininhaId\` em
   @ApiBearerAuth()
   @ApiTags(POS_MAQUININHAS_TAG)
   @ApiOperation({
-    summary:
-      '17. 🔒 Atualizar maquininha e seu vendedor (DISTRIBUIDOR apenas)',
+    summary: '17. 🔒 Atualizar maquininha e seu vendedor (DISTRIBUIDOR apenas)',
     description: `
 Edita os dados do aparelho, inativa/reativa e **redefine quem usa**.
 

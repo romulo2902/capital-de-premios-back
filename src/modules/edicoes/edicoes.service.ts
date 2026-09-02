@@ -190,6 +190,13 @@ export class EdicoesService {
     );
   }
 
+  /**
+   * Listagem enxuta para popular seletor de edição.
+   *
+   * Sem detalhes, combos, prêmios nem estoque: o dashboard e os relatórios só
+   * precisam de rótulo e id, e carregar a edição inteira para montar um
+   * dropdown puxa dezenas de relações por linha.
+   */
   async findAllSimples() {
     const data = await this.prisma.edicao.findMany({
       select: {

@@ -580,4 +580,61 @@ describe('PosService', () => {
       expect(options.maquininhaId).toBe('maq-1');
     });
   });
+
+  describe('criarVendaSena — forma de pagamento', () => {
+    const baseSena = {
+      edicaoSenaId: 'ed-sena-1',
+      cpf: '1',
+      nome: 'X',
+      telefone: '1',
+      dataNascimento: '1990-01-01',
+      modoSelecao: 'MANUAL',
+      numeros: [{ numeros: [1, 2, 3, 4, 5, 6], bola_extra: 7 }],
+    };
+
+    it('usa PIX quando o tipo é omitido, e exige gateway', async () => {
+      mockVendasSena.create.mockResolvedValue({ data: { id: 'venda-1' } });
+
+      await service.criarVendaSena({ ...baseSena } as never, vendedor);
+
+      const [dtoEnviado, , options] = mockVendasSena.create.mock.calls[0] as [
+        Record<string, unknown>,
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(dtoEnviado.tipoPagamento).toBe(TipoPagamento.PIX);
+      expect(options.requireGateway).toBe(true);
+    });
+
+    it('MANUAL passa adiante e dispensa o gateway', async () => {
+      mockVendasSena.create.mockResolvedValue({ data: { id: 'venda-1' } });
+
+      await service.criarVendaSena(
+        { ...baseSena, tipoPagamento: TipoPagamento.MANUAL } as never,
+        vendedor,
+      );
+
+      const [dtoEnviado, , options] = mockVendasSena.create.mock.calls[0] as [
+        Record<string, unknown>,
+        unknown,
+        Record<string, unknown>,
+      ];
+      // Antes o service sobrescrevia com PIX e forçava requireGateway.
+      expect(dtoEnviado.tipoPagamento).toBe(TipoPagamento.MANUAL);
+      expect(options.requireGateway).toBe(false);
+    });
+
+    it('CARTAO continua recusado no POS', async () => {
+      // `rejects`, e não `expect(() => ...).toThrow`: com a develop mesclada,
+      // `criarVendaSena` é async (resolve a maquininha), então a recusa chega
+      // como promise rejeitada mesmo a validação lançando antes do await.
+      await expect(
+        service.criarVendaSena(
+          { ...baseSena, tipoPagamento: TipoPagamento.CARTAO } as never,
+          vendedor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockVendasSena.create).not.toHaveBeenCalled();
+    });
+  });
 });

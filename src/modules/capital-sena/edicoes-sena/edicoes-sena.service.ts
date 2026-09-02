@@ -163,8 +163,12 @@ export class EdicoesSenaService {
     );
   }
 
-  // ─── FIND ALL SIMPLES ──────────────────────────────────
-
+  /**
+   * Listagem enxuta para popular seletor de edição Sena.
+   *
+   * Espelha o `findAllSimples` de Prêmios: o painel usa a mesma tela de
+   * relatório e de ranking para os dois produtos, alternando só o path.
+   */
   async findAllSimples() {
     const data = await this.prisma.edicaoSena.findMany({
       select: {

@@ -343,6 +343,10 @@ export class PosService {
 
   async criarVendaSena(dto: CreatePosVendaSenaDto, user: RequestUser) {
     this.validarDadosPagamento(dto.tipoPagamento);
+    const tipoPagamento = dto.tipoPagamento ?? TipoPagamento.PIX;
+    // `maquininhaId` sai do dto de propósito: é campo do canal POS e não
+    // existe no CreateVendaSenaDto compartilhado com admin e loja. Por isso o
+    // spread abaixo é de `dadosVenda`, nunca de `dto`.
     const { maquininhaId: maquininhaSolicitada, ...dadosVenda } = dto;
     const maquininhaId = await this.resolverMaquininha(
       maquininhaSolicitada,
@@ -350,12 +354,13 @@ export class PosService {
     );
     const vendaDto: CreateVendaSenaDto = {
       ...dadosVenda,
-      tipoPagamento: TipoPagamento.PIX,
+      tipoPagamento,
     };
     aplicarVinculoDoToken(vendaDto, user);
     return this.vendasSenaService.create(vendaDto, user, {
       origemParticipacao: OrigemParticipacao.POS,
-      requireGateway: true,
+      // MANUAL nasce aprovado e não passa pelo gateway, igual ao Prêmios.
+      requireGateway: tipoPagamento === TipoPagamento.PIX,
       maquininhaId,
     });
   }

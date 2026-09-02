@@ -22,6 +22,7 @@ import {
   normalizePagination,
 } from '../../../common/utils/pagination.util';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
+import { CreditosMaquininhaService } from '../../maquininhas/creditos-maquininha.service';
 import { CreateVendaSenaDto } from './dto/create-venda-sena.dto';
 import { FiltroVendasSenaDto } from './dto/filtro-vendas-sena.dto';
 import type { RequestUser } from '../../auth/strategies/jwt.strategy';
@@ -104,6 +105,7 @@ export class VendasSenaService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentGatewayFactory: PaymentGatewayFactory,
+    private readonly creditosMaquininhaService: CreditosMaquininhaService,
   ) {}
 
   // ─── CREATE ────────────────────────────────────────────
@@ -245,7 +247,11 @@ export class VendasSenaService {
         : (dto.distribuidorId ?? null);
 
     // 7. Calcular total
-    const tipoPagamento = this.resolverTipoPagamento(dto.tipoPagamento, user);
+    const tipoPagamento = this.resolverTipoPagamento(
+      dto.tipoPagamento,
+      user,
+      options,
+    );
     const origemParticipacao =
       options?.origemParticipacao ?? OrigemParticipacao.DIGITAL;
 
@@ -275,6 +281,17 @@ export class VendasSenaService {
             maquininhaId: options?.maquininhaId ?? null,
           },
         });
+        // Débito do crédito da maquininha na MESMA transação da venda:
+        // crédito insuficiente derruba tudo e a venda não nasce.
+        if (options?.maquininhaId) {
+          await this.creditosMaquininhaService.debitarVenda(tx, {
+            maquininhaId: options.maquininhaId,
+            vendaSenaId: venda.id,
+            valor: venda.total,
+            criadoPorId: user?.id ?? null,
+          });
+        }
+
         const cartelasGeradas = await this.criarCartelasRecebidas(
           tx,
           venda.id,
@@ -590,6 +607,18 @@ export class VendasSenaService {
           data: { saldo: { decrement: venda.comissaoSena.valor } },
         });
         await tx.comissaoSena.delete({ where: { id: venda.comissaoSena.id } });
+      }
+
+      // Devolver o crédito consumido na maquininha. O gatilho é o razão: só
+      // estorna se existe um CONSUMO desta venda ainda sem ESTORNO.
+      if (venda.maquininhaId) {
+        await this.creditosMaquininhaService.estornarVenda(tx, {
+          maquininhaId: venda.maquininhaId,
+          vendaSenaId: venda.id,
+          motivo: motivo
+            ? `Cancelamento da venda: ${motivo}`
+            : 'Estorno por cancelamento da venda',
+        });
       }
 
       // Cancelar no gateway
@@ -987,11 +1016,32 @@ export class VendasSenaService {
     );
   }
 
+  /**
+   * MANUAL cria a venda já APROVADA, sem passar pelo gateway — então quem
+   * pode usá-lo precisa ser restrito.
+   *
+   * Sem esta guarda, `POST /capital-sena/comprar`, que é rota pública e sem
+   * autenticação, aceitava `tipoPagamento: MANUAL` do corpo e emitia cartela
+   * aprovada sem nenhum pagamento. O fluxo de Prêmios já barrava assim; a Sena
+   * não.
+   */
   private resolverTipoPagamento(
     tipo: TipoPagamento,
     user?: RequestUser,
+    options?: CreateVendaSenaOptions,
   ): TipoPagamento {
     if (user?.perfil === 'ADMIN') return TipoPagamento.MANUAL;
+
+    if (tipo === TipoPagamento.MANUAL) {
+      if (options?.origemParticipacao === OrigemParticipacao.POS) {
+        return TipoPagamento.MANUAL;
+      }
+
+      throw new BadRequestException(
+        'tipoPagamento MANUAL é permitido apenas para venda direta do ADMIN ou no canal POS',
+      );
+    }
+
     return tipo;
   }
 

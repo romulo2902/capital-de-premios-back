@@ -2,15 +2,23 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import {
   ModoSelecaoSena,
+  OrigemParticipacao,
   Prisma,
   StatusEdicaoSena,
   StatusVendaSena,
+  TipoPagamento,
 } from '@prisma/client';
 import { VendasSenaService } from './vendas-sena.service';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CreditosMaquininhaService } from '../../maquininhas/creditos-maquininha.service';
 import { PaymentGatewayFactory } from '../../pagamentos/gateways/payment-gateway.factory';
 
 type ServicePrivado = VendasSenaService & {
+  resolverTipoPagamento(
+    tipo: TipoPagamento,
+    user?: { perfil: string },
+    options?: { origemParticipacao?: OrigemParticipacao },
+  ): TipoPagamento;
   validarNumerosDaVenda(
     itens: {
       numeros: number[];
@@ -93,6 +101,11 @@ describe('VendasSenaService', () => {
 
   const mockPaymentGatewayFactory = { getGateway: jest.fn() };
 
+  const mockCreditosMaquininhaService = {
+    debitarVenda: jest.fn(),
+    estornarVenda: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -104,12 +117,57 @@ describe('VendasSenaService', () => {
           provide: PaymentGatewayFactory,
           useValue: mockPaymentGatewayFactory,
         },
+        {
+          provide: CreditosMaquininhaService,
+          useValue: mockCreditosMaquininhaService,
+        },
       ],
     }).compile();
 
     service = module.get<VendasSenaService>(
       VendasSenaService,
     ) as ServicePrivado;
+  });
+
+  // ─── resolverTipoPagamento ───────────────────────────────
+
+  describe('resolverTipoPagamento', () => {
+    it('recusa MANUAL sem usuário e sem origem POS', () => {
+      // Este é o caminho da loja pública: POST /capital-sena/comprar não tem
+      // autenticação e chama o service sem user e sem options. Antes da
+      // guarda, o corpo pedia MANUAL e saía cartela APROVADA sem pagamento.
+      expect(() =>
+        service.resolverTipoPagamento(TipoPagamento.MANUAL),
+      ).toThrow(BadRequestException);
+    });
+
+    it('recusa MANUAL para CLIENTE autenticado na loja', () => {
+      expect(() =>
+        service.resolverTipoPagamento(TipoPagamento.MANUAL, {
+          perfil: 'CLIENTE',
+        }),
+      ).toThrow(BadRequestException);
+    });
+
+    it('aceita MANUAL no canal POS', () => {
+      expect(
+        service.resolverTipoPagamento(TipoPagamento.MANUAL, undefined, {
+          origemParticipacao: OrigemParticipacao.POS,
+        }),
+      ).toBe(TipoPagamento.MANUAL);
+    });
+
+    it('ADMIN sempre resolve para MANUAL', () => {
+      expect(
+        service.resolverTipoPagamento(TipoPagamento.PIX, { perfil: 'ADMIN' }),
+      ).toBe(TipoPagamento.MANUAL);
+    });
+
+    it('PIX da loja pública segue passando', () => {
+      expect(service.resolverTipoPagamento(TipoPagamento.PIX)).toBe(
+        TipoPagamento.PIX,
+      );
+    });
   });
 
   // ─── validarNumerosDaVenda ───────────────────────────────
@@ -686,6 +744,69 @@ describe('VendasSenaService', () => {
           numeros: [{ numeros: [1, 2, 3, 4, 5, 6], bola_extra: 7 }],
         } as never),
       ).rejects.toThrow('Seller não encontrado');
+    });
+  });
+
+  // ─── crédito da maquininha ────────────────────────────────
+
+  describe('cancelar — crédito da maquininha', () => {
+    const txMock = {
+      cartelaSena: { deleteMany: jest.fn() },
+      vendedor: { update: jest.fn() },
+      comissaoSena: { delete: jest.fn() },
+      vendaSena: { update: jest.fn().mockResolvedValue({}) },
+    };
+
+    beforeEach(() => {
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
+    });
+
+    it('devolve o crédito consumido ao cancelar a venda Sena', async () => {
+      mockPrisma.vendaSena.findUnique.mockResolvedValue({
+        id: 'venda-sena-1',
+        status: StatusVendaSena.APROVADO,
+        tipoPagamento: TipoPagamento.MANUAL,
+        maquininhaId: 'maq-1',
+        gatewayId: null,
+        gatewayPayload: {},
+        vendedorId: 'vendedor-1',
+        cartelas: [],
+        comissaoSena: null,
+      });
+
+      await service.cancelar('venda-sena-1', 'cliente desistiu');
+
+      expect(mockCreditosMaquininhaService.estornarVenda).toHaveBeenCalledWith(
+        txMock,
+        {
+          maquininhaId: 'maq-1',
+          vendaSenaId: 'venda-sena-1',
+          motivo: 'Cancelamento da venda: cliente desistiu',
+        },
+      );
+    });
+
+    it('não chama o estorno quando a venda não passou por maquininha', async () => {
+      mockPrisma.vendaSena.findUnique.mockResolvedValue({
+        id: 'venda-sena-2',
+        status: StatusVendaSena.APROVADO,
+        tipoPagamento: TipoPagamento.PIX,
+        maquininhaId: null,
+        gatewayId: null,
+        gatewayPayload: {},
+        vendedorId: null,
+        cartelas: [],
+        comissaoSena: null,
+      });
+
+      await service.cancelar('venda-sena-2');
+
+      expect(
+        mockCreditosMaquininhaService.estornarVenda,
+      ).not.toHaveBeenCalled();
     });
   });
 });

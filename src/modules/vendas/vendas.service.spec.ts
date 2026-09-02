@@ -14,6 +14,7 @@ import {
 } from '@prisma/client';
 import { VendasService } from './vendas.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreditosMaquininhaService } from '../maquininhas/creditos-maquininha.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
 import { EmailService } from '../../common/email/email.service';
@@ -88,6 +89,13 @@ describe('VendasService', () => {
     },
   };
 
+  // Vendas em maquininha sem crédito controlado são o caso padrão das specs:
+  // o débito vira no-op e o teste não precisa modelar saldo.
+  const mockCreditosMaquininhaService = {
+    debitarVenda: jest.fn(),
+    estornarVenda: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -102,6 +110,10 @@ describe('VendasService', () => {
         },
         { provide: EmailService, useValue: mockEmailService },
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: CreditosMaquininhaService,
+          useValue: mockCreditosMaquininhaService,
+        },
       ],
     }).compile();
 
@@ -643,6 +655,9 @@ describe('VendasService', () => {
         }),
       );
       expect(result.data.status).toBe(StatusVenda.APROVADO);
+      // Venda direta do ADMIN força MANUAL mas nunca carrega aparelho — por
+      // construção, não existe crédito de maquininha a consumir aqui.
+      expect(mockCreditosMaquininhaService.debitarVenda).not.toHaveBeenCalled();
     });
 
     it('should keep manual admin sales as UMA_CHANCE when quantidadeCartelas matches quantidade', async () => {
@@ -952,6 +967,98 @@ describe('VendasService', () => {
       );
       expect(result.data.status).toBe(StatusVenda.APROVADO);
       expect(mockPaymentGatewayFactory.getGateway).not.toHaveBeenCalled();
+    });
+
+    it('debita o crédito da maquininha na mesma transação da venda MANUAL', async () => {
+      mockPrisma.edicao.findUnique.mockResolvedValue(edicaoAtiva);
+      mockPrisma.cliente.findUnique.mockResolvedValue(clienteMock);
+      const vendaManual = {
+        ...vendaCriada,
+        id: 'venda-maquininha',
+        status: StatusVenda.APROVADO,
+        tipoPagamento: TipoPagamento.MANUAL,
+        origemParticipacao: OrigemParticipacao.POS,
+        maquininhaId: 'maq-1',
+        // `quantidade: 1` casa com o único range mockado abaixo. Com a
+        // quantidade 2 do fixture, a alocação de bilhetes pede mais range do
+        // que o mock entrega e a busca não termina.
+        quantidade: 1,
+        vendedorId: 'vendedor-1',
+        distribuidorId: 'distribuidor-1',
+        total: new Prisma.Decimal('60.00'),
+        gatewayPayload: null,
+        vendedor: { id: 'vendedor-1', distribuidorId: 'distribuidor-1' },
+        edicao: { id: 'edicao-1' },
+      };
+      const txMock = {
+        venda: {
+          create: jest.fn().mockResolvedValue(vendaManual),
+          update: jest.fn().mockResolvedValue({
+            ...vendaManual,
+            bilhetes: [],
+          }),
+        },
+        edicao: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ combos: edicaoAtiva.combos }),
+        },
+        matrizRange: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: 'matriz-1',
+              numero: BigInt(1000000),
+              sequenciaBolas: [1, 2, 3, 4, 5, 6],
+            },
+          ]),
+        },
+        bilhete: { createMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        distribuidor: { findUnique: jest.fn(), update: jest.fn() },
+        comissaoDistribuidor: { create: jest.fn() },
+        cliente: { update: jest.fn().mockResolvedValue(undefined) },
+        comissao: { create: jest.fn().mockResolvedValue(undefined) },
+        vendedor: { update: jest.fn() },
+      };
+      mockPrisma.$transaction.mockImplementation(async (callback) =>
+        callback(txMock as never),
+      );
+      mockPrisma.venda.findUnique.mockResolvedValue(vendaManual);
+      mockPrisma.vendedor.findUnique.mockResolvedValue({
+        id: 'vendedor-1',
+        distribuidorId: 'distribuidor-1',
+      });
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'distribuidor-1',
+      });
+
+      await service.create(
+        { ...createDto, tipoPagamento: TipoPagamento.MANUAL },
+        {
+          id: 'usuario-vendedor',
+          email: 'vend@test.com',
+          cpf: '12345678900',
+          perfil: 'VENDEDOR',
+          status: 'ATIVO',
+          vendedorId: 'vendedor-1',
+          distribuidorId: 'distribuidor-1',
+        },
+        {
+          origemParticipacao: OrigemParticipacao.POS,
+          maquininhaId: 'maq-1',
+        },
+      );
+
+      // O `tx` repassado é o MESMO da venda: se o débito falhar, a venda não
+      // nasce, e se a venda falhar, o crédito não fica consumido.
+      expect(mockCreditosMaquininhaService.debitarVenda).toHaveBeenCalledWith(
+        txMock,
+        {
+          maquininhaId: 'maq-1',
+          vendaId: 'venda-maquininha',
+          valor: new Prisma.Decimal('60.00'),
+          criadoPorId: 'usuario-vendedor',
+        },
+      );
     });
 
     it('should use combo price and persist combo cartela type when comboId is informed', async () => {
@@ -1892,6 +1999,54 @@ describe('VendasService', () => {
       expect(txMock.bilhete.deleteMany).toHaveBeenCalled();
       expect(txMock.comissao.delete).toHaveBeenCalled();
       expect(mockGateway.cancelarCobranca).toHaveBeenCalledWith('txid-123');
+      // Venda de outro canal, sem aparelho: nada de crédito a devolver.
+      expect(
+        mockCreditosMaquininhaService.estornarVenda,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('devolve o crédito da maquininha ao cancelar a venda', async () => {
+      const vendaNaMaquininha = {
+        id: 'venda-maquininha',
+        status: StatusVenda.APROVADO,
+        tipoPagamento: TipoPagamento.MANUAL,
+        maquininhaId: 'maq-1',
+        gatewayId: null,
+        gatewayPayload: {},
+        vendedorId: 'vendedor-1',
+        bilhetes: [],
+        comissao: null,
+        vendedor: { id: 'vendedor-1' },
+      };
+
+      mockPrisma.venda.findUnique
+        .mockResolvedValueOnce(vendaNaMaquininha)
+        .mockResolvedValueOnce({
+          ...vendaNaMaquininha,
+          status: StatusVenda.CANCELADO,
+        });
+
+      const txMock = {
+        bilhete: { deleteMany: jest.fn() },
+        vendedor: { update: jest.fn() },
+        comissao: { delete: jest.fn() },
+        venda: { update: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof txMock) => Promise<unknown>) =>
+          callback(txMock),
+      );
+
+      await service.cancelar('venda-maquininha', 'cliente desistiu');
+
+      expect(mockCreditosMaquininhaService.estornarVenda).toHaveBeenCalledWith(
+        txMock,
+        {
+          maquininhaId: 'maq-1',
+          vendaId: 'venda-maquininha',
+          motivo: 'Cancelamento da venda: cliente desistiu',
+        },
+      );
     });
   });
 
