@@ -341,6 +341,35 @@ export class MaquininhasService {
   }
 
   /**
+   * Consulta limite e saldo de crédito disponível do aparelho.
+   *
+   * Mesmo escopo de leitura do `garantirAcessoAoAparelho`: não exige status
+   * ATIVA, e 404 cobre tanto "não existe" quanto "não é do operador" — nunca
+   * 403, para não confirmar a existência de aparelho de outra rede/vendedor a
+   * quem chutar UUID.
+   */
+  async consultarLimite(maquininhaId: string, user: RequestUser) {
+    const maquininha = await this.prisma.maquininha.findFirst({
+      where: { ...this.buildEscopoDoOperador(user), id: maquininhaId },
+      select: {
+        id: true,
+        numeroSerie: true,
+        status: true,
+        limiteCredito: true,
+        saldoCredito: true,
+      },
+    });
+
+    if (!maquininha) {
+      throw new NotFoundException(
+        'Maquininha não encontrada ou não vinculada a este operador',
+      );
+    }
+
+    return { message: 'Limite consultado com sucesso', data: maquininha };
+  }
+
+  /**
    * Confirma que o aparelho está ao alcance do operador e devolve o id.
    *
    * Diferente do `garantirMaquininhaDoOperador`, não exige status ATIVA: é

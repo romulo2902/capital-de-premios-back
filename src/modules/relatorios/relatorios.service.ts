@@ -65,8 +65,32 @@ export class RelatoriosService {
 
     const vendas = await this.prisma.venda.findMany({
       where,
-      include: { cliente: true, vendedor: true },
+      include: {
+        cliente: true,
+        vendedor: true,
+        maquininha: { select: { numeroSerie: true } },
+      },
     });
+
+    const distribuidorIds = [
+      ...new Set(
+        vendas
+          .map((venda) => venda.distribuidorId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const distribuidores = distribuidorIds.length
+      ? await this.prisma.distribuidor.findMany({
+          where: { id: { in: distribuidorIds } },
+          select: { id: true, nome: true },
+        })
+      : [];
+    const nomeDistribuidorPorId = new Map(
+      distribuidores.map((distribuidor) => [
+        distribuidor.id,
+        distribuidor.nome,
+      ]),
+    );
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Capital de Prêmios';
@@ -79,10 +103,13 @@ export class RelatoriosService {
       { header: 'Cliente', key: 'cliente', width: 30 },
       { header: 'CPF', key: 'cpf', width: 15 },
       { header: 'Vendedor', key: 'vendedor', width: 25 },
+      { header: 'Distribuidor ID', key: 'distribuidorId', width: 38 },
+      { header: 'Distribuidor', key: 'distribuidor', width: 25 },
       { header: 'Qtd Cartelas', key: 'quantidade', width: 14 },
       { header: 'Total (R$)', key: 'total', width: 14 },
       { header: 'Status', key: 'status', width: 12 },
       { header: 'Pagamento', key: 'pagamento', width: 12 },
+      { header: 'Nº Série Maquininha', key: 'maquininha', width: 22 },
     ];
 
     // Header style
@@ -101,6 +128,10 @@ export class RelatoriosService {
         cliente: venda.cliente.nome,
         cpf: venda.cliente.cpf,
         vendedor: venda.vendedor?.nome ?? '-',
+        distribuidorId: venda.distribuidorId ?? '-',
+        distribuidor: venda.distribuidorId
+          ? (nomeDistribuidorPorId.get(venda.distribuidorId) ?? '-')
+          : '-',
         quantidade: calcularQuantidadeCartelasDaVenda({
           quantidade: venda.quantidade,
           tipoCartela: venda.tipoCartela as TipoCartela | null,
@@ -108,6 +139,7 @@ export class RelatoriosService {
         total: Number(venda.total).toFixed(2),
         status: venda.status,
         pagamento: venda.tipoPagamento,
+        maquininha: venda.maquininha?.numeroSerie ?? '-',
       });
     }
 
@@ -143,9 +175,30 @@ export class RelatoriosService {
         cliente: true,
         vendedor: { select: { nome: true } },
         edicaoSena: { select: { numero: true } },
+        maquininha: { select: { numeroSerie: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    const distribuidorIds = [
+      ...new Set(
+        vendas
+          .map((venda) => venda.distribuidorId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const distribuidores = distribuidorIds.length
+      ? await this.prisma.distribuidor.findMany({
+          where: { id: { in: distribuidorIds } },
+          select: { id: true, nome: true },
+        })
+      : [];
+    const nomeDistribuidorPorId = new Map(
+      distribuidores.map((distribuidor) => [
+        distribuidor.id,
+        distribuidor.nome,
+      ]),
+    );
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Capital de Prêmios';
@@ -160,11 +213,14 @@ export class RelatoriosService {
       { header: 'CPF', key: 'cpf', width: 18 },
       { header: 'Telefone', key: 'telefone', width: 18 },
       { header: 'Vendedor', key: 'vendedor', width: 26 },
+      { header: 'Distribuidor ID', key: 'distribuidorId', width: 38 },
+      { header: 'Distribuidor', key: 'distribuidor', width: 25 },
       { header: 'Qtd Cartelas', key: 'quantidade', width: 14 },
       { header: 'Total (R$)', key: 'total', width: 14 },
       { header: 'Status', key: 'status', width: 14 },
       { header: 'Pagamento', key: 'pagamento', width: 14 },
       { header: 'Onde Comprou', key: 'ondeComprou', width: 16 },
+      { header: 'Nº Série Maquininha', key: 'maquininha', width: 22 },
     ];
 
     sheet.getRow(1).fill = {
@@ -189,11 +245,16 @@ export class RelatoriosService {
         cpf: this.valorPlanilhaTexto(this.formatarCpf(venda.cliente.cpf)),
         telefone: this.valorPlanilhaTexto(venda.cliente.telefone),
         vendedor: venda.vendedor?.nome ?? '-',
+        distribuidorId: venda.distribuidorId ?? '-',
+        distribuidor: venda.distribuidorId
+          ? (nomeDistribuidorPorId.get(venda.distribuidorId) ?? '-')
+          : '-',
         quantidade: venda.quantidade,
         total: Number(venda.total).toFixed(2),
         status: venda.status,
         pagamento: venda.tipoPagamento,
         ondeComprou: this.resolverOndeComprouGanhadorSena(venda),
+        maquininha: venda.maquininha?.numeroSerie ?? '-',
       });
     }
 
