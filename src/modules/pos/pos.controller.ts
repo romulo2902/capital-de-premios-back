@@ -1488,6 +1488,66 @@ quando o saldo não cobre o total.
     return this.maquininhasService.validarPorNumeroSerie(dto.numeroSerie, user);
   }
 
+  @Get('maquininhas/:id/limite')
+  @UseGuards(PosAuthGuard, RolesGuard)
+  @Roles('DISTRIBUIDOR', 'VENDEDOR')
+  @ApiBearerAuth()
+  @ApiTags(POS_MAQUININHAS_TAG)
+  @ApiOperation({
+    summary:
+      '16.2. 🔒 Consultar limite disponível da maquininha pelo ID (VENDEDOR + DISTRIBUIDOR)',
+    description: `
+Retorna \`limiteCredito\` (teto concedido pelo ADMIN) e \`saldoCredito\` (o que
+ainda dá para vender no MANUAL) do aparelho.
+
+O recorte sai do token, igual às demais rotas de maquininha: **DISTRIBUIDOR**
+alcança qualquer aparelho da própria rede, **VENDEDOR** só o que está
+atribuído a ele. Fora do alcance ou inexistente responde **404**, nunca 403,
+para não confirmar a existência de aparelho de outra rede/vendedor a quem
+chutar UUID.
+
+Não exige aparelho **ATIVA**: é rota de consulta, então um aparelho inativado
+continua consultável (só não vende no MANUAL).
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID da maquininha (obtido em GET /pos/maquininhas ou /pos/maquininhas/validar)',
+    example: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Limite consultado.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Limite consultado com sucesso',
+        data: {
+          id: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+          numeroSerie: '8012345678',
+          status: 'ATIVA',
+          limiteCredito: '5000.00',
+          saldoCredito: '1230.50',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Operador sem vínculo válido de rede.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada ou não vinculada a este operador.',
+  })
+  consultarLimiteMaquininha(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.maquininhasService.consultarLimite(id, user);
+  }
+
   @Patch('maquininhas/:id')
   @UseGuards(PosAuthGuard, RolesGuard)
   @Roles('DISTRIBUIDOR')
