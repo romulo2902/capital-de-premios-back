@@ -20,6 +20,7 @@ import {
   formatarDataHora as formatarDataHoraUtil,
   formatarNumeroAleatorio as formatarNumeroAleatorioUtil,
   formatarPercentual as formatarPercentualUtil,
+  formatarValorMonetario as formatarValorMonetarioUtil,
   parseDataRelatorio as parseDataRelatorioUtil,
   resolverNumeroAleatorioCliente as resolverNumeroAleatorioClienteUtil,
   valorPlanilha as valorPlanilhaUtil,
@@ -51,12 +52,18 @@ export class RelatoriosService {
 
   async exportarVendasXlsx(
     res: Response,
-    filtros: { dataInicio?: string; dataFim?: string; edicaoId?: string },
+    filtros: {
+      dataInicio?: string;
+      dataFim?: string;
+      edicaoId?: string;
+      status?: StatusVenda;
+    },
   ): Promise<void> {
     this.logger.log('Gerando relatório XLSX de vendas');
 
     const where: Record<string, unknown> = {};
     if (filtros.edicaoId) where.edicaoId = filtros.edicaoId;
+    if (filtros.status) where.status = filtros.status;
     this.aplicarFiltroPeriodoCadastro(
       where,
       filtros.dataInicio,
@@ -136,7 +143,7 @@ export class RelatoriosService {
           quantidade: venda.quantidade,
           tipoCartela: venda.tipoCartela as TipoCartela | null,
         }),
-        total: Number(venda.total).toFixed(2),
+        total: formatarValorMonetarioUtil(venda.total),
         status: venda.status,
         pagamento: venda.tipoPagamento,
         maquininha: venda.maquininha?.numeroSerie ?? '-',
@@ -157,12 +164,18 @@ export class RelatoriosService {
 
   async exportarVendasSenaXlsx(
     res: Response,
-    filtros: { dataInicio?: string; dataFim?: string; edicaoSenaId?: string },
+    filtros: {
+      dataInicio?: string;
+      dataFim?: string;
+      edicaoSenaId?: string;
+      status?: StatusVendaSena;
+    },
   ): Promise<void> {
     this.logger.log('Gerando relatório XLSX de vendas Sena');
 
     const where: Record<string, unknown> = {};
     if (filtros.edicaoSenaId) where.edicaoSenaId = filtros.edicaoSenaId;
+    if (filtros.status) where.status = filtros.status;
     this.aplicarFiltroPeriodoCadastro(
       where,
       filtros.dataInicio,
@@ -229,12 +242,7 @@ export class RelatoriosService {
       fgColor: { argb: 'FF2E4057' },
     };
     sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    this.aplicarFormatoTextoColunas(sheet, [
-      'id',
-      'edicao',
-      'cpf',
-      'telefone',
-    ]);
+    this.aplicarFormatoTextoColunas(sheet, ['id', 'edicao', 'cpf', 'telefone']);
 
     for (const venda of vendas) {
       sheet.addRow({
@@ -250,7 +258,7 @@ export class RelatoriosService {
           ? (nomeDistribuidorPorId.get(venda.distribuidorId) ?? '-')
           : '-',
         quantidade: venda.quantidade,
-        total: Number(venda.total).toFixed(2),
+        total: formatarValorMonetarioUtil(venda.total),
         status: venda.status,
         pagamento: venda.tipoPagamento,
         ondeComprou: this.resolverOndeComprouGanhadorSena(venda),
@@ -318,7 +326,7 @@ export class RelatoriosService {
       }
       doc.text(comissao.vendedor.nome, 50, y);
       doc.text(comissao.vendaId.slice(0, 12) + '...', 200, y);
-      doc.text(`R$ ${Number(comissao.valor).toFixed(2)}`, 340, y);
+      doc.text(`R$ ${formatarValorMonetarioUtil(comissao.valor)}`, 340, y);
       doc.text(comissao.status, 440, y);
       y += 20;
     }
@@ -855,8 +863,19 @@ export class RelatoriosService {
     };
   }
 
-  async exportarRelatorioCDP(res: Response, edicaoId: string): Promise<void> {
-    this.logger.log(`Gerando relatório CDP para edição ${edicaoId}`);
+  /**
+   * `status` ausente significa "todos", igual aos XLSX — a regra e uma so nos
+   * quatro relatorios de venda. Quem quer o arquivo do parceiro pede
+   * APROVADO explicitamente, que e o que o painel manda por padrao no TXT.
+   */
+  async exportarRelatorioCDP(
+    res: Response,
+    edicaoId: string,
+    status?: StatusVenda,
+  ): Promise<void> {
+    this.logger.log(
+      `Gerando relatório CDP para edição ${edicaoId} (status ${status ?? 'todos'})`,
+    );
 
     const edicao = await this.prisma.edicao.findUniqueOrThrow({
       where: { id: edicaoId },
@@ -866,7 +885,7 @@ export class RelatoriosService {
     const bilhetes = await this.prisma.bilhete.findMany({
       where: {
         edicaoId,
-        venda: { status: StatusVenda.APROVADO },
+        ...(status ? { venda: { status } } : {}),
       },
       include: {
         venda: {
@@ -921,7 +940,11 @@ export class RelatoriosService {
 
     const ranges = [...edicao.combos]
       .sort((a, b) =>
-        a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0,
+        a.rangeInicio < b.rangeInicio
+          ? -1
+          : a.rangeInicio > b.rangeInicio
+            ? 1
+            : 0,
       )
       .map((c) => ({ inicio: c.rangeInicio, fim: c.rangeFinal }));
     const rangesStr = ranges
@@ -940,13 +963,17 @@ export class RelatoriosService {
     res.send(conteudo);
   }
 
+  /** Mesma regra do CDP: sem `status`, o arquivo sai com todos os status. */
   async exportarRelatorioSena(
     res: Response,
     edicaoSenaId: string,
     dataInicio?: string,
     dataFim?: string,
+    status?: StatusVendaSena,
   ): Promise<void> {
-    this.logger.log(`Gerando relatório Sena para edição ${edicaoSenaId}`);
+    this.logger.log(
+      `Gerando relatório Sena para edição ${edicaoSenaId} (status ${status ?? 'todos'})`,
+    );
 
     const edicao = await this.prisma.edicaoSena.findUniqueOrThrow({
       where: { id: edicaoSenaId },
@@ -956,7 +983,7 @@ export class RelatoriosService {
     const cartelas = await this.prisma.cartelaSena.findMany({
       where: {
         edicaoSenaId,
-        vendaSena: { status: StatusVendaSena.APROVADO },
+        ...(status ? { vendaSena: { status } } : {}),
       },
       include: {
         vendaSena: {
@@ -966,10 +993,7 @@ export class RelatoriosService {
           },
         },
       },
-      orderBy: [
-        { vendaSena: { createdAt: 'asc' } },
-        { createdAt: 'asc' },
-      ],
+      orderBy: [{ vendaSena: { createdAt: 'asc' } }, { createdAt: 'asc' }],
     });
 
     const hoje = new Date();

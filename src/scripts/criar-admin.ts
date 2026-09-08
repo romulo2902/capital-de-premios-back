@@ -92,8 +92,9 @@ function perguntarSenha(rotulo: string): Promise<string> {
         process.stdout.write(texto);
       }
     };
-    (rl as unknown as { _writeToOutput: (texto: string) => void })
-      ._writeToOutput = escrever;
+    (
+      rl as unknown as { _writeToOutput: (texto: string) => void }
+    )._writeToOutput = escrever;
 
     rl.question(rotulo, (resposta) => {
       rl.close();
@@ -105,7 +106,9 @@ function perguntarSenha(rotulo: string): Promise<string> {
 
 async function resolverSenha(senhaArgumento?: string): Promise<string> {
   const senha =
-    senhaArgumento ?? process.env.ADMIN_SENHA ?? (await perguntarSenha('Senha: '));
+    senhaArgumento ??
+    process.env.ADMIN_SENHA ??
+    (await perguntarSenha('Senha: '));
 
   if (senha.length < SENHA_MINIMA) {
     throw new Error(`A senha precisa ter ao menos ${SENHA_MINIMA} caracteres`);

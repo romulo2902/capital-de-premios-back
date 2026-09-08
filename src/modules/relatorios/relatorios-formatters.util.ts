@@ -64,6 +64,30 @@ export function formatarPercentual(value: number): string {
   return `${percentual}%`;
 }
 
+/**
+ * Valor monetario no padrao brasileiro: `1.234,56`.
+ *
+ * A celula da planilha ja era texto antes disso (`toFixed(2)` devolve string),
+ * entao trocar o separador nao tira soma nenhuma do Excel — nunca houve.
+ *
+ * Nao serve para os TXT de CDP e Sena: aquele layout e lido pelo parceiro e
+ * espera ponto.
+ *
+ * Recebe `unknown` porque os campos de dinheiro chegam como `Decimal` do
+ * Prisma, nao como number — mesmo motivo de `formatarValorRelatorioSena`.
+ */
+export function formatarValorMonetario(value: unknown): string {
+  const valor = Number(value);
+  if (!Number.isFinite(valor)) {
+    return '';
+  }
+
+  return valor.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 export function formatarCpf(cpf: string): string {
   return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
 }
