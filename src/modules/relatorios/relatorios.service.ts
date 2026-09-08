@@ -241,12 +241,7 @@ export class RelatoriosService {
       fgColor: { argb: 'FF2E4057' },
     };
     sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    this.aplicarFormatoTextoColunas(sheet, [
-      'id',
-      'edicao',
-      'cpf',
-      'telefone',
-    ]);
+    this.aplicarFormatoTextoColunas(sheet, ['id', 'edicao', 'cpf', 'telefone']);
 
     for (const venda of vendas) {
       sheet.addRow({
@@ -867,8 +862,19 @@ export class RelatoriosService {
     };
   }
 
-  async exportarRelatorioCDP(res: Response, edicaoId: string): Promise<void> {
-    this.logger.log(`Gerando relatório CDP para edição ${edicaoId}`);
+  /**
+   * O `status` e opcional e cai em APROVADO quando ausente — o arquivo e a
+   * prestacao de contas do parceiro, entao quem ja consome o endpoint sem o
+   * parametro continua recebendo exatamente o que recebia.
+   */
+  async exportarRelatorioCDP(
+    res: Response,
+    edicaoId: string,
+    status: StatusVenda = StatusVenda.APROVADO,
+  ): Promise<void> {
+    this.logger.log(
+      `Gerando relatório CDP para edição ${edicaoId} (status ${status})`,
+    );
 
     const edicao = await this.prisma.edicao.findUniqueOrThrow({
       where: { id: edicaoId },
@@ -878,7 +884,7 @@ export class RelatoriosService {
     const bilhetes = await this.prisma.bilhete.findMany({
       where: {
         edicaoId,
-        venda: { status: StatusVenda.APROVADO },
+        venda: { status },
       },
       include: {
         venda: {
@@ -933,7 +939,11 @@ export class RelatoriosService {
 
     const ranges = [...edicao.combos]
       .sort((a, b) =>
-        a.rangeInicio < b.rangeInicio ? -1 : a.rangeInicio > b.rangeInicio ? 1 : 0,
+        a.rangeInicio < b.rangeInicio
+          ? -1
+          : a.rangeInicio > b.rangeInicio
+            ? 1
+            : 0,
       )
       .map((c) => ({ inicio: c.rangeInicio, fim: c.rangeFinal }));
     const rangesStr = ranges
@@ -952,13 +962,17 @@ export class RelatoriosService {
     res.send(conteudo);
   }
 
+  /** Mesma regra do CDP: sem `status`, o arquivo sai com as APROVADAS. */
   async exportarRelatorioSena(
     res: Response,
     edicaoSenaId: string,
     dataInicio?: string,
     dataFim?: string,
+    status: StatusVendaSena = StatusVendaSena.APROVADO,
   ): Promise<void> {
-    this.logger.log(`Gerando relatório Sena para edição ${edicaoSenaId}`);
+    this.logger.log(
+      `Gerando relatório Sena para edição ${edicaoSenaId} (status ${status})`,
+    );
 
     const edicao = await this.prisma.edicaoSena.findUniqueOrThrow({
       where: { id: edicaoSenaId },
@@ -968,7 +982,7 @@ export class RelatoriosService {
     const cartelas = await this.prisma.cartelaSena.findMany({
       where: {
         edicaoSenaId,
-        vendaSena: { status: StatusVendaSena.APROVADO },
+        vendaSena: { status },
       },
       include: {
         vendaSena: {
@@ -978,10 +992,7 @@ export class RelatoriosService {
           },
         },
       },
-      orderBy: [
-        { vendaSena: { createdAt: 'asc' } },
-        { createdAt: 'asc' },
-      ],
+      orderBy: [{ vendaSena: { createdAt: 'asc' } }, { createdAt: 'asc' }],
     });
 
     const hoje = new Date();

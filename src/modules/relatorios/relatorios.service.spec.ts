@@ -990,5 +990,81 @@ describe('RelatoriosService', () => {
         }),
       );
     });
+    // Os TXT sao a prestacao de contas do parceiro: quem chama sem `status`
+    // precisa continuar recebendo o que recebia antes do filtro existir.
+    it('mantém APROVADO como padrão do TXT do CDP quando o status é omitido', async () => {
+      mockPrisma.edicao.findUniqueOrThrow.mockResolvedValue({
+        numero: 10,
+        dataSorteio: new Date('2026-06-09T12:00:00Z'),
+        combos: [],
+      });
+      mockPrisma.bilhete.findMany.mockResolvedValue([]);
+
+      const res = { setHeader: jest.fn(), send: jest.fn() };
+
+      await service.exportarRelatorioCDP(res as never, 'edicao-1');
+
+      expect(mockPrisma.bilhete.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            edicaoId: 'edicao-1',
+            venda: { status: StatusVenda.APROVADO },
+          },
+        }),
+      );
+    });
+
+    it('aplica o status informado no TXT do CDP', async () => {
+      mockPrisma.edicao.findUniqueOrThrow.mockResolvedValue({
+        numero: 10,
+        dataSorteio: new Date('2026-06-09T12:00:00Z'),
+        combos: [],
+      });
+      mockPrisma.bilhete.findMany.mockResolvedValue([]);
+
+      const res = { setHeader: jest.fn(), send: jest.fn() };
+
+      await service.exportarRelatorioCDP(
+        res as never,
+        'edicao-1',
+        StatusVenda.CANCELADO,
+      );
+
+      expect(mockPrisma.bilhete.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            edicaoId: 'edicao-1',
+            venda: { status: StatusVenda.CANCELADO },
+          },
+        }),
+      );
+    });
+
+    it('aplica o status informado no TXT do Sena', async () => {
+      mockPrisma.edicaoSena.findUniqueOrThrow.mockResolvedValue({
+        numero: '12',
+        valorCartela: 10,
+      });
+      mockPrisma.cartelaSena.findMany.mockResolvedValue([]);
+
+      const res = { setHeader: jest.fn(), send: jest.fn() };
+
+      await service.exportarRelatorioSena(
+        res as never,
+        'edicao-sena-1',
+        undefined,
+        undefined,
+        StatusVendaSena.PENDENTE,
+      );
+
+      expect(mockPrisma.cartelaSena.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            edicaoSenaId: 'edicao-sena-1',
+            vendaSena: { status: StatusVendaSena.PENDENTE },
+          },
+        }),
+      );
+    });
   });
 });

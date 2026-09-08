@@ -15,6 +15,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { RelatoriosService } from './relatorios.service';
 import { FiltroRelatorioVendasDto } from './dto/filtro-relatorio-vendas.dto';
 import { FiltroRelatorioVendasSenaDto } from './dto/filtro-relatorio-vendas-sena.dto';
+import { FiltroRelatorioVendasCdpDto } from './dto/filtro-relatorio-vendas-cdp.dto';
+import { FiltroRelatorioVendasSenaTxtDto } from './dto/filtro-relatorio-vendas-sena-txt.dto';
 
 @ApiTags('Admin / Relatórios - Vendas')
 @ApiBearerAuth()
@@ -76,11 +78,22 @@ export class RelatoriosVendasController {
     required: true,
     description: 'ID da edição',
   })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: StatusVenda,
+    description:
+      'Filtra por status da venda. Sem ele, o arquivo sai com as APROVADAS.',
+  })
   async exportarCDP(
     @Res() res: Response,
-    @Query('edicaoId') edicaoId: string,
+    @Query() filtros: FiltroRelatorioVendasCdpDto,
   ) {
-    return this.relatoriosService.exportarRelatorioCDP(res, edicaoId);
+    return this.relatoriosService.exportarRelatorioCDP(
+      res,
+      filtros.edicaoId,
+      filtros.status,
+    );
   }
 
   @Get('sena')
@@ -109,7 +122,8 @@ export class RelatoriosVendasController {
   @ApiQuery({
     name: 'dataInicio',
     required: false,
-    description: 'Data início do período no cabeçalho (YYYY-MM-DD). Padrão: hoje.',
+    description:
+      'Data início do período no cabeçalho (YYYY-MM-DD). Padrão: hoje.',
     example: '2026-06-09',
   })
   @ApiQuery({
@@ -118,17 +132,23 @@ export class RelatoriosVendasController {
     description: 'Data fim do período no cabeçalho (YYYY-MM-DD). Padrão: hoje.',
     example: '2026-06-09',
   })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: StatusVendaSena,
+    description:
+      'Filtra por status da venda. Sem ele, o arquivo sai com as APROVADAS.',
+  })
   async exportarSena(
     @Res() res: Response,
-    @Query('edicaoSenaId') edicaoSenaId: string,
-    @Query('dataInicio') dataInicio?: string,
-    @Query('dataFim') dataFim?: string,
+    @Query() filtros: FiltroRelatorioVendasSenaTxtDto,
   ) {
     return this.relatoriosService.exportarRelatorioSena(
       res,
-      edicaoSenaId,
-      dataInicio,
-      dataFim,
+      filtros.edicaoSenaId,
+      filtros.dataInicio,
+      filtros.dataFim,
+      filtros.status,
     );
   }
 

@@ -7,7 +7,9 @@ import { StatusVenda } from '@prisma/client';
  * Campo de filtro em branco no painel chega como `''` na query string. Sem
  * isso, limpar o campo passaria a devolver 400 em vez de "sem filtro".
  */
-export const parseCampoOpcionalVazio = ({ value }: TransformFnParams): unknown =>
+export const parseCampoOpcionalVazio = ({
+  value,
+}: TransformFnParams): unknown =>
   typeof value === 'string' && value.trim() === '' ? undefined : value;
 
 export class FiltroRelatorioVendasDto {
