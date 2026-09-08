@@ -31,6 +31,10 @@ import { LoginPosDto } from './dto/login-pos.dto';
 import { CreatePosVendaDto } from './dto/create-pos-venda.dto';
 import { CreatePosVendaSenaDto } from './dto/create-pos-venda-sena.dto';
 import { ReservarCartelasPosDto } from './dto/reservar-cartelas-pos.dto';
+import {
+  FiltroPosVendasMaquininhaDto,
+  TipoVendaPos,
+} from './dto/filtro-pos-vendas-maquininha.dto';
 import { CreatePosVendedorDto } from './dto/create-pos-vendedor.dto';
 import { FiltroPosVendedoresDto } from './dto/filtro-pos-vendedores.dto';
 import { MaquininhasService } from '../maquininhas/maquininhas.service';
@@ -1512,7 +1516,8 @@ continua consultável (só não vende no MANUAL).
   })
   @ApiParam({
     name: 'id',
-    description: 'ID da maquininha (obtido em GET /pos/maquininhas ou /pos/maquininhas/validar)',
+    description:
+      'ID da maquininha (obtido em GET /pos/maquininhas ou /pos/maquininhas/validar)',
     example: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
   })
   @ApiResponse({
@@ -1546,6 +1551,106 @@ continua consultável (só não vende no MANUAL).
     @CurrentUser() user: RequestUser,
   ) {
     return this.maquininhasService.consultarLimite(id, user);
+  }
+
+  @Get('maquininhas/:id/vendas')
+  @UseGuards(PosAuthGuard, RolesGuard)
+  @Roles('DISTRIBUIDOR', 'VENDEDOR')
+  @ApiBearerAuth()
+  @ApiTags(POS_MAQUININHAS_TAG)
+  @ApiOperation({
+    summary: '16.3. 🔒 Listar vendas da maquininha (VENDEDOR + DISTRIBUIDOR)',
+    description: `
+Histórico de vendas lançadas naquele aparelho, com **Capital de Prêmios e
+Capital Sena na mesma lista**, da mais recente para a mais antiga. Cada linha
+traz \`tipo\` (\`CDP\` ou \`SENA\`) para o terminal saber de qual produto é —
+e o filtro \`tipo\` restringe a um deles.
+
+O recorte sai do token, igual às demais rotas de maquininha: **DISTRIBUIDOR**
+alcança qualquer aparelho da própria rede, **VENDEDOR** só o que está
+atribuído a ele. Fora do alcance ou inexistente responde **404**, nunca 403,
+para não confirmar a existência de aparelho de outra rede a quem chutar UUID.
+
+Não exige aparelho **ATIVA**: o histórico de um aparelho tirado de operação
+continua consultável, igual ao extrato de crédito.
+
+\`quantidadeCartelas\` é o número de cartelas entregues, não de combos: um
+combo \`DUAS_CHANCES\` conta 2. \`total\` vem como string decimal.
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description:
+      'ID da maquininha (obtido em GET /pos/maquininhas ou /pos/maquininhas/validar)',
+    example: 'c3d4e5f6-a7b8-9012-cdef-345678901234',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'tipo',
+    required: false,
+    enum: TipoVendaPos,
+    description: 'Filtra por produto. Sem ele, a lista traz os dois.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PENDENTE', 'APROVADO', 'RECUSADO', 'CANCELADO'],
+    description: 'Filtra por status da venda.',
+  })
+  @ApiQuery({
+    name: 'dataInicio',
+    required: false,
+    type: String,
+    description: 'Início do período, em ISO 8601.',
+  })
+  @ApiQuery({
+    name: 'dataFim',
+    required: false,
+    type: String,
+    description: 'Fim do período, em ISO 8601.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Vendas listadas.',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Vendas da maquininha listadas com sucesso',
+        data: [
+          {
+            id: 'f1e2d3c4-b5a6-7890-fedc-ba9876543210',
+            tipo: 'CDP',
+            createdAt: '2026-09-08T14:12:00.000Z',
+            status: 'APROVADO',
+            statusLabel: 'Pagamento confirmado',
+            tipoPagamento: 'MANUAL',
+            total: '30',
+            quantidadeCartelas: 3,
+            cliente: { nome: 'Jair Rodrigues', cpf: '06790319107' },
+            vendedor: { id: 'a1b2c3d4-...', nome: 'Maria da Silva' },
+            edicao: { id: '6bee18cc-...', numero: 'teste-010' },
+          },
+        ],
+        meta: { total: 42, page: 1, limit: 20, lastPage: 3 },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Operador sem vínculo válido de rede.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Maquininha não encontrada ou não vinculada a este operador.',
+  })
+  listarVendasDaMaquininha(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() filtros: FiltroPosVendasMaquininhaDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.posService.listarVendasDaMaquininha(id, filtros, user);
   }
 
   @Patch('maquininhas/:id')
