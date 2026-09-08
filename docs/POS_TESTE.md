@@ -581,6 +581,20 @@ Mesma lógica do Capital de Prêmios — faça polling até `pago = true`.
 | 10 | `GET` | `/api/pos/capital-sena/edicoes` | Listar edições Sena ativas |
 | 11 | `POST` | `/api/pos/capital-sena/vendas` | Criar venda Sena + gerar PIX |
 | 12 | `GET` | `/api/pos/capital-sena/vendas/{id}/pagamento` | Polling de status Sena |
+| 13 | `POST` | `/api/pos/vendedores` | Cadastrar vendedor na própria rede (DISTRIBUIDOR) |
+| 14 | `GET` | `/api/pos/vendedores` | Listar vendedores da própria rede (DISTRIBUIDOR) |
+| 15 | `POST` | `/api/pos/maquininhas` | Cadastrar maquininha na própria rede (DISTRIBUIDOR) |
+| 16 | `GET` | `/api/pos/maquininhas` | Listar maquininhas do operador |
+| 16.1 | `GET` | `/api/pos/maquininhas/validar` | Traduzir número de série em `maquininhaId` |
+| 16.2 | `GET` | `/api/pos/maquininhas/{id}/limite` | Limite e saldo de crédito do aparelho |
+| 16.3 | `GET` | `/api/pos/maquininhas/{id}/vendas` | Histórico de vendas do aparelho (CDP + Sena) |
+| 17 | `PATCH` | `/api/pos/maquininhas/{id}` | Editar maquininha e trocar o vendedor (DISTRIBUIDOR) |
+| — | `GET` | `/api/pos/clientes/cpf/{cpf}` | Autofill do cliente no checkout |
+
+Rotas de vendedor e maquininha usam o recorte do token: **VENDEDOR** alcança só
+o próprio aparelho, **DISTRIBUIDOR** a rede inteira. Aparelho fora do alcance
+responde **404**, nunca 403 — responder diferente confirmaria a existência de
+aparelho de outra rede a quem chutasse UUID.
 
 ---
 
@@ -591,3 +605,4 @@ Mesma lógica do Capital de Prêmios — faça polling até `pago = true`.
 - O POS usa os **ranges e combos configurados como DIGITAL** — não há configuração específica por canal POS.
 - As reservas exigem **Redis configurado**. Sem Redis, o endpoint de reserva retorna 503. A criação de venda sem reserva prévia ainda funciona (cartelas avulsas ou compra rápida).
 - O cliente é criado via **upsert por CPF** no momento da venda — não é necessário cadastrá-lo antes.
+- `GET /api/pos/maquininhas/{id}/vendas` traz **Prêmios e Sena na mesma lista**, da mais recente para a mais antiga, cada linha com `tipo` (`CDP` ou `SENA`). Aceita `tipo`, `status`, `dataInicio`, `dataFim` e paginação. `quantidadeCartelas` conta cartelas entregues, não combos: um `DUAS_CHANCES` vale 2. Aparelho inativo continua consultável — tirar de operação não esconde o histórico.
