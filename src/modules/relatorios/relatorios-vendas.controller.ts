@@ -7,11 +7,14 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { StatusVenda, StatusVendaSena } from '@prisma/client';
 import type { Response } from 'express';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RelatoriosService } from './relatorios.service';
+import { FiltroRelatorioVendasDto } from './dto/filtro-relatorio-vendas.dto';
+import { FiltroRelatorioVendasSenaDto } from './dto/filtro-relatorio-vendas-sena.dto';
 
 @ApiTags('Admin / Relatórios - Vendas')
 @ApiBearerAuth()
@@ -22,7 +25,7 @@ export class RelatoriosVendasController {
   constructor(private readonly relatoriosService: RelatoriosService) {}
 
   @Get('xlsx')
-  @ApiOperation({ summary: 'Exportar relatório de vendas em XLSX' })
+  @ApiOperation({ summary: 'Exportar relatório de vendas em XLSX (ADMIN)' })
   @ApiQuery({
     name: 'dataInicio',
     required: false,
@@ -36,17 +39,18 @@ export class RelatoriosVendasController {
     example: '2026-03-31',
   })
   @ApiQuery({ name: 'edicaoId', required: false })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: StatusVenda,
+    description:
+      'Filtra por status da venda. Sem ele, a planilha traz todos os status.',
+  })
   async exportarXlsx(
     @Res() res: Response,
-    @Query('dataInicio') dataInicio?: string,
-    @Query('dataFim') dataFim?: string,
-    @Query('edicaoId') edicaoId?: string,
+    @Query() filtros: FiltroRelatorioVendasDto,
   ) {
-    return this.relatoriosService.exportarVendasXlsx(res, {
-      dataInicio,
-      dataFim,
-      edicaoId,
-    });
+    return this.relatoriosService.exportarVendasXlsx(res, filtros);
   }
 
   @Get('cdp')
@@ -152,17 +156,18 @@ export class RelatoriosVendasController {
     description: 'Use ISO, preferencialmente YYYY-MM-DD.',
     example: '2026-03-31',
   })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: StatusVendaSena,
+    description:
+      'Filtra por status da venda. Sem ele, a planilha traz todos os status.',
+  })
   async exportarSenaXlsx(
     @Res() res: Response,
-    @Query('edicaoSenaId') edicaoSenaId?: string,
-    @Query('dataInicio') dataInicio?: string,
-    @Query('dataFim') dataFim?: string,
+    @Query() filtros: FiltroRelatorioVendasSenaDto,
   ) {
-    return this.relatoriosService.exportarVendasSenaXlsx(res, {
-      edicaoSenaId,
-      dataInicio,
-      dataFim,
-    });
+    return this.relatoriosService.exportarVendasSenaXlsx(res, filtros);
   }
 
   @Get('sena/ganhadores')

@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common';
 import {
   OrigemParticipacao,
   StatusCartelaSena,
+  StatusVenda,
   StatusVendaSena,
   TipoPagamento,
 } from '@prisma/client';
@@ -768,11 +769,14 @@ describe('RelatoriosService', () => {
       'CPF',
       'Telefone',
       'Vendedor',
+      'Distribuidor ID',
+      'Distribuidor',
       'Qtd Cartelas',
       'Total (R$)',
       'Status',
       'Pagamento',
       'Onde Comprou',
+      'Nº Série Maquininha',
     ]);
     const [
       id,
@@ -782,11 +786,14 @@ describe('RelatoriosService', () => {
       cpf,
       telefone,
       vendedor,
+      distribuidorId,
+      distribuidor,
       quantidade,
       total,
       status,
       pagamento,
       ondeComprou,
+      maquininha,
     ] = linhas[1];
 
     expect(id).toBe('4e1d1b0e-0000-4000-8000-000000000001');
@@ -797,11 +804,15 @@ describe('RelatoriosService', () => {
     expect(cpf).toBe('067.903.191-07');
     expect(telefone).toBe('+5561999999999');
     expect(vendedor).toBe('Brunna costa');
+    // Venda sem rede e sem maquininha: as tres colunas novas viram traco.
+    expect(distribuidorId).toBe('-');
+    expect(distribuidor).toBe('-');
     expect(quantidade).toBe('3');
     expect(total).toBe('30.00');
     expect(status).toBe('APROVADO');
     expect(pagamento).toBe('PIX');
     expect(ondeComprou).toBe('POS');
+    expect(maquininha).toBe('-');
   });
 
   it('exporta ganhadores Sena em XLSX com uma linha por ganhador', async () => {
@@ -880,5 +891,104 @@ describe('RelatoriosService', () => {
       'POS',
       '-',
     ]);
+  });
+  describe('filtro de status nos relatórios de vendas', () => {
+    function vendaAprovada() {
+      return {
+        id: '7c2f0a1e-0000-4000-8000-000000000001',
+        quantidade: 2,
+        tipoCartela: null,
+        total: 20,
+        status: StatusVenda.APROVADO,
+        tipoPagamento: TipoPagamento.PIX,
+        distribuidorId: null,
+        createdAt: new Date('2026-03-10T13:45:00Z'),
+        cliente: { nome: 'Jair Rodrigues', cpf: '06790319107' },
+        vendedor: { nome: 'Brunna costa' },
+        maquininha: null,
+      };
+    }
+
+    it('repassa o status para o where das vendas CDP', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([vendaAprovada()]);
+      mockPrisma.distribuidor.findMany.mockResolvedValue([]);
+
+      const { res, finalizado } = criarResponseXlsx();
+
+      await service.exportarVendasXlsx(res as never, {
+        status: StatusVenda.APROVADO,
+      });
+      await finalizado;
+
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { status: StatusVenda.APROVADO } }),
+      );
+    });
+
+    // Sem status a planilha continua trazendo tudo: a chave nao pode entrar no
+    // where como `undefined`, senao o Prisma passa a filtrar por status nulo.
+    it('não filtra por status quando o parâmetro é omitido', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([vendaAprovada()]);
+      mockPrisma.distribuidor.findMany.mockResolvedValue([]);
+
+      const { res, finalizado } = criarResponseXlsx();
+
+      await service.exportarVendasXlsx(res as never, {
+        edicaoId: 'edicao-1',
+      });
+      await finalizado;
+
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { edicaoId: 'edicao-1' } }),
+      );
+    });
+
+    it('combina status, edição e período no where das vendas CDP', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([]);
+      mockPrisma.distribuidor.findMany.mockResolvedValue([]);
+
+      const { res, finalizado } = criarResponseXlsx();
+
+      await service.exportarVendasXlsx(res as never, {
+        edicaoId: 'edicao-1',
+        status: StatusVenda.CANCELADO,
+        dataInicio: '2026-03-01',
+        dataFim: '2026-03-31',
+      });
+      await finalizado;
+
+      const [{ where }] = mockPrisma.venda.findMany.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+
+      const createdAt = where.createdAt as { gte?: Date; lte?: Date };
+
+      expect(where.edicaoId).toBe('edicao-1');
+      expect(where.status).toBe(StatusVenda.CANCELADO);
+      expect(createdAt.gte).toBeInstanceOf(Date);
+      expect(createdAt.lte).toBeInstanceOf(Date);
+    });
+
+    it('repassa o status para o where das vendas Sena', async () => {
+      mockPrisma.vendaSena.findMany.mockResolvedValue([]);
+      mockPrisma.distribuidor.findMany.mockResolvedValue([]);
+
+      const { res, finalizado } = criarResponseXlsx();
+
+      await service.exportarVendasSenaXlsx(res as never, {
+        edicaoSenaId: 'edicao-sena-1',
+        status: StatusVendaSena.RECUSADO,
+      });
+      await finalizado;
+
+      expect(mockPrisma.vendaSena.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            edicaoSenaId: 'edicao-sena-1',
+            status: StatusVendaSena.RECUSADO,
+          },
+        }),
+      );
+    });
   });
 });

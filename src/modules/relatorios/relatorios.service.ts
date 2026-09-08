@@ -51,12 +51,18 @@ export class RelatoriosService {
 
   async exportarVendasXlsx(
     res: Response,
-    filtros: { dataInicio?: string; dataFim?: string; edicaoId?: string },
+    filtros: {
+      dataInicio?: string;
+      dataFim?: string;
+      edicaoId?: string;
+      status?: StatusVenda;
+    },
   ): Promise<void> {
     this.logger.log('Gerando relatório XLSX de vendas');
 
     const where: Record<string, unknown> = {};
     if (filtros.edicaoId) where.edicaoId = filtros.edicaoId;
+    if (filtros.status) where.status = filtros.status;
     this.aplicarFiltroPeriodoCadastro(
       where,
       filtros.dataInicio,
@@ -157,12 +163,18 @@ export class RelatoriosService {
 
   async exportarVendasSenaXlsx(
     res: Response,
-    filtros: { dataInicio?: string; dataFim?: string; edicaoSenaId?: string },
+    filtros: {
+      dataInicio?: string;
+      dataFim?: string;
+      edicaoSenaId?: string;
+      status?: StatusVendaSena;
+    },
   ): Promise<void> {
     this.logger.log('Gerando relatório XLSX de vendas Sena');
 
     const where: Record<string, unknown> = {};
     if (filtros.edicaoSenaId) where.edicaoSenaId = filtros.edicaoSenaId;
+    if (filtros.status) where.status = filtros.status;
     this.aplicarFiltroPeriodoCadastro(
       where,
       filtros.dataInicio,
