@@ -4,7 +4,12 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { OrigemParticipacao, StatusVenda, TipoPagamento } from '@prisma/client';
+import {
+  OrigemParticipacao,
+  StatusVenda,
+  StatusVendaSena,
+  TipoPagamento,
+} from '@prisma/client';
 import { PosService } from './pos.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VendasService } from '../vendas/vendas.service';
@@ -13,6 +18,7 @@ import { VendedoresService } from '../vendedores/vendedores.service';
 import { MaquininhasService } from '../maquininhas/maquininhas.service';
 import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.factory';
 import { RedisService } from '../../common/redis/redis.service';
+import { TipoVendaPos } from './dto/filtro-pos-vendas-maquininha.dto';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 describe('PosService', () => {
@@ -23,8 +29,18 @@ describe('PosService', () => {
     edicaoSena: { findMany: jest.fn() },
     cliente: { findFirst: jest.fn() },
     vendedor: { findUnique: jest.fn() },
-    venda: { findUnique: jest.fn(), update: jest.fn() },
-    vendaSena: { findUnique: jest.fn(), update: jest.fn() },
+    venda: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
+    vendaSena: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
   };
 
   const mockVendas = {
@@ -51,6 +67,7 @@ describe('PosService', () => {
 
   const mockMaquininhas = {
     garantirMaquininhaDoOperador: jest.fn(),
+    garantirAcessoAoAparelho: jest.fn(),
   };
 
   const mockRedisService = {
@@ -675,6 +692,152 @@ describe('PosService', () => {
         ),
       ).rejects.toThrow(BadRequestException);
       expect(mockVendasSena.create).not.toHaveBeenCalled();
+    });
+  });
+  describe('listarVendasDaMaquininha', () => {
+    const vendedor: RequestUser = {
+      id: 'user-9',
+      email: null,
+      cpf: '06790319107',
+      perfil: 'VENDEDOR',
+      status: 'ATIVO',
+      vendedorId: 'vend-1',
+    };
+
+    function vendaCdp(createdAt: string) {
+      return {
+        id: 'venda-cdp-1',
+        createdAt: new Date(createdAt),
+        status: StatusVenda.APROVADO,
+        tipoPagamento: TipoPagamento.MANUAL,
+        total: { toString: () => '30' },
+        quantidade: 3,
+        tipoCartela: null,
+        cliente: { nome: 'Jair Rodrigues', cpf: '06790319107' },
+        vendedor: { id: 'vend-1', nome: 'Maria da Silva' },
+        edicao: { id: 'edicao-1', numero: 'teste-010' },
+        _count: { bilhetes: 3 },
+      };
+    }
+
+    function vendaSena(createdAt: string) {
+      return {
+        id: 'venda-sena-1',
+        createdAt: new Date(createdAt),
+        status: StatusVendaSena.APROVADO,
+        tipoPagamento: TipoPagamento.PIX,
+        total: { toString: () => '10' },
+        quantidade: 1,
+        cliente: { nome: 'Ana Souza', cpf: '11122233344' },
+        vendedor: null,
+        edicaoSena: { id: 'edicao-sena-1', numero: '12' },
+      };
+    }
+
+    beforeEach(() => {
+      mockMaquininhas.garantirAcessoAoAparelho.mockResolvedValue('maq-1');
+      mockPrisma.venda.findMany.mockResolvedValue([]);
+      mockPrisma.venda.count.mockResolvedValue(0);
+      mockPrisma.vendaSena.findMany.mockResolvedValue([]);
+      mockPrisma.vendaSena.count.mockResolvedValue(0);
+    });
+
+    // O 404 de aparelho fora do escopo mora no `garantirAcessoAoAparelho`.
+    // Se a listagem consultasse as vendas antes dele, um vendedor descobriria
+    // o movimento do aparelho de outra rede chutando UUID.
+    it('valida o acesso ao aparelho antes de consultar vendas', async () => {
+      mockMaquininhas.garantirAcessoAoAparelho.mockRejectedValue(
+        new NotFoundException('Maquininha não encontrada'),
+      );
+
+      await expect(
+        service.listarVendasDaMaquininha('maq-alheia', {}, vendedor),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(mockPrisma.venda.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.vendaSena.findMany).not.toHaveBeenCalled();
+    });
+
+    it('mescla CDP e Sena numa lista só, da mais recente para a mais antiga', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([
+        vendaCdp('2026-09-08T10:00:00Z'),
+      ]);
+      mockPrisma.venda.count.mockResolvedValue(1);
+      mockPrisma.vendaSena.findMany.mockResolvedValue([
+        vendaSena('2026-09-08T15:00:00Z'),
+      ]);
+      mockPrisma.vendaSena.count.mockResolvedValue(1);
+
+      const resultado = await service.listarVendasDaMaquininha(
+        'maq-1',
+        {},
+        vendedor,
+      );
+
+      expect(resultado.data.map((linha) => linha.tipo)).toEqual([
+        'SENA',
+        'CDP',
+      ]);
+      expect(resultado.meta.total).toBe(2);
+      expect(resultado.data[1]).toMatchObject({
+        id: 'venda-cdp-1',
+        total: '30',
+        statusLabel: 'Pagamento confirmado',
+        edicao: { numero: 'teste-010' },
+      });
+    });
+
+    // `quantidade` na Venda e o numero de COMBOS. Devolver a coluna crua faria
+    // o terminal dizer "3 cartelas" numa venda que entregou 6.
+    it('reporta cartelas entregues, não combos', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([
+        { ...vendaCdp('2026-09-08T10:00:00Z'), _count: { bilhetes: 6 } },
+      ]);
+      mockPrisma.venda.count.mockResolvedValue(1);
+
+      const resultado = await service.listarVendasDaMaquininha(
+        'maq-1',
+        {},
+        vendedor,
+      );
+
+      expect(resultado.data[0].quantidadeCartelas).toBe(6);
+    });
+
+    it('não consulta o Sena quando o filtro pede só CDP', async () => {
+      await service.listarVendasDaMaquininha(
+        'maq-1',
+        { tipo: TipoVendaPos.CDP },
+        vendedor,
+      );
+
+      expect(mockPrisma.venda.findMany).toHaveBeenCalled();
+      expect(mockPrisma.vendaSena.findMany).not.toHaveBeenCalled();
+    });
+
+    it('aplica status e período no where dos dois produtos', async () => {
+      await service.listarVendasDaMaquininha(
+        'maq-1',
+        {
+          status: StatusVenda.CANCELADO,
+          dataInicio: '2026-09-01T00:00:00.000Z',
+          dataFim: '2026-09-30T23:59:59.999Z',
+        },
+        vendedor,
+      );
+
+      const whereEsperado = {
+        maquininhaId: 'maq-1',
+        status: StatusVenda.CANCELADO,
+        createdAt: { gte: expect.any(Date), lte: expect.any(Date) },
+      };
+
+      expect(mockPrisma.venda.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: whereEsperado }),
+      );
+      expect(mockPrisma.vendaSena.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: whereEsperado }),
+      );
     });
   });
 });

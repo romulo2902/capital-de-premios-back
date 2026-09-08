@@ -34,6 +34,30 @@ import { PaymentGatewayFactory } from '../pagamentos/gateways/payment-gateway.fa
 import { RedisService } from '../../common/redis/redis.service';
 import { obterQuantidadeCartelas } from '../edicoes/edicoes-range.util';
 import type { ReservarCartelasPosDto } from './dto/reservar-cartelas-pos.dto';
+import {
+  TipoVendaPos,
+  type FiltroPosVendasMaquininhaDto,
+} from './dto/filtro-pos-vendas-maquininha.dto';
+import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
+import {
+  buildPaginatedResponse,
+  normalizePagination,
+} from '../../common/utils/pagination.util';
+
+/** Uma linha do historico de vendas do aparelho, ja normalizada entre CDP e Sena. */
+export interface VendaDaMaquininha {
+  id: string;
+  tipo: TipoVendaPos;
+  createdAt: Date;
+  status: StatusVenda | StatusVendaSena;
+  statusLabel: string;
+  tipoPagamento: TipoPagamento;
+  total: string;
+  quantidadeCartelas: number;
+  cliente: { nome: string; cpf: string };
+  vendedor: { id: string; nome: string } | null;
+  edicao: { id: string; numero: string };
+}
 
 const POS_RESERVA_TTL_SEGUNDOS = 300;
 const POS_PRE_COMPRA_TTL_SEGUNDOS = 1800;
@@ -473,6 +497,172 @@ export class PosService {
    * Venda sem maquininha continua válida (PIX no terminal, por exemplo): só
    * quando o campo vem é que exigimos aparelho ATIVO e vinculado ao operador.
    */
+  /**
+   * Historico de vendas de uma maquininha, com CDP e Sena na mesma lista.
+   *
+   * O acesso ao aparelho e resolvido por `garantirAcessoAoAparelho`, que
+   * responde 404 tanto para aparelho inexistente quanto para aparelho de
+   * outra rede — VENDEDOR alcanca so o proprio, DISTRIBUIDOR a rede inteira.
+   * Nao ha checagem de dono da venda depois disso: toda venda daquele
+   * aparelho e, por construcao, da rede de quem pode ve-lo.
+   *
+   * Aparelho inativo ou sem vendas responde 200 com lista vazia. O historico
+   * de um aparelho tirado de operacao continua consultavel, igual ao extrato
+   * de credito.
+   */
+  async listarVendasDaMaquininha(
+    maquininhaId: string,
+    filtros: FiltroPosVendasMaquininhaDto,
+    user: RequestUser,
+  ) {
+    await this.maquininhasService.garantirAcessoAoAparelho(maquininhaId, user);
+
+    const pagination = normalizePagination(filtros.page, filtros.limit);
+    const periodo = this.buildPeriodoVendas(filtros);
+
+    const incluiCdp = filtros.tipo !== TipoVendaPos.SENA;
+    const incluiSena = filtros.tipo !== TipoVendaPos.CDP;
+
+    // Os dois produtos vivem em tabelas separadas e a lista sai ordenada por
+    // data, entao nao da para paginar no banco: `skip + limit` de cada lado
+    // garante que a fatia pedida esteja no material que veio, e o corte
+    // acontece depois da mesclagem.
+    const janela = pagination.skip + pagination.limit;
+
+    const [vendasCdp, totalCdp, vendasSena, totalSena] = await Promise.all([
+      incluiCdp
+        ? this.prisma.venda.findMany({
+            where: {
+              maquininhaId,
+              ...(filtros.status ? { status: filtros.status } : {}),
+              ...periodo,
+            },
+            take: janela,
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              createdAt: true,
+              status: true,
+              tipoPagamento: true,
+              total: true,
+              quantidade: true,
+              tipoCartela: true,
+              cliente: { select: { nome: true, cpf: true } },
+              vendedor: { select: { id: true, nome: true } },
+              edicao: { select: { id: true, numero: true } },
+              _count: { select: { bilhetes: true } },
+            },
+          })
+        : [],
+      incluiCdp
+        ? this.prisma.venda.count({
+            where: {
+              maquininhaId,
+              ...(filtros.status ? { status: filtros.status } : {}),
+              ...periodo,
+            },
+          })
+        : 0,
+      incluiSena
+        ? this.prisma.vendaSena.findMany({
+            where: {
+              maquininhaId,
+              ...(filtros.status
+                ? { status: filtros.status as unknown as StatusVendaSena }
+                : {}),
+              ...periodo,
+            },
+            take: janela,
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              createdAt: true,
+              status: true,
+              tipoPagamento: true,
+              total: true,
+              quantidade: true,
+              cliente: { select: { nome: true, cpf: true } },
+              vendedor: { select: { id: true, nome: true } },
+              edicaoSena: { select: { id: true, numero: true } },
+            },
+          })
+        : [],
+      incluiSena
+        ? this.prisma.vendaSena.count({
+            where: {
+              maquininhaId,
+              ...(filtros.status
+                ? { status: filtros.status as unknown as StatusVendaSena }
+                : {}),
+              ...periodo,
+            },
+          })
+        : 0,
+    ]);
+
+    const linhas: VendaDaMaquininha[] = [
+      ...vendasCdp.map((venda) => ({
+        id: venda.id,
+        tipo: TipoVendaPos.CDP,
+        createdAt: venda.createdAt,
+        status: venda.status,
+        statusLabel: this.statusVendaLabel(venda.status),
+        tipoPagamento: venda.tipoPagamento,
+        total: venda.total.toString(),
+        // `quantidade` e o numero de COMBOS, nao de cartelas: um combo
+        // DUAS_CHANCES vale 2. Mostrar a coluna crua faria o terminal dizer
+        // "2 cartelas" numa venda que entregou 4.
+        quantidadeCartelas: calcularQuantidadeCartelasDaVenda({
+          quantidade: venda.quantidade,
+          tipoCartela: venda.tipoCartela,
+          quantidadeBilhetes: venda._count.bilhetes || null,
+        }),
+        cliente: venda.cliente,
+        vendedor: venda.vendedor,
+        edicao: venda.edicao,
+      })),
+      ...vendasSena.map((venda) => ({
+        id: venda.id,
+        tipo: TipoVendaPos.SENA,
+        createdAt: venda.createdAt,
+        status: venda.status,
+        statusLabel: this.statusVendaSenaLabel(venda.status),
+        tipoPagamento: venda.tipoPagamento,
+        total: venda.total.toString(),
+        quantidadeCartelas: venda.quantidade,
+        cliente: venda.cliente,
+        vendedor: venda.vendedor,
+        edicao: venda.edicaoSena,
+      })),
+    ];
+
+    linhas.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    return buildPaginatedResponse(
+      linhas.slice(pagination.skip, pagination.skip + pagination.limit),
+      totalCdp + totalSena,
+      pagination.page,
+      pagination.limit,
+      {
+        successMessage: 'Vendas da maquininha listadas com sucesso',
+        emptyMessage: 'Nenhuma venda encontrada para esta maquininha',
+      },
+    );
+  }
+
+  private buildPeriodoVendas(filtros: FiltroPosVendasMaquininhaDto) {
+    if (!filtros.dataInicio && !filtros.dataFim) {
+      return {};
+    }
+
+    return {
+      createdAt: {
+        ...(filtros.dataInicio ? { gte: new Date(filtros.dataInicio) } : {}),
+        ...(filtros.dataFim ? { lte: new Date(filtros.dataFim) } : {}),
+      },
+    };
+  }
+
   private async resolverMaquininha(
     maquininhaId: string | undefined,
     tipoPagamento: TipoPagamento,
