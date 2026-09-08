@@ -20,6 +20,7 @@ import {
   formatarDataHora as formatarDataHoraUtil,
   formatarNumeroAleatorio as formatarNumeroAleatorioUtil,
   formatarPercentual as formatarPercentualUtil,
+  formatarValorMonetario as formatarValorMonetarioUtil,
   parseDataRelatorio as parseDataRelatorioUtil,
   resolverNumeroAleatorioCliente as resolverNumeroAleatorioClienteUtil,
   valorPlanilha as valorPlanilhaUtil,
@@ -142,7 +143,7 @@ export class RelatoriosService {
           quantidade: venda.quantidade,
           tipoCartela: venda.tipoCartela as TipoCartela | null,
         }),
-        total: Number(venda.total).toFixed(2),
+        total: formatarValorMonetarioUtil(venda.total),
         status: venda.status,
         pagamento: venda.tipoPagamento,
         maquininha: venda.maquininha?.numeroSerie ?? '-',
@@ -257,7 +258,7 @@ export class RelatoriosService {
           ? (nomeDistribuidorPorId.get(venda.distribuidorId) ?? '-')
           : '-',
         quantidade: venda.quantidade,
-        total: Number(venda.total).toFixed(2),
+        total: formatarValorMonetarioUtil(venda.total),
         status: venda.status,
         pagamento: venda.tipoPagamento,
         ondeComprou: this.resolverOndeComprouGanhadorSena(venda),
@@ -325,7 +326,7 @@ export class RelatoriosService {
       }
       doc.text(comissao.vendedor.nome, 50, y);
       doc.text(comissao.vendaId.slice(0, 12) + '...', 200, y);
-      doc.text(`R$ ${Number(comissao.valor).toFixed(2)}`, 340, y);
+      doc.text(`R$ ${formatarValorMonetarioUtil(comissao.valor)}`, 340, y);
       doc.text(comissao.status, 440, y);
       y += 20;
     }

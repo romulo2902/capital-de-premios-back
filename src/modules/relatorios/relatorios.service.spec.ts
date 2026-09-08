@@ -807,7 +807,7 @@ describe('RelatoriosService', () => {
     expect(distribuidorId).toBe('-');
     expect(distribuidor).toBe('-');
     expect(quantidade).toBe('3');
-    expect(total).toBe('30.00');
+    expect(total).toBe('30,00');
     expect(status).toBe('APROVADO');
     expect(pagamento).toBe('PIX');
     expect(ondeComprou).toBe('POS');
@@ -1060,6 +1060,72 @@ describe('RelatoriosService', () => {
           },
         }),
       );
+    });
+  });
+  describe('formatação de valores monetários', () => {
+    it('usa vírgula decimal e ponto de milhar no XLSX de vendas', async () => {
+      mockPrisma.venda.findMany.mockResolvedValue([
+        {
+          id: '7c2f0a1e-0000-4000-8000-000000000002',
+          quantidade: 1,
+          tipoCartela: null,
+          total: 1234.5,
+          status: StatusVenda.APROVADO,
+          tipoPagamento: TipoPagamento.PIX,
+          distribuidorId: null,
+          createdAt: new Date('2026-03-10T13:45:00Z'),
+          cliente: { nome: 'Jair Rodrigues', cpf: '06790319107' },
+          vendedor: null,
+          maquininha: null,
+        },
+      ]);
+      mockPrisma.distribuidor.findMany.mockResolvedValue([]);
+
+      const { res, finalizado } = criarResponseXlsx();
+
+      await service.exportarVendasXlsx(res as never, {});
+
+      const sheet = await lerPlanilha(await finalizado);
+      const linhas = linhasDaPlanilha(sheet);
+
+      // Coluna 10 e o Total (R$).
+      expect(linhas[1][8]).toBe('1.234,50');
+    });
+
+    // O TXT do CDP e lido pelo parceiro e espera ponto: a formatacao pt-BR
+    // vale so para as planilhas e o PDF, que sao lidos por gente.
+    it('mantém o ponto decimal no TXT do CDP', async () => {
+      mockPrisma.edicao.findUniqueOrThrow.mockResolvedValue({
+        numero: 10,
+        dataSorteio: new Date('2026-06-09T12:00:00Z'),
+        combos: [],
+      });
+      mockPrisma.bilhete.findMany.mockResolvedValue([
+        {
+          numero: 980000,
+          venda: {
+            origemParticipacao: OrigemParticipacao.POS,
+            gatewayPayload: null,
+            quantidade: 1,
+            total: '15.00',
+            cliente: {
+              cpf: '6790319107',
+              nome: 'Jair Rodrigues',
+              telefone: '9292837492874',
+              cep: '1234567',
+              estado: 'GO',
+              cidade: 'Goiânia',
+              email: 'jair@gmail.com',
+            },
+          },
+        },
+      ]);
+
+      const res = { setHeader: jest.fn(), send: jest.fn() };
+
+      await service.exportarRelatorioCDP(res as never, 'edicao-1');
+
+      expect(res.send).toHaveBeenCalledWith(expect.stringContaining(';15.00;'));
     });
   });
 });
