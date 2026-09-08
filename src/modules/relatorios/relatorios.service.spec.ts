@@ -443,7 +443,6 @@ describe('RelatoriosService', () => {
       expect.objectContaining({
         where: {
           edicaoSenaId: 'edicao-sena-1',
-          vendaSena: { status: StatusVendaSena.APROVADO },
         },
       }),
     );
@@ -990,9 +989,10 @@ describe('RelatoriosService', () => {
         }),
       );
     });
-    // Os TXT sao a prestacao de contas do parceiro: quem chama sem `status`
-    // precisa continuar recebendo o que recebia antes do filtro existir.
-    it('mantém APROVADO como padrão do TXT do CDP quando o status é omitido', async () => {
+    // A regra e uma so nos quatro relatorios: sem `status`, vem tudo. A chave
+    // nao pode entrar no where como `undefined`, senao o Prisma passa a
+    // filtrar por venda de status nulo e o arquivo sai vazio.
+    it('não filtra por status no TXT do CDP quando o parâmetro é omitido', async () => {
       mockPrisma.edicao.findUniqueOrThrow.mockResolvedValue({
         numero: 10,
         dataSorteio: new Date('2026-06-09T12:00:00Z'),
@@ -1005,12 +1005,7 @@ describe('RelatoriosService', () => {
       await service.exportarRelatorioCDP(res as never, 'edicao-1');
 
       expect(mockPrisma.bilhete.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            edicaoId: 'edicao-1',
-            venda: { status: StatusVenda.APROVADO },
-          },
-        }),
+        expect.objectContaining({ where: { edicaoId: 'edicao-1' } }),
       );
     });
 

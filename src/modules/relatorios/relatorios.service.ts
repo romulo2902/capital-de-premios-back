@@ -863,17 +863,17 @@ export class RelatoriosService {
   }
 
   /**
-   * O `status` e opcional e cai em APROVADO quando ausente — o arquivo e a
-   * prestacao de contas do parceiro, entao quem ja consome o endpoint sem o
-   * parametro continua recebendo exatamente o que recebia.
+   * `status` ausente significa "todos", igual aos XLSX — a regra e uma so nos
+   * quatro relatorios de venda. Quem quer o arquivo do parceiro pede
+   * APROVADO explicitamente, que e o que o painel manda por padrao no TXT.
    */
   async exportarRelatorioCDP(
     res: Response,
     edicaoId: string,
-    status: StatusVenda = StatusVenda.APROVADO,
+    status?: StatusVenda,
   ): Promise<void> {
     this.logger.log(
-      `Gerando relatório CDP para edição ${edicaoId} (status ${status})`,
+      `Gerando relatório CDP para edição ${edicaoId} (status ${status ?? 'todos'})`,
     );
 
     const edicao = await this.prisma.edicao.findUniqueOrThrow({
@@ -884,7 +884,7 @@ export class RelatoriosService {
     const bilhetes = await this.prisma.bilhete.findMany({
       where: {
         edicaoId,
-        venda: { status },
+        ...(status ? { venda: { status } } : {}),
       },
       include: {
         venda: {
@@ -962,16 +962,16 @@ export class RelatoriosService {
     res.send(conteudo);
   }
 
-  /** Mesma regra do CDP: sem `status`, o arquivo sai com as APROVADAS. */
+  /** Mesma regra do CDP: sem `status`, o arquivo sai com todos os status. */
   async exportarRelatorioSena(
     res: Response,
     edicaoSenaId: string,
     dataInicio?: string,
     dataFim?: string,
-    status: StatusVendaSena = StatusVendaSena.APROVADO,
+    status?: StatusVendaSena,
   ): Promise<void> {
     this.logger.log(
-      `Gerando relatório Sena para edição ${edicaoSenaId} (status ${status})`,
+      `Gerando relatório Sena para edição ${edicaoSenaId} (status ${status ?? 'todos'})`,
     );
 
     const edicao = await this.prisma.edicaoSena.findUniqueOrThrow({
@@ -982,7 +982,7 @@ export class RelatoriosService {
     const cartelas = await this.prisma.cartelaSena.findMany({
       where: {
         edicaoSenaId,
-        vendaSena: { status },
+        ...(status ? { vendaSena: { status } } : {}),
       },
       include: {
         vendaSena: {
