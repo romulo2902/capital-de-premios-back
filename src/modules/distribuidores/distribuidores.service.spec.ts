@@ -33,8 +33,16 @@ describe('DistribuidoresService', () => {
     gerarQrcodeSenaDistribuidor: jest.fn().mockResolvedValue(undefined),
   };
 
+  // Responde por chave de proposito: um mock que devolve o mesmo valor para
+  // qualquer variavel deixaria passar a leitura da variavel errada, que e
+  // justamente o que o teste do link precisa travar.
   const mockConfig = {
-    get: jest.fn().mockReturnValue('http://localhost:3001'),
+    get: jest.fn((chave: string) =>
+      ({
+        FRONTEND_ADMIN_URL: 'http://localhost:3002',
+        FRONTEND_LOJA_URL: 'http://localhost:3001',
+      })[chave],
+    ),
   };
 
   beforeEach(async () => {
@@ -163,8 +171,10 @@ describe('DistribuidoresService', () => {
         where: { id: 'dist-1' },
         select: { id: true, nome: true, tokenCadastro: true },
       });
+      // O formulario mora no painel, nao na loja, e o painel roteia por hash:
+      // sem o `/#/` o link abre o dashboard em vez do formulario.
       expect(resultado.data.url).toBe(
-        'http://localhost:3001/cadastro-vendedor/tok-123',
+        'http://localhost:3002/#/cadastro-vendedor/tok-123',
       );
     });
 

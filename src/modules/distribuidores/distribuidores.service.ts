@@ -44,12 +44,21 @@ export class DistribuidoresService {
     return randomUUID();
   }
 
+  /**
+   * O formulario publico mora no painel, nao na loja: quem se cadastra ali vai
+   * usar o painel depois, e a pagina reaproveita os componentes de cadastro
+   * que ja existem. Por isso a base e `FRONTEND_ADMIN_URL`.
+   *
+   * O `/#/` nao e enfeite: o painel e Flutter web na estrategia de hash, entao
+   * a rota vive depois do `#`. Sem ele o servidor devolve o index, o app sobe
+   * em `#/home` e o link cai no login em vez do formulario.
+   */
   private montarLinkCadastro(token: string): string {
-    const base = (this.config.get<string>('FRONTEND_LOJA_URL') ?? '').replace(
+    const base = (this.config.get<string>('FRONTEND_ADMIN_URL') ?? '').replace(
       /\/+$/,
       '',
     );
-    return `${base}/cadastro-vendedor/${token}`;
+    return `${base}/#/cadastro-vendedor/${token}`;
   }
 
   /**
