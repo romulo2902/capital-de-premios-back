@@ -200,6 +200,9 @@ model Distribuidor {
   comissaoPercent           Decimal                    @default(0)
   saldo                     Decimal                    @default(0)
   link                      String?
+  /// Token do link publico de auto-cadastro de vendedor. Opaco e rotacionavel:
+  /// se o link vazar, o distribuidor gera outro e o antigo morre na hora.
+  tokenCadastro             String                     @unique @default(uuid())
   qrcode                    String?
   linkSena                  String?
   qrcodeSena                String?
@@ -240,6 +243,10 @@ model Vendedor {
   linkSena        String?
   qrcodeSena      String?
   status          StatusUsuario  @default(ATIVO)
+  /// Nulo enquanto o auto-cadastro espera aprovacao do distribuidor. Quem e
+  /// cadastrado pelo painel ou pelo POS ja nasce aprovado, entao `null` aqui
+  /// distingue "aguardando" de "inativado", que compartilham o mesmo status.
+  aprovadoEm      DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   distribuidor    Distribuidor   @relation(fields: [distribuidorId], references: [id])

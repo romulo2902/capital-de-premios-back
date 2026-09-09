@@ -14,6 +14,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -63,7 +64,26 @@ export class VendedoresController {
       filtros.search,
       filtros.distribuidorId,
       user,
+      filtros.pendentes,
     );
+  }
+
+  @Patch(':id/aprovar')
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({
+    summary:
+      'Aprovar auto-cadastro de vendedor (ADMIN + DISTRIBUIDOR da própria rede)',
+    description:
+      'Libera um vendedor que se cadastrou pelo link público. Ativa o vendedor ' +
+      'e o usuário na mesma transação e carimba `aprovadoEm`. Vendedor de outra ' +
+      'rede responde 404; vendedor já aprovado responde 409.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do vendedor pendente' })
+  aprovar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendedoresService.aprovar(id, user);
   }
 
   @Get('performance')

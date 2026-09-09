@@ -4,6 +4,8 @@ import { DistribuidoresService } from './distribuidores.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConflictException } from '@nestjs/common';
 import { QrcodeService } from '../qrcode/qrcode.service';
+import { ConfigService } from '@nestjs/config';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 describe('DistribuidoresService', () => {
   let service: DistribuidoresService;
@@ -31,10 +33,15 @@ describe('DistribuidoresService', () => {
     gerarQrcodeSenaDistribuidor: jest.fn().mockResolvedValue(undefined),
   };
 
+  const mockConfig = {
+    get: jest.fn().mockReturnValue('http://localhost:3001'),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) =>
-      callback(mockPrisma as typeof mockPrisma),
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => unknown) =>
+        callback(mockPrisma as typeof mockPrisma),
     );
 
     const module: TestingModule = await Test.createTestingModule({
@@ -42,6 +49,7 @@ describe('DistribuidoresService', () => {
         DistribuidoresService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: QrcodeService, useValue: mockQrcodeService },
+        { provide: ConfigService, useValue: mockConfig },
       ],
     }).compile();
 
@@ -101,19 +109,22 @@ describe('DistribuidoresService', () => {
     const usuarioCreatePayload = mockPrisma.usuario.create.mock.calls[0][0] as {
       data: { senhaHash: string };
     };
-    expect(await bcrypt.compare('033638', usuarioCreatePayload.data.senhaHash))
-      .toBe(true);
+    expect(
+      await bcrypt.compare('033638', usuarioCreatePayload.data.senhaHash),
+    ).toBe(true);
     expect(mockQrcodeService.gerarQrcodeDistribuidor).toHaveBeenCalledWith(
       'dist-1',
     );
-    expect(
-      mockQrcodeService.gerarQrcodeSenaDistribuidor,
-    ).toHaveBeenCalledWith('dist-1');
+    expect(mockQrcodeService.gerarQrcodeSenaDistribuidor).toHaveBeenCalledWith(
+      'dist-1',
+    );
   });
 
   it('create should reject cpf already present in usuario table', async () => {
     mockPrisma.distribuidor.findFirst.mockResolvedValue(null);
-    mockPrisma.usuario.findFirst.mockResolvedValueOnce({ id: 'usuario-existente' });
+    mockPrisma.usuario.findFirst.mockResolvedValueOnce({
+      id: 'usuario-existente',
+    });
 
     await expect(
       service.create({
@@ -123,5 +134,62 @@ describe('DistribuidoresService', () => {
         email: 'novo@email.com',
       }),
     ).rejects.toThrow(ConflictException);
+  });
+  describe('link público de auto-cadastro', () => {
+    const distribuidor: RequestUser = {
+      id: 'user-2',
+      email: null,
+      cpf: '98765432100',
+      perfil: 'DISTRIBUIDOR',
+      status: 'ATIVO',
+      distribuidorId: 'dist-1',
+    };
+
+    // O id vem do token. Se o parametro da query vencesse, um distribuidor
+    // leria — e rotacionaria — o link de qualquer outra rede.
+    it('ignora o distribuidorId da query quando quem pede é DISTRIBUIDOR', async () => {
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+        id: 'dist-1',
+        nome: 'Distribuidora Norte',
+        tokenCadastro: 'tok-123',
+      });
+
+      const resultado = await service.consultarLinkCadastro(
+        'dist-de-outra-rede',
+        distribuidor,
+      );
+
+      expect(mockPrisma.distribuidor.findUnique).toHaveBeenCalledWith({
+        where: { id: 'dist-1' },
+        select: { id: true, nome: true, tokenCadastro: true },
+      });
+      expect(resultado.data.url).toBe(
+        'http://localhost:3001/cadastro-vendedor/tok-123',
+      );
+    });
+
+    it('regenerar grava um token diferente do anterior', async () => {
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({ id: 'dist-1' });
+      mockPrisma.distribuidor.update.mockImplementation(
+        ({ data }: { data: { tokenCadastro: string } }) =>
+          Promise.resolve({
+            id: 'dist-1',
+            nome: 'Distribuidora Norte',
+            tokenCadastro: data.tokenCadastro,
+          }),
+      );
+
+      const resultado = await service.regenerarTokenCadastro(
+        undefined,
+        distribuidor,
+      );
+
+      const gravado = mockPrisma.distribuidor.update.mock.calls[0][0] as {
+        data: { tokenCadastro: string };
+      };
+      expect(gravado.data.tokenCadastro).not.toBe('tok-123');
+      expect(gravado.data.tokenCadastro).toHaveLength(36);
+      expect(resultado.data.token).toBe(gravado.data.tokenCadastro);
+    });
   });
 });

@@ -25,6 +25,8 @@ import { CreateDistribuidorDto } from './dto/create-distribuidor.dto';
 import { UpdateDistribuidorDto } from './dto/update-distribuidor.dto';
 import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
 import { FiltroDistribuidoresDto } from './dto/filtro-distribuidores.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @ApiTags('Admin / Distribuidores')
 @ApiBearerAuth()
@@ -71,6 +73,58 @@ export class DistribuidoresController {
       filtros.page,
       filtros.limit,
       filtros,
+    );
+  }
+
+  @Get('link-cadastro')
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({
+    summary:
+      'Consultar o link público de auto-cadastro de vendedor (ADMIN + DISTRIBUIDOR)',
+    description:
+      'Devolve o token e a URL pronta para o distribuidor divulgar. Quem abrir ' +
+      'o link preenche um formulário e entra como vendedor **pendente** da rede. ' +
+      'DISTRIBUIDOR sempre recebe o da própria rede — o `distribuidorId` da query ' +
+      'é descartado; ADMIN precisa informá-lo.',
+  })
+  @ApiQuery({
+    name: 'distribuidorId',
+    required: false,
+    type: String,
+    description: 'Obrigatório para ADMIN. Ignorado para DISTRIBUIDOR.',
+  })
+  consultarLinkCadastro(
+    @Query('distribuidorId') distribuidorId: string | undefined,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.distribuidoresService.consultarLinkCadastro(
+      distribuidorId,
+      user,
+    );
+  }
+
+  @Post('link-cadastro/regenerar')
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({
+    summary: 'Regenerar o link público de auto-cadastro (ADMIN + DISTRIBUIDOR)',
+    description:
+      'Gera um token novo e **derruba o anterior na hora** — é o jeito de ' +
+      'estancar um link que vazou ou que passou a receber cadastro falso. ' +
+      'Quem já foi cadastrado pelo link antigo não é afetado.',
+  })
+  @ApiQuery({
+    name: 'distribuidorId',
+    required: false,
+    type: String,
+    description: 'Obrigatório para ADMIN. Ignorado para DISTRIBUIDOR.',
+  })
+  regenerarLinkCadastro(
+    @Query('distribuidorId') distribuidorId: string | undefined,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.distribuidoresService.regenerarTokenCadastro(
+      distribuidorId,
+      user,
     );
   }
 

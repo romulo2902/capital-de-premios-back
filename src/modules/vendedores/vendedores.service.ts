@@ -12,6 +12,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { QrcodeService } from '../qrcode/qrcode.service';
 import { CreateVendedorDto } from './dto/create-vendedor.dto';
 import { UpdateVendedorDto } from './dto/update-vendedor.dto';
+import { AutoCadastroVendedorDto } from './dto/auto-cadastro-vendedor.dto';
 import { FiltroPerformanceDto } from './dto/filtro-performance.dto';
 import {
   buildPaginatedResponse,
@@ -158,6 +159,159 @@ export class VendedoresService {
     return distribuidorIdDto;
   }
 
+  /**
+   * Traduz o token do link publico na rede correspondente.
+   *
+   * Token invalido e distribuidor inativo respondem o mesmo 404: a rota e
+   * publica, e distinguir os dois deixaria qualquer pessoa varrer tokens
+   * atras de rede existente.
+   */
+  async buscarRedePorTokenDeCadastro(token: string) {
+    const distribuidor = await this.prisma.distribuidor.findFirst({
+      where: { tokenCadastro: token, status: StatusUsuario.ATIVO },
+      select: { id: true, nome: true },
+    });
+
+    if (!distribuidor) {
+      throw new NotFoundException('Link de cadastro inválido ou expirado');
+    }
+
+    return distribuidor;
+  }
+
+  /**
+   * Auto-cadastro pelo link publico do distribuidor.
+   *
+   * O vendedor nasce INATIVO com `aprovadoEm` nulo e nao entra no painel nem
+   * no POS ate o distribuidor aprovar — o link e publico, e sem essa trava
+   * qualquer pessoa com a URL criaria conta com acesso imediato a rede.
+   *
+   * A rede sai do token da URL, nunca do corpo: o DTO publico nem tem
+   * `distribuidorId`, e o `forbidNonWhitelisted` global recusa quem tentar
+   * enviar um.
+   */
+  async autoCadastrar(token: string, dto: AutoCadastroVendedorDto) {
+    const distribuidor = await this.buscarRedePorTokenDeCadastro(token);
+    const cpf = this.normalizarCpf(dto.cpf);
+    const email = this.normalizarEmail(dto.email);
+
+    await Promise.all([
+      this.validarCpfDisponivel(cpf),
+      this.validarEmailDisponivel(email),
+    ]);
+
+    const senhaHash = dto.senha
+      ? await bcrypt.hash(dto.senha, 10)
+      : await bcrypt.hash(this.gerarSenhaPadraoPorCpf(cpf), 10);
+
+    const vendedor = await this.prisma.$transaction(async (tx) => {
+      const usuario = await tx.usuario.create({
+        data: {
+          email,
+          cpf,
+          senhaHash,
+          perfil: Perfil.VENDEDOR,
+          deveRedefinirSenha: false,
+          // O login do painel valida `Usuario.status`, e o POS valida o status
+          // do vendedor. Os dois precisam nascer INATIVO, senao a aprovacao
+          // fica so na aparencia e o cadastro ja opera por um dos canais.
+          status: StatusUsuario.INATIVO,
+        },
+      });
+
+      return tx.vendedor.create({
+        data: {
+          usuarioId: usuario.id,
+          distribuidorId: distribuidor.id,
+          nome: dto.nome,
+          cpf,
+          nomeRecebedor: dto.nome,
+          telefone: dto.telefone,
+          email,
+          dataNascimento: dto.dataNascimento
+            ? new Date(dto.dataNascimento)
+            : undefined,
+          cep: dto.cep,
+          endereco: dto.endereco,
+          numero: dto.numero,
+          bairro: dto.bairro,
+          cidade: dto.cidade,
+          estado: dto.estado,
+          tipoChavePix: dto.tipoChavePix,
+          chavePix: dto.chavePix,
+          status: StatusUsuario.INATIVO,
+          aprovadoEm: null,
+        },
+        select: {
+          id: true,
+          codigo: true,
+          nome: true,
+          cpf: true,
+          email: true,
+          status: true,
+          aprovadoEm: true,
+          createdAt: true,
+        },
+      });
+    });
+
+    this.logger.log(
+      `Auto-cadastro de vendedor ${vendedor.codigo} na rede ${distribuidor.nome}`,
+    );
+
+    return {
+      message:
+        'Cadastro enviado. Ele será liberado assim que o distribuidor aprovar.',
+      data: { ...vendedor, distribuidor: distribuidor.nome },
+    };
+  }
+
+  /**
+   * Aprova um auto-cadastro pendente.
+   *
+   * Liga as duas tabelas na mesma transacao, pela mesma razao da inativacao:
+   * o login do painel valida `Usuario.status` e o POS valida o do vendedor.
+   * Mexer so numa deixaria o aprovado entrando por um canal e barrado no outro.
+   */
+  async aprovar(id: string, user?: RequestUser) {
+    const vendedor = await this.prisma.vendedor.findFirst({
+      where: { id, ...this.buildHierarchyWhere(user) },
+      select: { id: true, usuarioId: true, nome: true, aprovadoEm: true },
+    });
+
+    if (!vendedor) {
+      throw new NotFoundException('Vendedor não encontrado');
+    }
+
+    if (vendedor.aprovadoEm) {
+      throw new ConflictException('Este vendedor já foi aprovado');
+    }
+
+    const aprovado = await this.prisma.$transaction(async (tx) => {
+      await tx.usuario.update({
+        where: { id: vendedor.usuarioId },
+        data: { status: StatusUsuario.ATIVO },
+      });
+
+      return tx.vendedor.update({
+        where: { id: vendedor.id },
+        data: { status: StatusUsuario.ATIVO, aprovadoEm: new Date() },
+        select: {
+          id: true,
+          codigo: true,
+          nome: true,
+          email: true,
+          status: true,
+          aprovadoEm: true,
+        },
+      });
+    });
+
+    this.logger.log(`Vendedor ${aprovado.codigo} aprovado`);
+
+    return { message: 'Vendedor aprovado com sucesso', data: aprovado };
+  }
+
   async create(dto: CreateVendedorDto, user?: RequestUser) {
     const distribuidorIdAlvo = this.resolverDistribuidorAlvo(
       dto.distribuidorId,
@@ -181,65 +335,71 @@ export class VendedoresService {
       ? await bcrypt.hash(dto.senha, 10)
       : await bcrypt.hash(this.gerarSenhaPadraoPorCpf(cpf), 10);
 
-    return this.prisma.$transaction(async (tx) => {
-      const usuario = await tx.usuario.create({
-        data: {
-          email,
-          cpf,
-          senhaHash,
-          perfil: Perfil.VENDEDOR,
-          deveRedefinirSenha: false,
-          status: StatusUsuario.ATIVO,
-        },
-      });
+    return this.prisma
+      .$transaction(async (tx) => {
+        const usuario = await tx.usuario.create({
+          data: {
+            email,
+            cpf,
+            senhaHash,
+            perfil: Perfil.VENDEDOR,
+            deveRedefinirSenha: false,
+            status: StatusUsuario.ATIVO,
+          },
+        });
 
-      const vendedor = await tx.vendedor.create({
-        data: {
-          ...(dto.codigo ? { codigo: dto.codigo } : {}),
-          usuarioId: usuario.id,
-          distribuidorId: distribuidorIdAlvo,
-          nome: dto.nome,
-          cpf,
-          nomeRecebedor: dto.nomeRecebedor ?? dto.nome,
-          telefone: dto.telefone,
-          email,
-          dataNascimento: dto.dataNascimento
-            ? new Date(dto.dataNascimento)
-            : undefined,
-          cep: dto.cep,
-          endereco: dto.endereco,
-          numero: dto.numero,
-          bairro: dto.bairro,
-          cidade: dto.cidade,
-          estado: dto.estado,
-          tipoChavePix: dto.tipoChavePix,
-          chavePix: dto.chavePix,
-          comissaoPercent:
-            dto.comissaoPercent !== undefined
-              ? this.normalizarComissao(dto.comissaoPercent)
-              : 0,
-          link: dto.link,
-          status: StatusUsuario.ATIVO,
-        },
-      });
+        const vendedor = await tx.vendedor.create({
+          data: {
+            ...(dto.codigo ? { codigo: dto.codigo } : {}),
+            usuarioId: usuario.id,
+            distribuidorId: distribuidorIdAlvo,
+            nome: dto.nome,
+            cpf,
+            nomeRecebedor: dto.nomeRecebedor ?? dto.nome,
+            telefone: dto.telefone,
+            email,
+            dataNascimento: dto.dataNascimento
+              ? new Date(dto.dataNascimento)
+              : undefined,
+            cep: dto.cep,
+            endereco: dto.endereco,
+            numero: dto.numero,
+            bairro: dto.bairro,
+            cidade: dto.cidade,
+            estado: dto.estado,
+            tipoChavePix: dto.tipoChavePix,
+            chavePix: dto.chavePix,
+            comissaoPercent:
+              dto.comissaoPercent !== undefined
+                ? this.normalizarComissao(dto.comissaoPercent)
+                : 0,
+            link: dto.link,
+            status: StatusUsuario.ATIVO,
+            // Cadastro feito pelo painel ou pelo POS ja passou por gente da
+            // rede, entao nasce aprovado. Deixar nulo aqui o faria aparecer na
+            // fila de pendentes junto com os auto-cadastros.
+            aprovadoEm: new Date(),
+          },
+        });
 
-      this.logger.log(
-        `Vendedor criado: ${vendedor.nome} (${vendedor.codigo}) → dist ${distribuidor.codigo}`,
-      );
-      return vendedor;
-    }).then(async (vendedor) => {
-      try {
-        await Promise.all([
-          this.qrcodeService.gerarQrcodeVendedor(vendedor.id),
-          this.qrcodeService.gerarQrcodeSenaVendedor(vendedor.id),
-        ]);
-      } catch (err) {
-        this.logger.warn(
-          `Falha ao gerar QR Codes para vendedor ${vendedor.id}: ${(err as Error).message}`,
+        this.logger.log(
+          `Vendedor criado: ${vendedor.nome} (${vendedor.codigo}) → dist ${distribuidor.codigo}`,
         );
-      }
-      return vendedor;
-    });
+        return vendedor;
+      })
+      .then(async (vendedor) => {
+        try {
+          await Promise.all([
+            this.qrcodeService.gerarQrcodeVendedor(vendedor.id),
+            this.qrcodeService.gerarQrcodeSenaVendedor(vendedor.id),
+          ]);
+        } catch (err) {
+          this.logger.warn(
+            `Falha ao gerar QR Codes para vendedor ${vendedor.id}: ${(err as Error).message}`,
+          );
+        }
+        return vendedor;
+      });
   }
 
   async findAll(
@@ -248,19 +408,20 @@ export class VendedoresService {
     search?: string,
     distribuidorId?: string,
     user?: RequestUser,
+    pendentes?: boolean,
   ) {
     const pagination = normalizePagination(page, limit);
     const filtersWhere: Prisma.VendedorWhereInput = {};
 
     if (distribuidorId) filtersWhere.distribuidorId = distribuidorId;
+    // `aprovadoEm` nulo e o unico marcador de "aguardando": o status INATIVO
+    // sozinho nao serve, porque tambem cobre quem o distribuidor desligou.
+    if (pendentes) filtersWhere.aprovadoEm = null;
     if (search) {
       filtersWhere.OR = buildBuscaPorTexto(search);
     }
 
-    const where = this.mergeWhere(
-      filtersWhere,
-      this.buildHierarchyWhere(user),
-    );
+    const where = this.mergeWhere(filtersWhere, this.buildHierarchyWhere(user));
 
     const [data, total] = await Promise.all([
       this.prisma.vendedor.findMany({
