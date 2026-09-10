@@ -247,6 +247,10 @@ model Vendedor {
   /// cadastrado pelo painel ou pelo POS ja nasce aprovado, entao `null` aqui
   /// distingue "aguardando" de "inativado", que compartilham o mesmo status.
   aprovadoEm      DateTime?
+  /// Carimbo da recusa de um auto-cadastro. Sem ele, recusar era gravar o
+  /// INATIVO que o pendente ja tinha: o registro voltava para a fila igual a um
+  /// pedido novo. Preenchido implica nunca aprovado — os dois nunca convivem.
+  rejeitadoEm     DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   distribuidor    Distribuidor   @relation(fields: [distribuidorId], references: [id])

@@ -512,6 +512,163 @@ describe('VendedoresService', () => {
       expect(mockPrisma.usuario.update).not.toHaveBeenCalled();
     });
 
+    it('recusar carimba a rejeicao, senao o pendente volta para a fila', async () => {
+      // Pendente ja nasce INATIVO: sem o carimbo, o DELETE gravava o status que
+      // o registro ja tinha e ele reaparecia identico a um pedido novo.
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+        aprovadoEm: null,
+        rejeitadoEm: null,
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.remove('vend-1', distribuidor);
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.status).toBe('INATIVO');
+      expect(argumentos.data.rejeitadoEm).toBeInstanceOf(Date);
+    });
+
+    it('nao carimba rejeicao ao inativar quem ja tinha sido aprovado', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+        aprovadoEm: new Date('2026-01-10'),
+        rejeitadoEm: null,
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.remove('vend-1', distribuidor);
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.rejeitadoEm).toBeUndefined();
+    });
+
+    it('aprovar reverte uma recusa, que e o caminho de volta do engano', async () => {
+      // A linha recusada segura o CPF para sempre: sem esta rota, quem foi
+      // recusado por engano nao se recadastra nem e liberado.
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+        nome: 'Maria',
+        aprovadoEm: null,
+        rejeitadoEm: new Date('2026-02-01'),
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({
+        id: 'vend-1',
+        codigo: 7,
+      });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.aprovar('vend-1', distribuidor);
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.status).toBe('ATIVO');
+      expect(argumentos.data.aprovadoEm).toBeInstanceOf(Date);
+      expect(argumentos.data.rejeitadoEm).toBeNull();
+    });
+
+    it('recusar pelo PATCH carimba igual ao DELETE', async () => {
+      // Mesmo furo do remove(), por outra porta: sem o carimbo o pendente
+      // desligado pela tela de edicao voltava para a fila.
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+        aprovadoEm: null,
+        rejeitadoEm: null,
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.update(
+        'vend-1',
+        { status: 'INATIVO' } as never,
+        distribuidor,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.rejeitadoEm).toBeInstanceOf(Date);
+    });
+
+    it('inativar pelo PATCH quem ja operava nao vira recusa', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+        aprovadoEm: new Date('2026-01-10'),
+        rejeitadoEm: null,
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.update(
+        'vend-1',
+        { status: 'INATIVO' } as never,
+        distribuidor,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.rejeitadoEm).toBeUndefined();
+    });
+
+    it('ativar pelo PATCH generico vale como aprovacao', async () => {
+      // Sem o carimbo, o vendedor passava a operar e ficava na fila de
+      // pendentes para sempre, e um aprovar() posterior devolvia 200.
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+        aprovadoEm: null,
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.update(
+        'vend-1',
+        { status: 'ATIVO' } as never,
+        distribuidor,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.aprovadoEm).toBeInstanceOf(Date);
+      expect(argumentos.data.rejeitadoEm).toBeNull();
+    });
+
+    it('nao reescreve a data de aprovacao de quem ja estava aprovado', async () => {
+      const original = new Date('2026-01-10');
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-1',
+        usuarioId: 'usuario-1',
+        aprovadoEm: original,
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.update(
+        'vend-1',
+        { status: 'ATIVO' } as never,
+        distribuidor,
+      );
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.aprovadoEm).toBeUndefined();
+    });
+
     it('recusa aprovar duas vezes', async () => {
       mockPrisma.vendedor.findFirst.mockResolvedValue({
         id: 'vend-1',

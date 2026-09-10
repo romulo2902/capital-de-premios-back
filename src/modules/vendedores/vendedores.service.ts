@@ -276,7 +276,13 @@ export class VendedoresService {
   async aprovar(id: string, user?: RequestUser) {
     const vendedor = await this.prisma.vendedor.findFirst({
       where: { id, ...this.buildHierarchyWhere(user) },
-      select: { id: true, usuarioId: true, nome: true, aprovadoEm: true },
+      select: {
+        id: true,
+        usuarioId: true,
+        nome: true,
+        aprovadoEm: true,
+        rejeitadoEm: true,
+      },
     });
 
     if (!vendedor) {
@@ -287,6 +293,14 @@ export class VendedoresService {
       throw new ConflictException('Este vendedor já foi aprovado');
     }
 
+    // Recusado nao volta pela FILA — quem tira ele de la e o filtro de
+    // `pendentes`, nao um 409 aqui. Aprovar um recusado exige alcancar o id de
+    // proposito, e precisa funcionar: a linha recusada segura o CPF para
+    // sempre, entao um 409 aqui deixava quem foi recusado por engano sem
+    // caminho de volta — nao conseguia se recadastrar (o CPF ja existe) nem ser
+    // liberado pela rota que a documentacao manda usar.
+    const recuperandoRecusado = vendedor.rejeitadoEm !== null;
+
     const aprovado = await this.prisma.$transaction(async (tx) => {
       await tx.usuario.update({
         where: { id: vendedor.usuarioId },
@@ -295,7 +309,11 @@ export class VendedoresService {
 
       return tx.vendedor.update({
         where: { id: vendedor.id },
-        data: { status: StatusUsuario.ATIVO, aprovadoEm: new Date() },
+        data: {
+          status: StatusUsuario.ATIVO,
+          aprovadoEm: new Date(),
+          rejeitadoEm: null,
+        },
         select: {
           id: true,
           codigo: true,
@@ -303,13 +321,23 @@ export class VendedoresService {
           email: true,
           status: true,
           aprovadoEm: true,
+          rejeitadoEm: true,
         },
       });
     });
 
-    this.logger.log(`Vendedor ${aprovado.codigo} aprovado`);
+    this.logger.log(
+      recuperandoRecusado
+        ? `Vendedor ${aprovado.codigo} aprovado apos recusa anterior`
+        : `Vendedor ${aprovado.codigo} aprovado`,
+    );
 
-    return { message: 'Vendedor aprovado com sucesso', data: aprovado };
+    return {
+      message: recuperandoRecusado
+        ? 'Cadastro recusado anteriormente foi liberado com sucesso'
+        : 'Vendedor aprovado com sucesso',
+      data: aprovado,
+    };
   }
 
   async create(dto: CreateVendedorDto, user?: RequestUser) {
@@ -414,9 +442,13 @@ export class VendedoresService {
     const filtersWhere: Prisma.VendedorWhereInput = {};
 
     if (distribuidorId) filtersWhere.distribuidorId = distribuidorId;
-    // `aprovadoEm` nulo e o unico marcador de "aguardando": o status INATIVO
-    // sozinho nao serve, porque tambem cobre quem o distribuidor desligou.
-    if (pendentes) filtersWhere.aprovadoEm = null;
+    // "Aguardando" e a ausencia dos dois carimbos: o status INATIVO sozinho nao
+    // serve, porque tambem cobre quem o distribuidor desligou, e `aprovadoEm`
+    // sozinho deixaria o recusado voltando para a fila a cada abertura da tela.
+    if (pendentes) {
+      filtersWhere.aprovadoEm = null;
+      filtersWhere.rejeitadoEm = null;
+    }
     if (search) {
       filtersWhere.OR = buildBuscaPorTexto(search);
     }
@@ -475,7 +507,12 @@ export class VendedoresService {
     // diferente entregaria a existência do cadastro alheio a quem chutar UUID.
     const vendedorAtual = await this.prisma.vendedor.findFirst({
       where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
-      select: { id: true, usuarioId: true },
+      select: {
+        id: true,
+        usuarioId: true,
+        aprovadoEm: true,
+        rejeitadoEm: true,
+      },
     });
 
     if (!vendedorAtual) {
@@ -509,6 +546,26 @@ export class VendedoresService {
     if (dto.comissaoPercent !== undefined) {
       data.comissaoPercent = this.normalizarComissao(dto.comissaoPercent);
     }
+    // Ativar pelo PATCH generico vale como aprovacao: e o mesmo ato do
+    // `aprovar()`, feito pela tela de edicao em vez do botao. Sem o carimbo, o
+    // vendedor passava a operar e mesmo assim ficava na fila de pendentes para
+    // sempre, e um `aprovar()` posterior devolvia 200 em vez de 409.
+    if (dto.status === StatusUsuario.ATIVO && !vendedorAtual.aprovadoEm) {
+      data.aprovadoEm = new Date();
+      data.rejeitadoEm = null;
+    }
+    // E recusar pela tela de edicao vale o mesmo que recusar pelo DELETE. Sem
+    // esta metade, o pendente desligado pelo PATCH ficava sem carimbo nenhum e
+    // voltava para a fila — o mesmo furo que o `remove()` fechou, por outra
+    // porta. Para o pendente, o INATIVO do corpo nao muda nada por si so: ele
+    // ja nasce INATIVO, entao o que marca a decisao e o carimbo.
+    if (
+      dto.status === StatusUsuario.INATIVO &&
+      !vendedorAtual.aprovadoEm &&
+      !vendedorAtual.rejeitadoEm
+    ) {
+      data.rejeitadoEm = new Date();
+    }
 
     const usuarioData: Prisma.UsuarioUpdateInput = {};
     if (dto.cpf) usuarioData.cpf = this.normalizarCpf(dto.cpf);
@@ -540,6 +597,14 @@ export class VendedoresService {
     // de outra rede responde 404 antes de qualquer escrita.
     const vendedor = await this.findOne(id, user);
 
+    // Pendente ja nasce INATIVO, entao para ele inativar nao muda nada: o que
+    // marca a recusa e o carimbo. Sem ele, o cadastro recusado reaparecia na
+    // fila identico a um pedido novo e seguia aprovavel.
+    const recusa =
+      !vendedor.aprovadoEm && !vendedor.rejeitadoEm
+        ? { rejeitadoEm: new Date() }
+        : {};
+
     // As duas linhas caem juntas: o login do painel valida `Usuario.status`, e
     // inativar só o Vendedor deixaria o acesso de pé.
     return this.prisma.$transaction(async (tx) => {
@@ -550,7 +615,7 @@ export class VendedoresService {
 
       return tx.vendedor.update({
         where: { id },
-        data: { status: StatusUsuario.INATIVO },
+        data: { status: StatusUsuario.INATIVO, ...recusa },
       });
     });
   }
