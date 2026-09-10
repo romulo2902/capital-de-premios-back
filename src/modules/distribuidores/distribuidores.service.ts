@@ -93,8 +93,11 @@ export class DistribuidoresService {
     user: RequestUser,
   ) {
     const alvo = this.resolverDistribuidorDoLink(distribuidorId, user);
-    const distribuidor = await this.prisma.distribuidor.findUnique({
-      where: { id: alvo },
+    // Mesmo filtro da ponta publica (`buscarRedePorTokenDeCadastro`): rede
+    // inativa nao tem link para divulgar. Sem ele, o painel entregava uma URL
+    // bem formada que dava 404 em todo mundo que a abrisse, sem nenhum aviso.
+    const distribuidor = await this.prisma.distribuidor.findFirst({
+      where: { id: alvo, status: StatusUsuario.ATIVO },
       select: { id: true, nome: true, tokenCadastro: true },
     });
 
@@ -137,18 +140,26 @@ export class DistribuidoresService {
     const distribuidor = await this.prisma.distribuidor.update({
       where: { id: alvo },
       data: { tokenCadastro: token },
-      select: { id: true, nome: true, tokenCadastro: true },
+      select: { id: true, nome: true, tokenCadastro: true, status: true },
     });
 
     this.logger.log(`Token de cadastro regenerado para ${distribuidor.nome}`);
 
+    // A rotacao vale para rede inativa — queimar um token vazado nao depende de
+    // a rede estar operando, e bloquear a chamada tiraria a unica forma de
+    // fazer isso antes de uma reativacao. O que nao vale e devolver a URL: a
+    // rota publica filtra `status: ATIVO`, entao ela daria 404 em quem abrisse.
+    const ativo = distribuidor.status === StatusUsuario.ATIVO;
+
     return {
-      message: 'Link de cadastro regenerado. O link anterior deixou de valer.',
+      message: ativo
+        ? 'Link de cadastro regenerado. O link anterior deixou de valer.'
+        : 'Token regenerado e o anterior deixou de valer. A rede está inativa: o link só volta a funcionar quando ela for reativada.',
       data: {
         distribuidorId: distribuidor.id,
         nome: distribuidor.nome,
         token: distribuidor.tokenCadastro,
-        url: this.montarLinkCadastro(distribuidor.tokenCadastro),
+        url: ativo ? this.montarLinkCadastro(distribuidor.tokenCadastro) : null,
       },
     };
   }

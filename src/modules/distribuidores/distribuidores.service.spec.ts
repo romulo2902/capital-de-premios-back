@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { DistribuidoresService } from './distribuidores.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { QrcodeService } from '../qrcode/qrcode.service';
 import { ConfigService } from '@nestjs/config';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
@@ -156,7 +156,7 @@ describe('DistribuidoresService', () => {
     // O id vem do token. Se o parametro da query vencesse, um distribuidor
     // leria — e rotacionaria — o link de qualquer outra rede.
     it('ignora o distribuidorId da query quando quem pede é DISTRIBUIDOR', async () => {
-      mockPrisma.distribuidor.findUnique.mockResolvedValue({
+      mockPrisma.distribuidor.findFirst.mockResolvedValue({
         id: 'dist-1',
         nome: 'Distribuidora Norte',
         tokenCadastro: 'tok-123',
@@ -167,8 +167,8 @@ describe('DistribuidoresService', () => {
         distribuidor,
       );
 
-      expect(mockPrisma.distribuidor.findUnique).toHaveBeenCalledWith({
-        where: { id: 'dist-1' },
+      expect(mockPrisma.distribuidor.findFirst).toHaveBeenCalledWith({
+        where: { id: 'dist-1', status: 'ATIVO' },
         select: { id: true, nome: true, tokenCadastro: true },
       });
       // O formulario mora no painel, nao na loja, e o painel roteia por hash:
@@ -176,6 +176,38 @@ describe('DistribuidoresService', () => {
       expect(resultado.data.url).toBe(
         'http://localhost:3002/#/cadastro-vendedor/tok-123',
       );
+    });
+
+    // Queimar um token vazado nao depende de a rede estar operando, entao a
+    // rotacao segue valendo — o que nao pode e devolver a URL, que daria 404.
+    it('regenerar em rede inativa rotaciona o token, mas sem devolver URL', async () => {
+      mockPrisma.distribuidor.findUnique.mockResolvedValue({ id: 'dist-1' });
+      mockPrisma.distribuidor.update.mockImplementation(
+        ({ data }: { data: { tokenCadastro: string } }) =>
+          Promise.resolve({
+            id: 'dist-1',
+            nome: 'Distribuidora Norte',
+            tokenCadastro: data.tokenCadastro,
+            status: 'INATIVO',
+          }),
+      );
+
+      const resultado = await service.regenerarTokenCadastro(
+        undefined,
+        distribuidor,
+      );
+
+      expect(mockPrisma.distribuidor.update).toHaveBeenCalled();
+      expect(resultado.data.token).toBeTruthy();
+      expect(resultado.data.url).toBeNull();
+    });
+
+    it('não entrega link de rede inativa, que a rota pública recusaria', async () => {
+      mockPrisma.distribuidor.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.consultarLinkCadastro(undefined, distribuidor),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('regenerar grava um token diferente do anterior', async () => {
@@ -186,6 +218,7 @@ describe('DistribuidoresService', () => {
             id: 'dist-1',
             nome: 'Distribuidora Norte',
             tokenCadastro: data.tokenCadastro,
+            status: 'ATIVO',
           }),
       );
 
