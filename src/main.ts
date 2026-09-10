@@ -43,7 +43,17 @@ async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
 
   app.enableShutdownHooks();
-  app.set('trust proxy', true);
+  // Quantos proxies nossos ficam na frente da API. `true` confiava em todos, e
+  // com isso o `req.ip` passava a sair da primeira entrada do `X-Forwarded-For`
+  // — header que o proprio cliente escreve. Rate limit que balde por esse valor
+  // vira enfeite: basta rodar o header para ganhar um balde novo por
+  // requisicao. Com o numero de hops, o Express le a entrada que o nosso proxy
+  // de borda acrescentou, que o cliente nao controla.
+  const trustProxyHops = Number(config.get('TRUST_PROXY_HOPS', 1));
+  app.set(
+    'trust proxy',
+    Number.isFinite(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1,
+  );
 
   const host = config.get<string>('HOST', '0.0.0.0');
   const port = config.get<number>('PORT', 3000);
