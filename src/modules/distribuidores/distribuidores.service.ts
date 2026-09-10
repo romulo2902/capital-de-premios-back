@@ -1,9 +1,13 @@
 import {
+  BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
 import { Perfil, Prisma, StatusUsuario, StatusVenda } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -17,6 +21,7 @@ import {
 } from '../../common/utils/pagination.util';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
 import { buildBuscaPorTexto } from '../../common/utils/busca-cadastro.util';
+import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @Injectable()
 export class DistribuidoresService {
@@ -25,7 +30,139 @@ export class DistribuidoresService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly qrcodeService: QrcodeService,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Token opaco do link publico de auto-cadastro.
+   *
+   * Mesmo formato do `@default(uuid())` que preenche a coluna no cadastro:
+   * 128 bits de entropia, fora de alcance de varredura. O valor e rotacionavel,
+   * entao um link vazado morre trocando a coluna.
+   */
+  private gerarTokenCadastro(): string {
+    return randomUUID();
+  }
+
+  /**
+   * O formulario publico mora no painel, nao na loja: quem se cadastra ali vai
+   * usar o painel depois, e a pagina reaproveita os componentes de cadastro
+   * que ja existem. Por isso a base e `FRONTEND_ADMIN_URL`.
+   *
+   * O `/#/` nao e enfeite: o painel e Flutter web na estrategia de hash, entao
+   * a rota vive depois do `#`. Sem ele o servidor devolve o index, o app sobe
+   * em `#/home` e o link cai no login em vez do formulario.
+   */
+  private montarLinkCadastro(token: string): string {
+    const base = (this.config.get<string>('FRONTEND_ADMIN_URL') ?? '').replace(
+      /\/+$/,
+      '',
+    );
+    return `${base}/#/cadastro-vendedor/${token}`;
+  }
+
+  /**
+   * Resolve de qual rede e o link. DISTRIBUIDOR so alcanca a propria: o id vem
+   * do token e o parametro e descartado, como no resto do projeto.
+   */
+  private resolverDistribuidorDoLink(
+    distribuidorIdParam: string | undefined,
+    user: RequestUser,
+  ): string {
+    if (user.perfil === 'DISTRIBUIDOR') {
+      if (!user.distribuidorId) {
+        throw new ForbiddenException(
+          'Operador distribuidor sem vínculo válido',
+        );
+      }
+      return user.distribuidorId;
+    }
+
+    if (!distribuidorIdParam) {
+      throw new BadRequestException(
+        'distribuidorId é obrigatório para o perfil ADMIN',
+      );
+    }
+
+    return distribuidorIdParam;
+  }
+
+  /** Link publico de auto-cadastro de vendedor da rede. */
+  async consultarLinkCadastro(
+    distribuidorId: string | undefined,
+    user: RequestUser,
+  ) {
+    const alvo = this.resolverDistribuidorDoLink(distribuidorId, user);
+    // Mesmo filtro da ponta publica (`buscarRedePorTokenDeCadastro`): rede
+    // inativa nao tem link para divulgar. Sem ele, o painel entregava uma URL
+    // bem formada que dava 404 em todo mundo que a abrisse, sem nenhum aviso.
+    const distribuidor = await this.prisma.distribuidor.findFirst({
+      where: { id: alvo, status: StatusUsuario.ATIVO },
+      select: { id: true, nome: true, tokenCadastro: true },
+    });
+
+    if (!distribuidor) {
+      throw new NotFoundException('Distribuidor não encontrado');
+    }
+
+    return {
+      message: 'Link de cadastro consultado com sucesso',
+      data: {
+        distribuidorId: distribuidor.id,
+        nome: distribuidor.nome,
+        token: distribuidor.tokenCadastro,
+        url: this.montarLinkCadastro(distribuidor.tokenCadastro),
+      },
+    };
+  }
+
+  /**
+   * Gera um token novo e derruba o anterior.
+   *
+   * E o unico jeito de estancar um link que vazou: quem tiver a URL antiga
+   * passa a receber 404 na hora, sem afetar quem ja foi cadastrado por ela.
+   */
+  async regenerarTokenCadastro(
+    distribuidorId: string | undefined,
+    user: RequestUser,
+  ) {
+    const alvo = this.resolverDistribuidorDoLink(distribuidorId, user);
+    const existe = await this.prisma.distribuidor.findUnique({
+      where: { id: alvo },
+      select: { id: true },
+    });
+
+    if (!existe) {
+      throw new NotFoundException('Distribuidor não encontrado');
+    }
+
+    const token = this.gerarTokenCadastro();
+    const distribuidor = await this.prisma.distribuidor.update({
+      where: { id: alvo },
+      data: { tokenCadastro: token },
+      select: { id: true, nome: true, tokenCadastro: true, status: true },
+    });
+
+    this.logger.log(`Token de cadastro regenerado para ${distribuidor.nome}`);
+
+    // A rotacao vale para rede inativa — queimar um token vazado nao depende de
+    // a rede estar operando, e bloquear a chamada tiraria a unica forma de
+    // fazer isso antes de uma reativacao. O que nao vale e devolver a URL: a
+    // rota publica filtra `status: ATIVO`, entao ela daria 404 em quem abrisse.
+    const ativo = distribuidor.status === StatusUsuario.ATIVO;
+
+    return {
+      message: ativo
+        ? 'Link de cadastro regenerado. O link anterior deixou de valer.'
+        : 'Token regenerado e o anterior deixou de valer. A rede está inativa: o link só volta a funcionar quando ela for reativada.',
+      data: {
+        distribuidorId: distribuidor.id,
+        nome: distribuidor.nome,
+        token: distribuidor.tokenCadastro,
+        url: ativo ? this.montarLinkCadastro(distribuidor.tokenCadastro) : null,
+      },
+    };
+  }
 
   private normalizarCpf(cpf: string): string {
     return cpf.replace(/\D/g, '');
@@ -93,60 +230,65 @@ export class DistribuidoresService {
       ? await bcrypt.hash(dto.senha, 10)
       : await bcrypt.hash(this.gerarSenhaPadraoPorCpf(cpf), 10);
 
-    return this.prisma.$transaction(async (tx) => {
-      const usuario = await tx.usuario.create({
-        data: {
-          email,
-          cpf,
-          senhaHash,
-          perfil: Perfil.DISTRIBUIDOR,
-          deveRedefinirSenha: false,
-          status: StatusUsuario.ATIVO,
-        },
-      });
+    return this.prisma
+      .$transaction(async (tx) => {
+        const usuario = await tx.usuario.create({
+          data: {
+            email,
+            cpf,
+            senhaHash,
+            perfil: Perfil.DISTRIBUIDOR,
+            deveRedefinirSenha: false,
+            status: StatusUsuario.ATIVO,
+          },
+        });
 
-      const distribuidor = await tx.distribuidor.create({
-        data: {
-          ...(dto.codigo ? { codigo: dto.codigo } : {}),
-          usuarioId: usuario.id,
-          nome: dto.nome,
-          cpf,
-          telefone: dto.telefone,
-          email,
-          dataNascimento: dto.dataNascimento
-            ? new Date(dto.dataNascimento)
-            : undefined,
-          cep: dto.cep,
-          endereco: dto.endereco,
-          numero: dto.numero,
-          bairro: dto.bairro,
-          cidade: dto.cidade,
-          estado: dto.estado,
-          tipoChavePix: dto.tipoChavePix,
-          chavePix: dto.chavePix,
-          comissaoPercent: dto.comissaoPercent !== undefined ? dto.comissaoPercent : 0,
-          link: dto.link,
-          status: StatusUsuario.ATIVO,
-        },
-      });
+        const distribuidor = await tx.distribuidor.create({
+          data: {
+            ...(dto.codigo ? { codigo: dto.codigo } : {}),
+            usuarioId: usuario.id,
+            nome: dto.nome,
+            cpf,
+            telefone: dto.telefone,
+            email,
+            dataNascimento: dto.dataNascimento
+              ? new Date(dto.dataNascimento)
+              : undefined,
+            cep: dto.cep,
+            endereco: dto.endereco,
+            numero: dto.numero,
+            bairro: dto.bairro,
+            cidade: dto.cidade,
+            estado: dto.estado,
+            tipoChavePix: dto.tipoChavePix,
+            chavePix: dto.chavePix,
+            comissaoPercent:
+              dto.comissaoPercent !== undefined ? dto.comissaoPercent : 0,
+            link: dto.link,
+            // `tokenCadastro` sai do DEFAULT do banco: toda rede nasce com
+            // link de auto-cadastro pronto, e nenhum call site precisa saber.
+            status: StatusUsuario.ATIVO,
+          },
+        });
 
-      this.logger.log(
-        `Distribuidor criado: ${distribuidor.nome} (${distribuidor.codigo})`,
-      );
-      return distribuidor;
-    }).then(async (distribuidor) => {
-      try {
-        await Promise.all([
-          this.qrcodeService.gerarQrcodeDistribuidor(distribuidor.id),
-          this.qrcodeService.gerarQrcodeSenaDistribuidor(distribuidor.id),
-        ]);
-      } catch (err) {
-        this.logger.warn(
-          `Falha ao gerar QR Codes para distribuidor ${distribuidor.id}: ${(err as Error).message}`,
+        this.logger.log(
+          `Distribuidor criado: ${distribuidor.nome} (${distribuidor.codigo})`,
         );
-      }
-      return distribuidor;
-    });
+        return distribuidor;
+      })
+      .then(async (distribuidor) => {
+        try {
+          await Promise.all([
+            this.qrcodeService.gerarQrcodeDistribuidor(distribuidor.id),
+            this.qrcodeService.gerarQrcodeSenaDistribuidor(distribuidor.id),
+          ]);
+        } catch (err) {
+          this.logger.warn(
+            `Falha ao gerar QR Codes para distribuidor ${distribuidor.id}: ${(err as Error).message}`,
+          );
+        }
+        return distribuidor;
+      });
   }
 
   async findAll(page = 1, limit = 20, search?: string) {
