@@ -202,7 +202,12 @@ model Distribuidor {
   link                      String?
   /// Token do link publico de auto-cadastro de vendedor. Opaco e rotacionavel:
   /// se o link vazar, o distribuidor gera outro e o antigo morre na hora.
-  tokenCadastro             String                     @unique @default(uuid())
+  /// O default e do banco, nao do cliente: a migration criou a coluna com
+  /// `DEFAULT gen_random_uuid()`, que cobre quem insere por SQL cru (seed
+  /// manual, restore, psql) contra o NOT NULL. Declarar `@default(uuid())`
+  /// aqui deixava schema e banco divergentes, e o proximo `migrate dev`
+  /// geraria um DROP DEFAULT desfazendo justamente essa cobertura.
+  tokenCadastro             String                     @unique @default(dbgenerated("(gen_random_uuid())::text"))
   qrcode                    String?
   linkSena                  String?
   qrcodeSena                String?

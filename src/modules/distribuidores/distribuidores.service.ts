@@ -265,8 +265,8 @@ export class DistribuidoresService {
             comissaoPercent:
               dto.comissaoPercent !== undefined ? dto.comissaoPercent : 0,
             link: dto.link,
-            // `tokenCadastro` sai do @default(uuid()): toda rede nasce com link
-            // de auto-cadastro pronto, e nenhum call site precisa saber disso.
+            // `tokenCadastro` sai do DEFAULT do banco: toda rede nasce com
+            // link de auto-cadastro pronto, e nenhum call site precisa saber.
             status: StatusUsuario.ATIVO,
           },
         });
