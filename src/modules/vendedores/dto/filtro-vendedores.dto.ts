@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class FiltroVendedoresDto extends PaginationQueryDto {
@@ -18,4 +19,15 @@ export class FiltroVendedoresDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID('4')
   distribuidorId?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'Apenas auto-cadastros aguardando aprovação (`aprovadoEm` nulo). ' +
+      'Omitido, a lista traz todos.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  pendentes?: boolean;
 }

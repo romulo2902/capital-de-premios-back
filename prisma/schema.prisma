@@ -200,6 +200,14 @@ model Distribuidor {
   comissaoPercent           Decimal                    @default(0)
   saldo                     Decimal                    @default(0)
   link                      String?
+  /// Token do link publico de auto-cadastro de vendedor. Opaco e rotacionavel:
+  /// se o link vazar, o distribuidor gera outro e o antigo morre na hora.
+  /// O default e do banco, nao do cliente: a migration criou a coluna com
+  /// `DEFAULT gen_random_uuid()`, que cobre quem insere por SQL cru (seed
+  /// manual, restore, psql) contra o NOT NULL. Declarar `@default(uuid())`
+  /// aqui deixava schema e banco divergentes, e o proximo `migrate dev`
+  /// geraria um DROP DEFAULT desfazendo justamente essa cobertura.
+  tokenCadastro             String                     @unique @default(dbgenerated("(gen_random_uuid())::text"))
   qrcode                    String?
   linkSena                  String?
   qrcodeSena                String?
@@ -240,6 +248,14 @@ model Vendedor {
   linkSena        String?
   qrcodeSena      String?
   status          StatusUsuario  @default(ATIVO)
+  /// Nulo enquanto o auto-cadastro espera aprovacao do distribuidor. Quem e
+  /// cadastrado pelo painel ou pelo POS ja nasce aprovado, entao `null` aqui
+  /// distingue "aguardando" de "inativado", que compartilham o mesmo status.
+  aprovadoEm      DateTime?
+  /// Carimbo da recusa de um auto-cadastro. Sem ele, recusar era gravar o
+  /// INATIVO que o pendente ja tinha: o registro voltava para a fila igual a um
+  /// pedido novo. Preenchido implica nunca aprovado — os dois nunca convivem.
+  rejeitadoEm     DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   distribuidor    Distribuidor   @relation(fields: [distribuidorId], references: [id])

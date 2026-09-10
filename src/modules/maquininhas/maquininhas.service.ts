@@ -104,12 +104,23 @@ export class MaquininhasService {
   ): Promise<void> {
     const vendedor = await this.prisma.vendedor.findFirst({
       where: { id: vendedorId, distribuidorId },
-      select: { id: true },
+      select: { id: true, aprovadoEm: true, rejeitadoEm: true },
     });
 
     if (!vendedor) {
       throw new BadRequestException(
         'Vendedor não pertence à rede desta maquininha',
+      );
+    }
+
+    // Auto-cadastro so recebe aparelho depois de aprovado. Antes disso ele nao
+    // autentica no POS, entao o vinculo nasceria inerte — e ainda ocuparia o
+    // unico slot de vendedor da maquininha, que passaria a constar como
+    // entregue sem estar. Recusado idem, e nada na recusa devolve o aparelho
+    // para o estoque.
+    if (!vendedor.aprovadoEm || vendedor.rejeitadoEm) {
+      throw new BadRequestException(
+        'Vendedor ainda não foi aprovado e não pode receber maquininha',
       );
     }
   }

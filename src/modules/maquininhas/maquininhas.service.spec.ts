@@ -123,6 +123,42 @@ describe('MaquininhasService', () => {
       expect(mockPrisma.maquininha.create).not.toHaveBeenCalled();
     });
 
+    it('recusa vínculo com auto-cadastro ainda não aprovado', async () => {
+      // O pendente nao autentica no POS: o vinculo nasceria inerte e ainda
+      // ocuparia o unico slot de vendedor do aparelho.
+      mockPrisma.maquininha.findUnique.mockResolvedValue(null);
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-pendente',
+        aprovadoEm: null,
+        rejeitadoEm: null,
+      });
+
+      await expect(
+        service.create(
+          { numeroSerie: '8012345678', vendedorId: 'vend-pendente' },
+          distribuidor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.maquininha.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa vínculo com cadastro recusado', async () => {
+      mockPrisma.maquininha.findUnique.mockResolvedValue(null);
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-recusado',
+        aprovadoEm: null,
+        rejeitadoEm: new Date('2026-02-01'),
+      });
+
+      await expect(
+        service.create(
+          { numeroSerie: '8012345678', vendedorId: 'vend-recusado' },
+          distribuidor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.maquininha.create).not.toHaveBeenCalled();
+    });
+
     it('ADMIN precisa informar a rede', async () => {
       mockPrisma.maquininha.findUnique.mockResolvedValue(null);
 
@@ -221,7 +257,11 @@ describe('MaquininhasService', () => {
         id: 'maq-1',
         distribuidorId: 'dist-1',
       });
-      mockPrisma.vendedor.findFirst.mockResolvedValue({ id: 'vend-2' });
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-2',
+        aprovadoEm: new Date('2026-01-10'),
+        rejeitadoEm: null,
+      });
       mockPrisma.maquininha.update.mockResolvedValue({ id: 'maq-1' });
 
       await service.update('maq-1', { vendedorId: 'vend-2' }, distribuidor);
@@ -322,7 +362,11 @@ describe('MaquininhasService', () => {
         id: 'maq-1',
         distribuidorId: 'dist-1',
       });
-      mockPrisma.vendedor.findFirst.mockResolvedValue({ id: 'vend-da-nova' });
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-da-nova',
+        aprovadoEm: new Date('2026-01-10'),
+        rejeitadoEm: null,
+      });
       mockPrisma.maquininha.update.mockResolvedValue({ id: 'maq-1' });
 
       await service.update(

@@ -14,6 +14,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -63,7 +64,29 @@ export class VendedoresController {
       filtros.search,
       filtros.distribuidorId,
       user,
+      filtros.pendentes,
     );
+  }
+
+  @Patch(':id/aprovar')
+  @Roles('ADMIN', 'DISTRIBUIDOR')
+  @ApiOperation({
+    summary:
+      'Aprovar auto-cadastro de vendedor (ADMIN + DISTRIBUIDOR da própria rede)',
+    description:
+      'Libera um vendedor que se cadastrou pelo link público. Ativa o vendedor ' +
+      'e o usuário na mesma transação e carimba `aprovadoEm`. Serve também para ' +
+      'reverter uma recusa: cadastro com `rejeitadoEm` é liberado e o carimbo ' +
+      'da recusa é limpo — é o caminho de volta de quem foi recusado por ' +
+      'engano, já que a linha recusada segura o CPF e impede o recadastro. ' +
+      'Vendedor de outra rede responde 404; vendedor já aprovado responde 409.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do vendedor pendente' })
+  aprovar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendedoresService.aprovar(id, user);
   }
 
   @Get('performance')
@@ -110,7 +133,7 @@ export class VendedoresController {
   @ApiOperation({
     summary: 'Atualizar vendedor (ADMIN + DISTRIBUIDOR)',
     description:
-      'DISTRIBUIDOR só alcança vendedor da própria rede — os demais respondem 404 — e não consegue transferir o vendedor para outra rede: o `distribuidorId` do corpo é descartado. ADMIN edita qualquer vendedor, transferência inclusa.',
+      'DISTRIBUIDOR só alcança vendedor da própria rede — os demais respondem 404 — e não consegue transferir o vendedor para outra rede: o `distribuidorId` do corpo é descartado. ADMIN edita qualquer vendedor, transferência inclusa. Em auto-cadastro ainda pendente, o `status` do corpo decide o cadastro: `ATIVO` vale como aprovação (carimba `aprovadoEm` e limpa `rejeitadoEm`) e `INATIVO` vale como recusa (carimba `rejeitadoEm`) — os dois tiram o cadastro da fila de pendentes, igual aos endpoints dedicados.',
   })
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -125,7 +148,7 @@ export class VendedoresController {
   @ApiOperation({
     summary: 'Inativar vendedor (ADMIN + DISTRIBUIDOR)',
     description:
-      'Inativação lógica: o vendedor passa a `INATIVO`, o registro é preservado e o histórico de vendas e comissões continua intacto. DISTRIBUIDOR só alcança vendedor da própria rede — os demais respondem 404.',
+      'Inativação lógica: o vendedor passa a `INATIVO`, o registro é preservado e o histórico de vendas e comissões continua intacto. DISTRIBUIDOR só alcança vendedor da própria rede — os demais respondem 404. Em auto-cadastro ainda pendente vale como **recusa**: como o pendente já nasce `INATIVO`, o que marca a decisão é o carimbo `rejeitadoEm`, que tira o cadastro da fila de pendentes. Para reverter, use `PATCH /admin/vendedores/{id}/aprovar`.',
   })
   remove(
     @Param('id', ParseUUIDPipe) id: string,
