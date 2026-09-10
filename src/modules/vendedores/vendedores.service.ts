@@ -195,6 +195,20 @@ export class VendedoresService {
     const cpf = this.normalizarCpf(dto.cpf);
     const email = this.normalizarEmail(dto.email);
 
+    // DECISAO CONSCIENTE: o 409 daqui chega a um chamador sem autenticacao, e
+    // com isso a rota diz se um CPF existe no sistema — de qualquer rede, de
+    // qualquer perfil. E enumeracao, e fica.
+    //
+    // Nao adianta estreitar a checagem para a rede do token: `Usuario.cpf`,
+    // `Usuario.email` e `Vendedor.cpf` sao `@unique` globais, entao o INSERT
+    // bateria em P2002 e o `HttpExceptionFilter` devolveria o mesmo 409 — a
+    // diferenca sairia do pre-check e voltaria pela constraint.
+    //
+    // A unica alternativa real seria responder igual em todo caso ("cadastro
+    // enviado") e engolir o conflito. Isso custa o feedback de quem digitou o
+    // CPF errado ou ja se cadastrou, que e a maioria de quem esbarra aqui, para
+    // esconder o que qualquer formulario de cadastro revela. O que limita
+    // varredura em massa e o rate limit da rota, nao a mensagem.
     await Promise.all([
       this.validarCpfDisponivel(cpf),
       this.validarEmailDisponivel(email),
