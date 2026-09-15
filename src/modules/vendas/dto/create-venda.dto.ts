@@ -164,8 +164,9 @@ export class CreateVendaDto {
   @ApiPropertyOptional({
     example: 'romulo.valadares@email.com',
     description:
-      'E-mail do cliente (opcional). Se informado, é usado para enviar o comprovante de compra.',
+      'E-mail do cliente (opcional). Se informado, é usado para enviar o comprovante de compra. String vazia é ignorada.',
   })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsEmail({}, { message: 'e-mail inválido' })
   email?: string;
@@ -173,8 +174,9 @@ export class CreateVendaDto {
   @ApiPropertyOptional({
     example: '1985-04-11',
     description:
-      'Data de nascimento do cliente no formato YYYY-MM-DD (opcional). Se informada, é usada para validar maioridade.',
+      'Data de nascimento do cliente no formato YYYY-MM-DD (opcional). Se informada, é usada para validar maioridade. String vazia é ignorada.',
   })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
