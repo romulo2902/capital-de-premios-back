@@ -38,8 +38,8 @@ export class DashboardService {
       const [totalClientes, totalVendedores, totalDistribuidores, vendedores] =
         await Promise.all([
           this.prisma.cliente.count(),
-          this.prisma.vendedor.count(),
-          this.prisma.distribuidor.count(),
+          this.prisma.vendedor.count({ where: { deletedAt: null } }),
+          this.prisma.distribuidor.count({ where: { deletedAt: null } }),
           this.prisma.vendedor.findMany({
             select: {
               id: true,
@@ -102,8 +102,8 @@ export class DashboardService {
     const [totalClientes, totalVendedores, totalDistribuidores, vendedores] =
       await Promise.all([
         this.prisma.cliente.count(),
-        this.prisma.vendedor.count(),
-        this.prisma.distribuidor.count(),
+        this.prisma.vendedor.count({ where: { deletedAt: null } }),
+        this.prisma.distribuidor.count({ where: { deletedAt: null } }),
         this.prisma.vendedor.findMany({
           select: {
             id: true,

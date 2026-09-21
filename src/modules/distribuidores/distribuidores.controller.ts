@@ -14,6 +14,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -48,11 +49,19 @@ export class DistribuidoresController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({
+    name: 'excluidos',
+    required: false,
+    type: Boolean,
+    description:
+      'Lista **apenas** os distribuidores excluídos, em vez de somá-los à listagem normal. É a única porta por onde o id de um excluído sai da API — use para alcançar `PATCH /admin/distribuidores/{id}/restaurar`.',
+  })
   findAll(@Query() filtros: FiltroDistribuidoresDto) {
     return this.distribuidoresService.findAll(
       filtros.page,
       filtros.limit,
       filtros.search,
+      filtros.excluidos,
     );
   }
 
@@ -159,5 +168,29 @@ export class DistribuidoresController {
   @ApiOperation({ summary: 'Inativar distribuidor (ADMIN)' })
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.distribuidoresService.remove(id);
+  }
+
+  @Delete(':id/excluir')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Excluir distribuidor (ADMIN apenas)',
+    description:
+      'Exclusão lógica: o distribuidor some de toda listagem e do seletor de rede, mas o registro fica — Venda, ComissaoDistribuidor, Saque e Maquininha apontam para ele, e apagar de verdade levaria o histórico junto. É estado distinto de `INATIVO`, que segue na listagem e é reativado pelo `PATCH`. Excluir também inativa o distribuidor e o usuário na mesma transação. Responde 409 com saldo pendente, com vendedores na rede ou com maquininhas na frota: `Vendedor.distribuidorId` e `Maquininha.distribuidorId` são obrigatórios, então esvazie a rede antes. Para desfazer, use `PATCH /admin/distribuidores/{id}/restaurar`.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do distribuidor' })
+  excluir(@Param('id', ParseUUIDPipe) id: string) {
+    return this.distribuidoresService.excluir(id);
+  }
+
+  @Patch(':id/restaurar')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restaurar distribuidor excluído (ADMIN apenas)',
+    description:
+      'Devolve à listagem um distribuidor excluído. Ele volta `INATIVO`, não `ATIVO`: quem decide se opera de novo é o `PATCH /admin/distribuidores/{id}` com `status: ATIVO`. Para descobrir o id, liste com `GET /admin/distribuidores?excluidos=true`. Distribuidor que não está excluído responde 409.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do distribuidor excluído' })
+  restaurar(@Param('id', ParseUUIDPipe) id: string) {
+    return this.distribuidoresService.restaurar(id);
   }
 }

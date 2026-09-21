@@ -34,6 +34,24 @@ export class DistribuidoresService {
   ) {}
 
   /**
+   * Recorte de tudo que o módulo lê: o filtro de excluídos.
+   *
+   * O `deletedAt: null` mora aqui, e não em cada consulta, porque é o único
+   * ponto por onde toda leitura passa — `findAll`, `findOne`, `findByCodigo` e
+   * `update`. Consulta nova que não use o escopo é a forma mais fácil de um
+   * cadastro excluído reaparecer.
+   *
+   * `incluirExcluidos` existe só para a listagem achar o que foi excluído: sem
+   * ela, o id de um excluído seria impossível de descobrir pela API, e
+   * `restaurar` não teria como ser chamado.
+   */
+  private buildEscopoDoOperador(
+    incluirExcluidos = false,
+  ): Prisma.DistribuidorWhereInput {
+    return incluirExcluidos ? {} : { deletedAt: null };
+  }
+
+  /**
    * Token opaco do link publico de auto-cadastro.
    *
    * Mesmo formato do `@default(uuid())` que preenche a coluna no cadastro:
@@ -187,6 +205,7 @@ export class DistribuidoresService {
           cpf,
           ...(distribuidorId ? { NOT: { id: distribuidorId } } : {}),
         },
+        select: { id: true, deletedAt: true },
       }),
       this.prisma.usuario.findFirst({
         where: {
@@ -195,6 +214,16 @@ export class DistribuidoresService {
         },
       }),
     ]);
+
+    // O excluído continua segurando o CPF — `Distribuidor.cpf` e `Usuario.cpf`
+    // são `@unique` globais e não abrem exceção para ele. Sem dizer isso, o
+    // recadastro batia num "CPF já cadastrado" que não existe em listagem
+    // nenhuma, e o caminho certo (restaurar) ficava invisível.
+    if (distribuidorExistente?.deletedAt) {
+      throw new ConflictException(
+        'CPF pertence a um distribuidor excluído. Restaure o cadastro em vez de criar outro.',
+      );
+    }
 
     if (distribuidorExistente || usuarioExistente) {
       throw new ConflictException('CPF já cadastrado');
@@ -291,9 +320,16 @@ export class DistribuidoresService {
       });
   }
 
-  async findAll(page = 1, limit = 20, search?: string) {
+  async findAll(page = 1, limit = 20, search?: string, excluidos?: boolean) {
     const pagination = normalizePagination(page, limit);
-    const where = search ? { OR: buildBuscaPorTexto(search) } : {};
+    const where: Prisma.DistribuidorWhereInput = {
+      ...this.buildEscopoDoOperador(excluidos),
+      ...(search ? { OR: buildBuscaPorTexto(search) } : {}),
+      // Lixeira: `excluidos` lista SÓ os excluídos, em vez de somá-los à
+      // listagem normal. Esta é a única porta por onde o id de um excluído sai
+      // da API, e é dela que `restaurar` depende.
+      ...(excluidos ? { deletedAt: { not: null } } : {}),
+    };
 
     const [data, total] = await Promise.all([
       this.prisma.distribuidor.findMany({
@@ -301,7 +337,9 @@ export class DistribuidoresService {
         skip: pagination.skip,
         take: pagination.limit,
         orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { vendedores: true } } },
+        include: {
+          _count: { select: { vendedores: { where: { deletedAt: null } } } },
+        },
       }),
       this.prisma.distribuidor.count({ where }),
     ]);
@@ -319,11 +357,16 @@ export class DistribuidoresService {
   }
 
   async findOne(id: string) {
-    const distribuidor = await this.prisma.distribuidor.findUnique({
-      where: { id },
+    // `findFirst`, não `findUnique`: o escopo não é chave única, e `findUnique`
+    // não aceita filtro fora dela — seria a porta de um excluído reaparecer.
+    const distribuidor = await this.prisma.distribuidor.findFirst({
+      where: { id, ...this.buildEscopoDoOperador() },
       include: {
-        _count: { select: { vendedores: true } },
+        // O contador acompanha a lista: somar os excluídos daria uma rede com
+        // "8 vendedores" e 6 linhas na tela.
+        _count: { select: { vendedores: { where: { deletedAt: null } } } },
         vendedores: {
+          where: { deletedAt: null },
           select: { id: true, nome: true, codigo: true, status: true },
         },
       },
@@ -334,8 +377,8 @@ export class DistribuidoresService {
   }
 
   async findByCodigo(codigo: number) {
-    const distribuidor = await this.prisma.distribuidor.findUnique({
-      where: { codigo },
+    const distribuidor = await this.prisma.distribuidor.findFirst({
+      where: { codigo, ...this.buildEscopoDoOperador() },
     });
     if (!distribuidor)
       throw new NotFoundException('Distribuidor não encontrado');
@@ -343,8 +386,11 @@ export class DistribuidoresService {
   }
 
   async update(id: string, dto: UpdateDistribuidorDto) {
-    const distribuidorAtual = await this.prisma.distribuidor.findUnique({
-      where: { id },
+    // Excluído não se edita: o `PATCH` é o caminho de reativar (`status:
+    // ATIVO`), e sem o escopo aqui ele devolvia à operação quem tinha sumido da
+    // listagem, pulando o `restaurar`.
+    const distribuidorAtual = await this.prisma.distribuidor.findFirst({
+      where: { id, ...this.buildEscopoDoOperador() },
       select: { id: true, usuarioId: true },
     });
 
@@ -413,6 +459,107 @@ export class DistribuidoresService {
         where: { id },
         data: { status: StatusUsuario.INATIVO },
       });
+    });
+  }
+
+  /**
+   * Exclusão lógica — ADMIN apenas.
+   *
+   * Some de toda listagem e do seletor de rede, mas o registro fica: Venda,
+   * ComissaoDistribuidor, Saque e Maquininha apontam para ele, e apagar de
+   * verdade levaria o histórico junto.
+   *
+   * Excluir também inativa, nas duas tabelas. Não é redundância com `remove`:
+   * é o que faz os caminhos que só conhecem `status` — login, link público de
+   * auto-cadastro — barrarem o excluído sem precisar aprender o `deletedAt`.
+   */
+  async excluir(id: string) {
+    const distribuidor = await this.findOne(id);
+
+    // Sumir da listagem levando o saldo junto prenderia a comissão da rede sem
+    // tela para pagá-la. O caminho é liquidar o saque antes.
+    if (distribuidor.saldo.gt(0)) {
+      throw new ConflictException(
+        `O distribuidor ${distribuidor.nome} ainda tem R$ ${distribuidor.saldo.toFixed(2)} ` +
+          'de saldo. Liquide o saque antes de excluir.',
+      );
+    }
+
+    // `Vendedor.distribuidorId` é NOT NULL: excluir a rede por cima dos
+    // vendedores deixaria cada um deles apontando para um distribuidor que
+    // sumiu de toda listagem — visíveis no painel, sem rede alcançável. O
+    // caminho é transferir os vendedores (PATCH com `distribuidorId`) ou
+    // excluí-los antes.
+    const vendedoresNaRede = await this.prisma.vendedor.count({
+      where: { distribuidorId: id, deletedAt: null },
+    });
+
+    if (vendedoresNaRede > 0) {
+      throw new ConflictException(
+        `O distribuidor ${distribuidor.nome} ainda tem ${vendedoresNaRede} vendedor(es) na rede. ` +
+          'Transfira ou exclua os vendedores antes.',
+      );
+    }
+
+    // Mesmo motivo, para a frota: `Maquininha.distribuidorId` também é NOT
+    // NULL, e o aparelho carrega saldo de crédito próprio.
+    const maquininhasNaRede = await this.prisma.maquininha.count({
+      where: { distribuidorId: id, deletedAt: null },
+    });
+
+    if (maquininhasNaRede > 0) {
+      throw new ConflictException(
+        `O distribuidor ${distribuidor.nome} ainda tem ${maquininhasNaRede} maquininha(s) na rede. ` +
+          'Exclua os aparelhos antes.',
+      );
+    }
+
+    this.logger.log(
+      `Excluindo distribuidor ${distribuidor.nome} (${distribuidor.codigo})`,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.usuario.update({
+        where: { id: distribuidor.usuarioId },
+        data: { status: StatusUsuario.INATIVO },
+      });
+
+      return tx.distribuidor.update({
+        where: { id },
+        data: { status: StatusUsuario.INATIVO, deletedAt: new Date() },
+      });
+    });
+  }
+
+  /**
+   * Desfaz a exclusão — ADMIN apenas.
+   *
+   * O cadastro volta INATIVO, não ATIVO: restaurar devolve o registro à
+   * listagem, e quem decide se ele opera de novo é o `PATCH` de status. Sem
+   * este caminho, excluir por engano seria definitivo — o CPF continua
+   * `@unique` e seguraria o recadastro para sempre.
+   */
+  async restaurar(id: string) {
+    const distribuidor = await this.prisma.distribuidor.findFirst({
+      where: { id, ...this.buildEscopoDoOperador(true) },
+      select: { id: true, nome: true, codigo: true, deletedAt: true },
+    });
+
+    if (!distribuidor) {
+      throw new NotFoundException('Distribuidor não encontrado');
+    }
+
+    if (!distribuidor.deletedAt) {
+      throw new ConflictException('Este distribuidor não está excluído');
+    }
+
+    this.logger.log(
+      `Restaurando distribuidor ${distribuidor.nome} (${distribuidor.codigo})`,
+    );
+
+    return this.prisma.distribuidor.update({
+      where: { id },
+      data: { deletedAt: null },
     });
   }
 

@@ -161,8 +161,18 @@ describe('DashboardService', () => {
         }),
       );
       expect(mockPrisma.cliente.count).toHaveBeenCalledWith();
-      expect(mockPrisma.vendedor.count).toHaveBeenCalledWith();
-      expect(mockPrisma.distribuidor.count).toHaveBeenCalledWith();
+      // Contador de cadastros ignora excluídos; o ranking, que é número de
+      // venda, não filtra — a venda de um excluído continua somando.
+      expect(mockPrisma.vendedor.count).toHaveBeenCalledWith({
+        where: { deletedAt: null },
+      });
+      expect(mockPrisma.distribuidor.count).toHaveBeenCalledWith({
+        where: { deletedAt: null },
+      });
+      const [chamadaRanking] = mockPrisma.vendedor.findMany.mock.calls[0] as [
+        { where?: Record<string, unknown> },
+      ];
+      expect(chamadaRanking.where?.deletedAt).toBeUndefined();
     });
 
     it('should filter ranking de vendedores (CDP) by edicaoIds when provided', async () => {

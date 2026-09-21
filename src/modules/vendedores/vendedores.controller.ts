@@ -54,6 +54,13 @@ export class VendedoresController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'distribuidorId', required: false, type: String })
+  @ApiQuery({
+    name: 'excluidos',
+    required: false,
+    type: Boolean,
+    description:
+      '**ADMIN apenas.** Lista **apenas** os vendedores excluídos, em vez de somá-los à listagem normal. É a única porta por onde o id de um excluído sai da API — use para alcançar `PATCH /admin/vendedores/{id}/restaurar`. Para DISTRIBUIDOR o parâmetro é ignorado e a listagem sai normal, sem excluídos.',
+  })
   findAll(
     @Query() filtros: FiltroVendedoresDto,
     @CurrentUser() user: RequestUser,
@@ -65,6 +72,7 @@ export class VendedoresController {
       filtros.distribuidorId,
       user,
       filtros.pendentes,
+      filtros.excluidos,
     );
   }
 
@@ -155,5 +163,35 @@ export class VendedoresController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.vendedoresService.remove(id, user);
+  }
+
+  @Delete(':id/excluir')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Excluir vendedor (ADMIN apenas)',
+    description:
+      'Exclusão lógica: o vendedor some de toda listagem e do seletor do POS, mas o registro fica — Venda, Comissao, Saque e Maquininha apontam para ele, e apagar de verdade levaria o histórico junto. É estado distinto de `INATIVO`, que segue na listagem e é reativado pelo `PATCH`. Excluir também inativa o vendedor e o usuário na mesma transação. Vendedor com saldo pendente responde 409: liquide o saque antes. Para desfazer, use `PATCH /admin/vendedores/{id}/restaurar`.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do vendedor' })
+  excluir(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendedoresService.excluir(id, user);
+  }
+
+  @Patch(':id/restaurar')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restaurar vendedor excluído (ADMIN apenas)',
+    description:
+      'Devolve à listagem um vendedor excluído. Ele volta `INATIVO`, não `ATIVO`: quem decide se opera de novo é o `PATCH /admin/vendedores/{id}` com `status: ATIVO`. Para descobrir o id, liste com `GET /admin/vendedores?excluidos=true`. Vendedor que não está excluído responde 409.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do vendedor excluído' })
+  restaurar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.vendedoresService.restaurar(id, user);
   }
 }
