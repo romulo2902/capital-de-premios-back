@@ -54,9 +54,29 @@ export class VendedoresService {
     return cpf.slice(0, 6);
   }
 
-  private buildHierarchyWhere(user?: RequestUser): Prisma.VendedorWhereInput {
+  /**
+   * Recorte de tudo que o módulo lê: a rede do operador e o filtro de
+   * excluídos.
+   *
+   * O `deletedAt: null` mora aqui, e não em cada consulta, porque é o único
+   * ponto por onde toda leitura passa — `findAll`, `findOne`, `findByCodigo`,
+   * `update` e `aprovar`. Consulta nova que não use o escopo é a forma mais
+   * fácil de um cadastro excluído reaparecer.
+   *
+   * `incluirExcluidos` existe só para a listagem do ADMIN achar o que excluiu:
+   * sem ela, o id de um excluído seria impossível de descobrir pela API, e
+   * `restaurar` não teria como ser chamado.
+   */
+  private buildEscopoDoOperador(
+    user?: RequestUser,
+    incluirExcluidos = false,
+  ): Prisma.VendedorWhereInput {
+    const escopo: Prisma.VendedorWhereInput = incluirExcluidos
+      ? {}
+      : { deletedAt: null };
+
     if (!user || user.perfil === 'ADMIN') {
-      return {};
+      return escopo;
     }
 
     if (user.perfil === 'DISTRIBUIDOR') {
@@ -66,10 +86,10 @@ export class VendedoresService {
         );
       }
 
-      return { distribuidorId: user.distribuidorId };
+      return { ...escopo, distribuidorId: user.distribuidorId };
     }
 
-    return {};
+    return escopo;
   }
 
   private mergeWhere(
@@ -100,6 +120,7 @@ export class VendedoresService {
           cpf,
           ...(vendedorId ? { NOT: { id: vendedorId } } : {}),
         },
+        select: { id: true, deletedAt: true },
       }),
       this.prisma.usuario.findFirst({
         where: {
@@ -108,6 +129,16 @@ export class VendedoresService {
         },
       }),
     ]);
+
+    // O excluído continua segurando o CPF — `Vendedor.cpf` e `Usuario.cpf` são
+    // `@unique` globais e não abrem exceção para ele. Sem dizer isso, o
+    // recadastro batia num "CPF já cadastrado" que não existe em listagem
+    // nenhuma, e o caminho certo (restaurar) ficava invisível.
+    if (vendedorExistente?.deletedAt) {
+      throw new ConflictException(
+        'CPF pertence a um vendedor excluído. Restaure o cadastro em vez de criar outro.',
+      );
+    }
 
     if (vendedorExistente || usuarioExistente) {
       throw new ConflictException('CPF já cadastrado');
@@ -289,7 +320,7 @@ export class VendedoresService {
    */
   async aprovar(id: string, user?: RequestUser) {
     const vendedor = await this.prisma.vendedor.findFirst({
-      where: { id, ...this.buildHierarchyWhere(user) },
+      where: { id, ...this.buildEscopoDoOperador(user) },
       select: {
         id: true,
         usuarioId: true,
@@ -451,11 +482,23 @@ export class VendedoresService {
     distribuidorId?: string,
     user?: RequestUser,
     pendentes?: boolean,
+    excluidos?: boolean,
   ) {
     const pagination = normalizePagination(page, limit);
     const filtersWhere: Prisma.VendedorWhereInput = {};
 
     if (distribuidorId) filtersWhere.distribuidorId = distribuidorId;
+    // Lixeira: `excluidos` lista SÓ os excluídos, em vez de somá-los à listagem
+    // normal. Esta é a única porta por onde o id de um excluído sai da API, e é
+    // dela que `restaurar` depende.
+    //
+    // Só vale para o ADMIN. Para o DISTRIBUIDOR o parâmetro é descartado e a
+    // listagem sai normal: excluído some de toda listagem, e quem não pode
+    // restaurar não tem o que fazer com a lixeira.
+    const verExcluidos = excluidos === true && user?.perfil === 'ADMIN';
+    if (verExcluidos) {
+      filtersWhere.deletedAt = { not: null };
+    }
     // "Aguardando" e a ausencia dos dois carimbos: o status INATIVO sozinho nao
     // serve, porque tambem cobre quem o distribuidor desligou, e `aprovadoEm`
     // sozinho deixaria o recusado voltando para a fila a cada abertura da tela.
@@ -467,7 +510,10 @@ export class VendedoresService {
       filtersWhere.OR = buildBuscaPorTexto(search);
     }
 
-    const where = this.mergeWhere(filtersWhere, this.buildHierarchyWhere(user));
+    const where = this.mergeWhere(
+      filtersWhere,
+      this.buildEscopoDoOperador(user, verExcluidos),
+    );
 
     const [data, total] = await Promise.all([
       this.prisma.vendedor.findMany({
@@ -497,7 +543,7 @@ export class VendedoresService {
 
   async findOne(id: string, user?: RequestUser) {
     const vendedor = await this.prisma.vendedor.findFirst({
-      where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
+      where: this.mergeWhere({ id }, this.buildEscopoDoOperador(user)),
       include: {
         distribuidor: { select: { id: true, nome: true, codigo: true } },
         _count: { select: { clientes: true, vendas: true } },
@@ -509,7 +555,7 @@ export class VendedoresService {
 
   async findByCodigo(codigo: number, user?: RequestUser) {
     const vendedor = await this.prisma.vendedor.findFirst({
-      where: this.mergeWhere({ codigo }, this.buildHierarchyWhere(user)),
+      where: this.mergeWhere({ codigo }, this.buildEscopoDoOperador(user)),
     });
     if (!vendedor) throw new NotFoundException('Vendedor não encontrado');
     return vendedor;
@@ -520,7 +566,7 @@ export class VendedoresService {
     // de outra rede simplesmente não existe (404), em vez de 403 — responder
     // diferente entregaria a existência do cadastro alheio a quem chutar UUID.
     const vendedorAtual = await this.prisma.vendedor.findFirst({
-      where: this.mergeWhere({ id }, this.buildHierarchyWhere(user)),
+      where: this.mergeWhere({ id }, this.buildEscopoDoOperador(user)),
       select: {
         id: true,
         usuarioId: true,
@@ -607,7 +653,7 @@ export class VendedoresService {
   }
 
   async remove(id: string, user?: RequestUser) {
-    // `findOne` já aplica `buildHierarchyWhere`: para o DISTRIBUIDOR, vendedor
+    // `findOne` já aplica `buildEscopoDoOperador`: para o DISTRIBUIDOR, vendedor
     // de outra rede responde 404 antes de qualquer escrita.
     const vendedor = await this.findOne(id, user);
 
@@ -631,6 +677,76 @@ export class VendedoresService {
         where: { id },
         data: { status: StatusUsuario.INATIVO, ...recusa },
       });
+    });
+  }
+
+  /**
+   * Exclusão lógica — ADMIN apenas.
+   *
+   * Some de toda listagem e do seletor do POS, mas o registro fica: Venda,
+   * Comissao, Saque e Maquininha apontam para ele, e apagar de verdade levaria
+   * o histórico junto.
+   *
+   * Excluir também inativa, nas duas tabelas. Não é redundância com `remove`:
+   * é o que faz os caminhos que só conhecem `status` — login, POS, venda —
+   * barrarem o excluído sem precisar aprender o `deletedAt`.
+   */
+  async excluir(id: string, user?: RequestUser) {
+    const vendedor = await this.findOne(id, user);
+
+    // Sumir da listagem levando o saldo junto prenderia a comissão do vendedor
+    // sem tela para pagá-la. O caminho é liquidar o saque antes.
+    if (vendedor.saldo.gt(0)) {
+      throw new ConflictException(
+        `O vendedor ${vendedor.nome} ainda tem R$ ${vendedor.saldo.toFixed(2)} ` +
+          'de saldo. Liquide o saque antes de excluir.',
+      );
+    }
+
+    this.logger.log(`Excluindo vendedor ${vendedor.nome} (${vendedor.codigo})`);
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.usuario.update({
+        where: { id: vendedor.usuarioId },
+        data: { status: StatusUsuario.INATIVO },
+      });
+
+      return tx.vendedor.update({
+        where: { id },
+        data: { status: StatusUsuario.INATIVO, deletedAt: new Date() },
+      });
+    });
+  }
+
+  /**
+   * Desfaz a exclusão — ADMIN apenas.
+   *
+   * O cadastro volta INATIVO, não ATIVO: restaurar devolve o registro à
+   * listagem, e quem decide se ele opera de novo é o `PATCH` de status. Sem
+   * este caminho, excluir por engano seria definitivo — o CPF continua
+   * `@unique` e seguraria o recadastro para sempre.
+   */
+  async restaurar(id: string, user?: RequestUser) {
+    const vendedor = await this.prisma.vendedor.findFirst({
+      where: this.mergeWhere({ id }, this.buildEscopoDoOperador(user, true)),
+      select: { id: true, nome: true, codigo: true, deletedAt: true },
+    });
+
+    if (!vendedor) {
+      throw new NotFoundException('Vendedor não encontrado');
+    }
+
+    if (!vendedor.deletedAt) {
+      throw new ConflictException('Este vendedor não está excluído');
+    }
+
+    this.logger.log(
+      `Restaurando vendedor ${vendedor.nome} (${vendedor.codigo})`,
+    );
+
+    return this.prisma.vendedor.update({
+      where: { id },
+      data: { deletedAt: null },
     });
   }
 
