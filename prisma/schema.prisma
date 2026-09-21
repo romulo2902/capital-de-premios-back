@@ -212,6 +212,17 @@ model Distribuidor {
   linkSena                  String?
   qrcodeSena                String?
   status                    StatusUsuario              @default(ATIVO)
+  /// Exclusão é lógica e só o ADMIN faz. É estado distinto de `status: INATIVO`:
+  /// inativo é cadastro desligado que segue na listagem e é reativado pelo
+  /// PATCH; excluído some de toda listagem e do seletor de rede.
+  ///
+  /// O registro fica porque Venda, ComissaoDistribuidor, Saque e Maquininha
+  /// apontam para ele — apagar de verdade levaria o histórico junto.
+  ///
+  /// Excluir também inativa (aqui e no `Usuario`, na mesma transação): é o que
+  /// faz todo caminho que já filtra `status` ficar coberto sem precisar
+  /// conhecer o `deletedAt`.
+  deletedAt                 DateTime?
   createdAt                 DateTime                   @default(now())
   updatedAt                 DateTime                   @updatedAt
   vendedores                Vendedor[]
@@ -220,6 +231,10 @@ model Distribuidor {
   comissoesDistribuidor     ComissaoDistribuidor[]
   comissoesDistribuidorSena ComissaoDistribuidorSena[]
   maquininhas               Maquininha[]
+
+  /// Toda leitura do módulo filtra por `deletedAt: null`; sem isto o filtro
+  /// vira varredura na tabela inteira conforme a base cresce.
+  @@index([deletedAt])
 }
 
 model Vendedor {
@@ -256,6 +271,18 @@ model Vendedor {
   /// INATIVO que o pendente ja tinha: o registro voltava para a fila igual a um
   /// pedido novo. Preenchido implica nunca aprovado — os dois nunca convivem.
   rejeitadoEm     DateTime?
+  /// Exclusão é lógica e só o ADMIN faz. É estado distinto de `status: INATIVO`
+  /// e de `rejeitadoEm`: inativo é vendedor desligado que o distribuidor
+  /// reativa, recusado é auto-cadastro negado que ainda pode ser aprovado, e
+  /// excluído some de toda listagem, inclusive do seletor do POS.
+  ///
+  /// O registro fica porque Venda, Comissao, Saque e Maquininha apontam para
+  /// ele — apagar de verdade levaria o histórico de vendas e comissões junto.
+  ///
+  /// Excluir também inativa (aqui e no `Usuario`, na mesma transação): é o que
+  /// faz todo caminho que já filtra `status` ficar coberto sem precisar
+  /// conhecer o `deletedAt`.
+  deletedAt       DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   distribuidor    Distribuidor   @relation(fields: [distribuidorId], references: [id])
@@ -266,6 +293,10 @@ model Vendedor {
   comissoesSena   ComissaoSena[]
   saques          Saque[]
   maquininhas     Maquininha[]
+
+  /// Toda leitura do módulo filtra por `deletedAt: null`; sem isto o filtro
+  /// vira varredura na tabela inteira conforme a base cresce.
+  @@index([deletedAt])
 }
 
 model Cliente {

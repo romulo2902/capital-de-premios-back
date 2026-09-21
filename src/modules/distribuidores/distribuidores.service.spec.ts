@@ -3,6 +3,7 @@ import * as bcrypt from 'bcrypt';
 import { DistribuidoresService } from './distribuidores.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { QrcodeService } from '../qrcode/qrcode.service';
 import { ConfigService } from '@nestjs/config';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
@@ -20,6 +21,12 @@ describe('DistribuidoresService', () => {
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+    },
+    vendedor: {
+      count: jest.fn(),
+    },
+    maquininha: {
+      count: jest.fn(),
     },
     usuario: {
       findFirst: jest.fn(),
@@ -233,6 +240,141 @@ describe('DistribuidoresService', () => {
       expect(gravado.data.tokenCadastro).not.toBe('tok-123');
       expect(gravado.data.tokenCadastro).toHaveLength(36);
       expect(resultado.data.token).toBe(gravado.data.tokenCadastro);
+    });
+  });
+
+  describe('excluir — exclusão lógica', () => {
+    const distribuidorExcluivel = {
+      id: 'dist-1',
+      codigo: 3,
+      nome: 'Distribuidora Norte',
+      usuarioId: 'usuario-1',
+      saldo: new Prisma.Decimal(0),
+    };
+
+    const redeVazia = () => {
+      mockPrisma.vendedor.count.mockResolvedValue(0);
+      mockPrisma.maquininha.count.mockResolvedValue(0);
+    };
+
+    it('marca deletedAt e inativa as duas tabelas na mesma transação', async () => {
+      mockPrisma.distribuidor.findFirst.mockResolvedValue(
+        distribuidorExcluivel,
+      );
+      redeVazia();
+      mockPrisma.distribuidor.update.mockResolvedValue({ id: 'dist-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.excluir('dist-1');
+
+      // Nunca `delete`: Venda, ComissaoDistribuidor e Saque apontam para esta
+      // linha, e apagar levaria o histórico junto.
+      expect(mockPrisma.distribuidor.delete).not.toHaveBeenCalled();
+
+      const [argumentos] = mockPrisma.distribuidor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.deletedAt).toBeInstanceOf(Date);
+      // Excluir também inativa: é o que faz o login do painel e o link público
+      // — que só conhecem `status` — barrarem o excluído.
+      expect(argumentos.data.status).toBe('INATIVO');
+      expect(mockPrisma.usuario.update).toHaveBeenCalledWith({
+        where: { id: 'usuario-1' },
+        data: { status: 'INATIVO' },
+      });
+    });
+
+    it('recusa excluir distribuidor que ainda tem saldo', async () => {
+      mockPrisma.distribuidor.findFirst.mockResolvedValue({
+        ...distribuidorExcluivel,
+        saldo: new Prisma.Decimal(320),
+      });
+      redeVazia();
+
+      await expect(service.excluir('dist-1')).rejects.toThrow(
+        /ainda tem R\$ 320\.00 de saldo/,
+      );
+      expect(mockPrisma.distribuidor.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa excluir rede que ainda tem vendedores', async () => {
+      // `Vendedor.distribuidorId` é NOT NULL: excluir por cima deixaria cada
+      // vendedor apontando para uma rede que sumiu de toda listagem.
+      mockPrisma.distribuidor.findFirst.mockResolvedValue(
+        distribuidorExcluivel,
+      );
+      mockPrisma.vendedor.count.mockResolvedValue(4);
+      mockPrisma.maquininha.count.mockResolvedValue(0);
+
+      await expect(service.excluir('dist-1')).rejects.toThrow(
+        /ainda tem 4 vendedor\(es\) na rede/,
+      );
+      expect(mockPrisma.distribuidor.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa excluir rede que ainda tem maquininhas', async () => {
+      mockPrisma.distribuidor.findFirst.mockResolvedValue(
+        distribuidorExcluivel,
+      );
+      mockPrisma.vendedor.count.mockResolvedValue(0);
+      mockPrisma.maquininha.count.mockResolvedValue(2);
+
+      await expect(service.excluir('dist-1')).rejects.toThrow(
+        /ainda tem 2 maquininha\(s\) na rede/,
+      );
+      expect(mockPrisma.distribuidor.update).not.toHaveBeenCalled();
+    });
+
+    it('esconde o excluído de toda leitura do módulo', async () => {
+      mockPrisma.distribuidor.findMany.mockResolvedValue([]);
+      mockPrisma.distribuidor.count.mockResolvedValue(0);
+
+      await service.findAll();
+
+      const [chamada] = mockPrisma.distribuidor.findMany.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(chamada.where.deletedAt).toBeNull();
+    });
+
+    it('lista só os excluídos quando pedido, para o restaurar alcançá-los', async () => {
+      mockPrisma.distribuidor.findMany.mockResolvedValue([]);
+      mockPrisma.distribuidor.count.mockResolvedValue(0);
+
+      await service.findAll(1, 20, undefined, true);
+
+      const [chamada] = mockPrisma.distribuidor.findMany.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(chamada.where.deletedAt).toEqual({ not: null });
+    });
+
+    it('restaurar devolve à listagem sem reativar', async () => {
+      mockPrisma.distribuidor.findFirst.mockResolvedValue({
+        ...distribuidorExcluivel,
+        deletedAt: new Date('2026-09-15'),
+      });
+      mockPrisma.distribuidor.update.mockResolvedValue({ id: 'dist-1' });
+
+      await service.restaurar('dist-1');
+
+      expect(mockPrisma.distribuidor.update).toHaveBeenCalledWith({
+        where: { id: 'dist-1' },
+        data: { deletedAt: null },
+      });
+      expect(mockPrisma.usuario.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa restaurar quem não está excluído', async () => {
+      mockPrisma.distribuidor.findFirst.mockResolvedValue({
+        ...distribuidorExcluivel,
+        deletedAt: null,
+      });
+
+      await expect(service.restaurar('dist-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(mockPrisma.distribuidor.update).not.toHaveBeenCalled();
     });
   });
 });

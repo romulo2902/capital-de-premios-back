@@ -1266,7 +1266,9 @@ export class RelatoriosService {
   private async buscarVendedoresRelatorio(
     filtros: FiltrosRelatorioVendedores,
   ): Promise<VendedorRelatorioRow[]> {
-    const where: Record<string, unknown> = {};
+    // Excluído não entra em relatório: some de toda listagem, e o histórico de
+    // vendas dele continua somando pelos relatórios de venda.
+    const where: Record<string, unknown> = { deletedAt: null };
 
     this.aplicarFiltroPeriodoCadastro(
       where,
@@ -1388,7 +1390,7 @@ export class RelatoriosService {
   private async buscarDistribuidoresRelatorio(
     filtros: FiltrosRelatorioDistribuidores,
   ): Promise<DistribuidorRelatorioRow[]> {
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { deletedAt: null };
 
     this.aplicarFiltroPeriodoCadastro(
       where,

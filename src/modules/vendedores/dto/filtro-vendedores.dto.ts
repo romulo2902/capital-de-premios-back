@@ -30,4 +30,16 @@ export class FiltroVendedoresDto extends PaginationQueryDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   pendentes?: boolean;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'ADMIN apenas. Lista **apenas** os vendedores excluídos, em vez de ' +
+      'somá-los à listagem normal. Omitido — ou enviado por DISTRIBUIDOR —, ' +
+      'os excluídos não aparecem.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  excluidos?: boolean;
 }

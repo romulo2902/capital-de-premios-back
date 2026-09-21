@@ -413,8 +413,11 @@ export class QrcodeService {
 
     const recriarTodos = modo === ModoAtualizacaoQrcode.RECRIAR_TODOS;
 
+    // Excluído fica de fora do lote: regerar QR code de quem sumiu de toda
+    // listagem só gasta chamada e infla o relatório da operação.
     const [vendedores, distribuidores] = await Promise.all([
       this.prisma.vendedor.findMany({
+        where: { deletedAt: null },
         select: {
           id: true,
           nome: true,
@@ -425,6 +428,7 @@ export class QrcodeService {
         },
       }),
       this.prisma.distribuidor.findMany({
+        where: { deletedAt: null },
         select: {
           id: true,
           nome: true,

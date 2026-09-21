@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { QrcodeService } from '../qrcode/qrcode.service';
-import { StatusUsuario } from '@prisma/client';
+import { Prisma, StatusUsuario } from '@prisma/client';
 import type { RequestUser } from '../auth/strategies/jwt.strategy';
 
 describe('VendedoresService', () => {
@@ -91,7 +91,7 @@ describe('VendedoresService', () => {
 
     expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { distribuidorId: 'distribuidor-1' },
+        where: { deletedAt: null, distribuidorId: 'distribuidor-1' },
       }),
     );
   });
@@ -682,6 +682,173 @@ describe('VendedoresService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
 
       expect(mockPrisma.vendedor.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('excluir — exclusão lógica', () => {
+    const admin: RequestUser = {
+      id: 'usuario-admin',
+      email: 'admin@test.com',
+      cpf: '00000000000',
+      perfil: 'ADMIN',
+      status: 'ATIVO',
+    };
+
+    const vendedorExcluivel = {
+      id: 'vend-1',
+      codigo: 7,
+      nome: 'Maria',
+      usuarioId: 'usuario-1',
+      saldo: new Prisma.Decimal(0),
+    };
+
+    it('marca deletedAt e inativa as duas tabelas na mesma transação', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue(vendedorExcluivel);
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+      mockPrisma.usuario.update.mockResolvedValue({ id: 'usuario-1' });
+
+      await service.excluir('vend-1', admin);
+
+      // Nunca `delete`: Venda, Comissao e Saque apontam para esta linha, e
+      // apagar levaria o histórico de vendas e comissões junto.
+      expect(mockPrisma.vendedor.delete).not.toHaveBeenCalled();
+
+      const [argumentos] = mockPrisma.vendedor.update.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      expect(argumentos.data.deletedAt).toBeInstanceOf(Date);
+      // Excluir também inativa: é o que faz login, POS e venda — que só
+      // conhecem `status` — barrarem o excluído sem saber do `deletedAt`.
+      expect(argumentos.data.status).toBe(StatusUsuario.INATIVO);
+      expect(mockPrisma.usuario.update).toHaveBeenCalledWith({
+        where: { id: 'usuario-1' },
+        data: { status: StatusUsuario.INATIVO },
+      });
+    });
+
+    it('recusa excluir vendedor que ainda tem saldo', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        ...vendedorExcluivel,
+        saldo: new Prisma.Decimal(150),
+      });
+
+      await expect(service.excluir('vend-1', admin)).rejects.toThrow(
+        /ainda tem R\$ 150\.00 de saldo/,
+      );
+      expect(mockPrisma.vendedor.update).not.toHaveBeenCalled();
+    });
+
+    it('responde 404 para vendedor fora do escopo do operador', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue(null);
+
+      await expect(service.excluir('vend-alheio', admin)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('esconde o excluído de toda leitura do módulo', async () => {
+      mockPrisma.vendedor.findMany.mockResolvedValue([]);
+      mockPrisma.vendedor.count.mockResolvedValue(0);
+
+      await service.findAll();
+
+      const [chamada] = mockPrisma.vendedor.findMany.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(chamada.where.deletedAt).toBeNull();
+    });
+
+    it('lista só os excluídos quando pedido, para o restaurar alcançá-los', async () => {
+      mockPrisma.vendedor.findMany.mockResolvedValue([]);
+      mockPrisma.vendedor.count.mockResolvedValue(0);
+
+      await service.findAll(1, 20, undefined, undefined, admin, false, true);
+
+      const [chamada] = mockPrisma.vendedor.findMany.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(chamada.where.deletedAt).toEqual({ not: null });
+    });
+
+    it('descarta o filtro de excluídos vindo do DISTRIBUIDOR', async () => {
+      // Quem não restaura não tem o que fazer com a lixeira, e sem este corte o
+      // excluído voltava a aparecer para a rede dele.
+      mockPrisma.vendedor.findMany.mockResolvedValue([]);
+      mockPrisma.vendedor.count.mockResolvedValue(0);
+
+      await service.findAll(
+        1,
+        20,
+        undefined,
+        undefined,
+        {
+          id: 'usuario-dist',
+          email: 'dist@test.com',
+          cpf: '12345678900',
+          perfil: 'DISTRIBUIDOR',
+          status: 'ATIVO',
+          distribuidorId: 'distribuidor-1',
+        },
+        false,
+        true,
+      );
+
+      expect(mockPrisma.vendedor.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { deletedAt: null, distribuidorId: 'distribuidor-1' },
+        }),
+      );
+    });
+
+    it('restaurar devolve à listagem sem reativar', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        ...vendedorExcluivel,
+        deletedAt: new Date('2026-09-15'),
+      });
+      mockPrisma.vendedor.update.mockResolvedValue({ id: 'vend-1' });
+
+      await service.restaurar('vend-1', admin);
+
+      // Volta INATIVO: restaurar devolve o registro à listagem, e quem decide
+      // se ele opera de novo é o PATCH de status.
+      expect(mockPrisma.vendedor.update).toHaveBeenCalledWith({
+        where: { id: 'vend-1' },
+        data: { deletedAt: null },
+      });
+      expect(mockPrisma.usuario.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa restaurar quem não está excluído', async () => {
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        ...vendedorExcluivel,
+        deletedAt: null,
+      });
+
+      await expect(service.restaurar('vend-1', admin)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(mockPrisma.vendedor.update).not.toHaveBeenCalled();
+    });
+
+    it('recadastro de CPF excluído aponta o caminho de volta', async () => {
+      // O excluído continua segurando o CPF (`@unique` global), então sem esta
+      // mensagem o recadastro batia num "CPF já cadastrado" que não aparece em
+      // listagem nenhuma.
+      mockPrisma.vendedor.findFirst.mockResolvedValue({
+        id: 'vend-excluido',
+        deletedAt: new Date('2026-09-15'),
+      });
+      mockPrisma.usuario.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.create({
+          distribuidorId: 'dist-1',
+          nome: 'Maria',
+          cpf: '033.638.128-09',
+          telefone: '(64) 98461-4339',
+          email: 'maria@test.com',
+        }),
+      ).rejects.toThrow(/vendedor excluído/);
     });
   });
 });

@@ -139,6 +139,61 @@ valida o status do próprio vendedor.
 
 Reativar segue o mesmo caminho, pelo `PATCH` com `status: ATIVO`.
 
+### Exclusão de Vendedor e Distribuidor
+
+`DELETE /admin/vendedores/:id/excluir` e `DELETE /admin/distribuidores/:id/excluir`
+são **ADMIN apenas** e a exclusão é **lógica** (`deletedAt`), no mesmo padrão da
+maquininha.
+
+A rota é própria porque `DELETE /:id` já é **inativar** — e, em auto-cadastro
+pendente, **recusar**. Repropor o verbo tiraria a inativação do DISTRIBUIDOR e
+mataria o caminho da recusa de uma vez só.
+
+São três estados distintos, e nenhum é sinônimo do outro:
+
+| Estado | Aparece na listagem | Quem reverte |
+|--------|---------------------|--------------|
+| `status: INATIVO` | sim | `PATCH` com `status: ATIVO` (ADMIN + DISTRIBUIDOR) |
+| `rejeitadoEm` (só vendedor) | só no filtro de pendentes | `PATCH /:id/aprovar` |
+| `deletedAt` | não | `PATCH /:id/restaurar` (ADMIN) |
+
+**Excluir também inativa**, nas duas tabelas e na mesma transação. Não é
+redundância: é o que faz todo caminho que já filtra `status` — login do painel,
+POS, venda, link público — barrar o excluído sem precisar aprender o
+`deletedAt`. Sem isso, cada um desses pontos viraria um furo à parte.
+
+O filtro `deletedAt: null` mora **só** em `buildEscopoDoOperador`, um por
+módulo, por onde toda leitura passa. `findOne` e `findByCodigo` do distribuidor
+usam `findFirst`, não `findUnique`: o escopo não é chave única, e `findUnique`
+não aceita filtro fora dela.
+
+"Some de toda listagem" vale para **cadastro**, nunca para **venda**. O filtro
+entra em listagem, seletor, contador de cadastros e relatório de cadastro; fica
+**fora** de tudo que é número de venda — totais, timeline, comissões, ranking e
+quebras "por vendedor". A venda de um excluído aconteceu: tirá-lo do ranking ou
+do faturamento por vendedor faria a soma das linhas deixar de bater com o total
+do período, e o histórico dele sumiria justamente de onde ele é consultado.
+
+Restaurar devolve o cadastro **`INATIVO`**, nunca `ATIVO` — quem decide se ele
+opera de novo é o `PATCH` de status. Achar o excluído é pelo
+`GET ...?excluidos=true`, que lista **só** os excluídos; sem essa porta o id
+seria indescobrível e `restaurar` ficaria inalcançável. O filtro é **ADMIN
+apenas**: em `/admin/vendedores`, que o DISTRIBUIDOR também lista, o parâmetro
+vindo dele é descartado e a listagem sai normal — quem não restaura não tem o
+que fazer com a lixeira, e o excluído voltaria a aparecer para ele.
+
+As travas:
+
+- **Saldo pendente não é excluído** (409). Sumir da listagem levando o saldo
+  junto prenderia a comissão sem tela para pagá-la.
+- **Rede não vazia não é excluída** (409). `Vendedor.distribuidorId` e
+  `Maquininha.distribuidorId` são NOT NULL — excluir a rede por cima deixaria
+  vendedores e aparelhos apontando para um distribuidor invisível. Transfira ou
+  exclua antes.
+- **`cpf` segue único global, incluindo excluídos.** A pessoa existe uma vez só,
+  e liberar o CPF daria dois históricos de comissão à mesma pessoa. Recadastrar
+  responde 409 com mensagem própria apontando o `restaurar`.
+
 ---
 
 ## Maquininhas de Cartão
