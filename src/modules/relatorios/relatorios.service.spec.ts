@@ -103,6 +103,8 @@ describe('RelatoriosService', () => {
     const result = await service.findAll();
     expect(result.data).toEqual({
       endpoints: [
+        '/relatorios/vendas/cabecas',
+        '/relatorios/vendas/cabecas/xlsx',
         '/relatorios/vendas/xlsx',
         '/relatorios/comissoes/pdf',
         '/relatorios/vendedores/xlsx',
@@ -1126,6 +1128,145 @@ describe('RelatoriosService', () => {
       await service.exportarRelatorioCDP(res as never, 'edicao-1');
 
       expect(res.send).toHaveBeenCalledWith(expect.stringContaining(';15.00;'));
+    });
+  });
+
+  describe('relatório de cabeças', () => {
+    const cliente = {
+      cpf: '6790319107',
+      nome: 'Jair Rodrigues',
+      telefone: '62999998888',
+      cep: '74000000',
+      estado: 'GO',
+      cidade: 'Goiânia',
+      email: 'jair@gmail.com',
+    };
+
+    // Combo 2x com quantidade 2: duas cartelas, quatro títulos.
+    const vendaDupla = {
+      id: 'venda-2x',
+      origemParticipacao: OrigemParticipacao.DIGITAL,
+      tipoCartela: 'DUAS_CHANCES',
+      gatewayPayload: null,
+      quantidade: 2,
+      total: '20.00',
+      distribuidorId: 'dist-1',
+      createdAt: new Date('2026-06-09T12:00:00Z'),
+      status: StatusVenda.APROVADO,
+      tipoPagamento: TipoPagamento.PIX,
+      cliente,
+      vendedor: { nome: 'Vendedor 1' },
+      maquininha: null,
+    };
+    const vendaSimples = {
+      ...vendaDupla,
+      id: 'venda-1x',
+      tipoCartela: null,
+      quantidade: 1,
+      total: '7.00',
+      distribuidorId: null,
+      vendedor: null,
+    };
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-09T12:00:00-03:00'));
+      mockPrisma.edicao.findUniqueOrThrow.mockResolvedValue({
+        numero: '10',
+        dataSorteio: new Date('2026-06-09T12:00:00-03:00'),
+        combos: [
+          {
+            origemParticipacao: OrigemParticipacao.DIGITAL,
+            tipoCartela: 'DUAS_CHANCES',
+            intervalo: 50000n,
+            rangeInicio: 1n,
+            rangeFinal: 1000n,
+          },
+        ],
+      });
+      mockPrisma.bilhete.findMany.mockResolvedValue([
+        { numero: 1n, venda: vendaDupla },
+        { numero: 2n, venda: vendaDupla },
+        { numero: 5n, venda: vendaSimples },
+        { numero: 50001n, venda: vendaDupla },
+        { numero: 50002n, venda: vendaDupla },
+      ]);
+      mockPrisma.distribuidor.findMany.mockResolvedValue([
+        { id: 'dist-1', nome: 'Dist 1' },
+      ]);
+    });
+
+    it('TXT traz uma linha D3 por cabeça, com o preço da cartela', async () => {
+      const res = { setHeader: jest.fn(), send: jest.fn() };
+
+      await service.exportarRelatorioCabecasCDP(res as never, 'edicao-1');
+
+      const conteudo = (res.send.mock.calls[0] as string[])[0];
+      const linhas = conteudo.split('\r\n');
+
+      expect(linhas[0]).toBe('H;CAPDF;09/06/2026;09/06/2026;002');
+      expect(linhas.slice(1, -1).map((l) => l.split(';').slice(0, 3))).toEqual([
+        ['D3', '0000001', '10.00'],
+        ['D3', '0000002', '10.00'],
+        ['D3', '0000005', '7.00'],
+      ]);
+      expect(conteudo).not.toContain('0050001');
+      expect(linhas[linhas.length - 1]).toBe('T;3;0000001;0001000;');
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'X-Filename',
+        'capital_de_premios_cabecas_20260609.txt',
+      );
+    });
+
+    it('sem status não filtra; com status filtra pela venda', async () => {
+      const res = { setHeader: jest.fn(), send: jest.fn() };
+
+      await service.exportarRelatorioCabecasCDP(res as never, 'edicao-1');
+      await service.exportarRelatorioCabecasCDP(
+        res as never,
+        'edicao-1',
+        StatusVenda.APROVADO,
+      );
+
+      expect(mockPrisma.bilhete.findMany).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ where: { edicaoId: 'edicao-1' } }),
+      );
+      expect(mockPrisma.bilhete.findMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: {
+            edicaoId: 'edicao-1',
+            venda: { status: StatusVenda.APROVADO },
+          },
+        }),
+      );
+    });
+
+    it('XLSX traz a cabeça e as demais chances dela', async () => {
+      // O ExcelJS escreve no stream via timers; relógio falso trava o pipe.
+      jest.useRealTimers();
+      const { res, finalizado } = criarResponseXlsx();
+
+      await service.exportarCabecasXlsx(res as never, 'edicao-1');
+
+      const linhas = linhasDaPlanilha(await lerPlanilha(await finalizado));
+
+      expect(linhas[0].slice(0, 4)).toEqual([
+        'Cabeça',
+        'Demais Chances',
+        'Tipo Cartela',
+        'Valor (R$)',
+      ]);
+      expect(linhas.slice(1).map((l) => l.slice(0, 3))).toEqual([
+        ['0000001', '0050001', 'DUAS_CHANCES'],
+        ['0000002', '0050002', 'DUAS_CHANCES'],
+        ['0000005', '', 'UMA_CHANCE'],
+      ]);
+      expect(linhas[1]).toContain('Dist 1');
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'X-Filename',
+        expect.stringMatching(/^capital_de_premios_cabecas_10_\d{8}\.xlsx$/),
+      );
     });
   });
 });

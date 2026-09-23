@@ -11,6 +11,9 @@ import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.util';
+import { obterQuantidadeCartelas } from '../edicoes/edicoes-range.util';
+import { resolverIntervalo } from '../edicoes/edicoes-setores.util';
+import { reconstruirCartelasDaVenda } from './relatorios-cabecas.util';
 import {
   aplicarFiltroPeriodoCadastro as aplicarFiltroPeriodoCadastroUtil,
   aplicarFormatoTextoColunas as aplicarFormatoTextoColunasUtil,
@@ -845,6 +848,11 @@ export class RelatoriosService {
       message: 'Módulo de relatórios',
       data: {
         endpoints: [
+          // Antes de /vendas/xlsx de propósito: painel antigo agrupa por
+          // `vendas` + último segmento, e o último a chegar vence. Nessa ordem
+          // o XLSX de cabeças nunca toma o lugar do XLSX de vendas.
+          '/relatorios/vendas/cabecas',
+          '/relatorios/vendas/cabecas/xlsx',
           '/relatorios/vendas/xlsx',
           '/relatorios/comissoes/pdf',
           '/relatorios/vendedores/xlsx',
@@ -961,6 +969,163 @@ export class RelatoriosService {
 
     this.configurarRespostaTxt(res, nomeArquivo);
     res.send(conteudo);
+  }
+
+  /**
+   * CDP só com as cabeças: mesmo layout do `exportarRelatorioCDP`, mas uma
+   * linha D3 por cartela em vez de uma por título. O preço da linha já é o da
+   * cartela (`total / quantidade`), então aqui a soma das linhas fecha com o
+   * faturamento — no CDP completo cada chance repete o preço da cartela.
+   */
+  async exportarRelatorioCabecasCDP(
+    res: Response,
+    edicaoId: string,
+    status?: StatusVenda,
+  ): Promise<void> {
+    this.logger.log(
+      `Gerando relatório CDP de cabeças para edição ${edicaoId} (status ${status ?? 'todos'})`,
+    );
+
+    const { edicao, cabecas } = await this.buscarCabecasDaEdicao(
+      edicaoId,
+      status,
+    );
+
+    const dataSorteioFmt = this.formatarDataArquivoSena(edicao.dataSorteio);
+    const removerAcentos = (str: string): string =>
+      str.normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+    const linhas: string[] = [
+      `H;CAPDF;${dataSorteioFmt};${dataSorteioFmt};${this.formatarCodigoVendedorArquivo(CODIGO_VENDEDOR_ARQUIVO_CDP_SENA)}`,
+    ];
+
+    for (const { cabeca, venda } of cabecas) {
+      const { cliente } = venda;
+      const preco = (Number(venda.total) / venda.quantidade).toFixed(2);
+      const cpf = this.formatarCampoNumericoCdp(cliente.cpf, 11);
+      const telefone = (cliente.telefone ?? '').replace(/\D/g, '');
+      const ddd = telefone.substring(0, 2);
+      const cep = this.formatarCampoNumericoCdp(cliente.cep, 8);
+      const uf = (cliente.estado ?? '').toUpperCase().trim();
+      const cidade = removerAcentos(cliente.cidade ?? '').trim();
+      const email = cliente.email ?? '';
+      const origemAquisicao = this.resolverOrigemAquisicaoCdp(venda);
+
+      linhas.push(
+        `D3;${this.formatarNumeroCdp(cabeca)};${preco};${cpf};${cliente.nome};;M;${email};${ddd};${telefone};${uf};${cep};${cidade};;;;${origemAquisicao};V;N;`,
+      );
+    }
+
+    const rangesStr = this.ordenarRangesDosCombos(edicao.combos)
+      .map(
+        (c) =>
+          `${this.formatarNumeroCdp(c.rangeInicio)};${this.formatarNumeroCdp(c.rangeFinal)}`,
+      )
+      .join(';');
+
+    linhas.push(`T;${cabecas.length};${rangesStr};`);
+
+    const nomeArquivo = `capital_de_premios_cabecas_${this.formatarDataNomeArquivo(new Date())}.txt`;
+
+    this.configurarRespostaTxt(res, nomeArquivo);
+    res.send(linhas.join('\r\n'));
+  }
+
+  async exportarCabecasXlsx(
+    res: Response,
+    edicaoId: string,
+    status?: StatusVenda,
+  ): Promise<void> {
+    this.logger.log(
+      `Gerando relatório XLSX de cabeças para edição ${edicaoId} (status ${status ?? 'todos'})`,
+    );
+
+    const { edicao, cabecas } = await this.buscarCabecasDaEdicao(
+      edicaoId,
+      status,
+    );
+
+    const distribuidorIds = [
+      ...new Set(
+        cabecas
+          .map(({ venda }) => venda.distribuidorId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const distribuidores = distribuidorIds.length
+      ? await this.prisma.distribuidor.findMany({
+          where: { id: { in: distribuidorIds } },
+          select: { id: true, nome: true },
+        })
+      : [];
+    const nomeDistribuidorPorId = new Map(
+      distribuidores.map((distribuidor) => [
+        distribuidor.id,
+        distribuidor.nome,
+      ]),
+    );
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Capital de Prêmios';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Cabeças');
+    sheet.columns = [
+      { header: 'Cabeça', key: 'cabeca', width: 12 },
+      { header: 'Demais Chances', key: 'chances', width: 34 },
+      { header: 'Tipo Cartela', key: 'tipoCartela', width: 16 },
+      { header: 'Valor (R$)', key: 'valor', width: 12 },
+      { header: 'Data', key: 'data', width: 20 },
+      { header: 'Venda ID', key: 'vendaId', width: 38 },
+      { header: 'Cliente', key: 'cliente', width: 30 },
+      { header: 'CPF', key: 'cpf', width: 15 },
+      { header: 'Telefone', key: 'telefone', width: 16 },
+      { header: 'E-mail', key: 'email', width: 28 },
+      { header: 'Vendedor', key: 'vendedor', width: 25 },
+      { header: 'Distribuidor', key: 'distribuidor', width: 25 },
+      { header: 'Origem', key: 'origem', width: 24 },
+      { header: 'Status', key: 'status', width: 12 },
+      { header: 'Pagamento', key: 'pagamento', width: 12 },
+      { header: 'Nº Série Maquininha', key: 'maquininha', width: 22 },
+    ];
+
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2E4057' },
+    };
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+    for (const { cabeca, chances, venda } of cabecas) {
+      sheet.addRow({
+        cabeca: this.formatarNumeroCdp(cabeca),
+        chances: chances.map((c) => this.formatarNumeroCdp(c)).join(', '),
+        tipoCartela: venda.tipoCartela ?? TipoCartela.UMA_CHANCE,
+        valor: formatarValorMonetarioUtil(
+          Number(venda.total) / venda.quantidade,
+        ),
+        data: this.formatarDataHora(venda.createdAt),
+        vendaId: venda.id,
+        cliente: venda.cliente.nome,
+        cpf: venda.cliente.cpf,
+        telefone: venda.cliente.telefone ?? '-',
+        email: venda.cliente.email ?? '-',
+        vendedor: venda.vendedor?.nome ?? '-',
+        distribuidor: venda.distribuidorId
+          ? (nomeDistribuidorPorId.get(venda.distribuidorId) ?? '-')
+          : '-',
+        origem: this.resolverOrigemAquisicaoCdp(venda),
+        status: venda.status,
+        pagamento: venda.tipoPagamento,
+        maquininha: venda.maquininha?.numeroSerie ?? '-',
+      });
+    }
+
+    const nomeArquivo = `capital_de_premios_cabecas_${edicao.numero}_${this.formatarDataNomeArquivo(new Date())}.xlsx`;
+
+    this.configurarRespostaXlsx(res, nomeArquivo);
+    await workbook.xlsx.write(res);
+    res.end();
   }
 
   /** Mesma regra do CDP: sem `status`, o arquivo sai com todos os status. */
@@ -1236,6 +1401,103 @@ export class RelatoriosService {
     }
 
     return 'Digital';
+  }
+
+  /**
+   * Cabeças da edição, uma por cartela, em ordem crescente de título.
+   *
+   * O agrupamento é por venda: cada venda usa o intervalo e a quantidade de
+   * chances do combo dela (`origemParticipacao` + `tipoCartela`). Venda sem
+   * `tipoCartela` é legado de uma chance, e aí todo título é cabeça.
+   */
+  private async buscarCabecasDaEdicao(edicaoId: string, status?: StatusVenda) {
+    const edicao = await this.prisma.edicao.findUniqueOrThrow({
+      where: { id: edicaoId },
+      include: { combos: true },
+    });
+
+    const bilhetes = await this.prisma.bilhete.findMany({
+      where: {
+        edicaoId,
+        ...(status ? { venda: { status } } : {}),
+      },
+      select: {
+        numero: true,
+        venda: {
+          include: {
+            cliente: true,
+            vendedor: { select: { nome: true } },
+            maquininha: { select: { numeroSerie: true } },
+          },
+        },
+      },
+      orderBy: { numero: 'asc' },
+    });
+
+    type VendaDoBilhete = (typeof bilhetes)[number]['venda'];
+    const vendasPorId = new Map<
+      string,
+      { venda: VendaDoBilhete; numeros: bigint[] }
+    >();
+    for (const bilhete of bilhetes) {
+      const grupo = vendasPorId.get(bilhete.venda.id);
+      if (grupo) {
+        grupo.numeros.push(bilhete.numero);
+      } else {
+        vendasPorId.set(bilhete.venda.id, {
+          venda: bilhete.venda,
+          numeros: [bilhete.numero],
+        });
+      }
+    }
+
+    const cabecas: Array<{
+      cabeca: bigint;
+      chances: bigint[];
+      venda: VendaDoBilhete;
+    }> = [];
+
+    for (const { venda, numeros } of vendasPorId.values()) {
+      const tipoCartela = venda.tipoCartela ?? TipoCartela.UMA_CHANCE;
+      const combo = edicao.combos.find(
+        (c) =>
+          c.origemParticipacao === venda.origemParticipacao &&
+          c.tipoCartela === tipoCartela,
+      );
+      const chancesPorCartela = obterQuantidadeCartelas(tipoCartela);
+
+      if (!combo && chancesPorCartela > 1) {
+        this.logger.warn(
+          `Venda ${venda.id} sem combo ${venda.origemParticipacao}/${tipoCartela} na edição ${edicaoId}; agrupando com intervalo padrão`,
+        );
+      }
+
+      for (const cartela of reconstruirCartelasDaVenda(
+        numeros,
+        chancesPorCartela,
+        resolverIntervalo(combo?.intervalo),
+      )) {
+        cabecas.push({ ...cartela, venda });
+      }
+    }
+
+    cabecas.sort((a, b) =>
+      a.cabeca < b.cabeca ? -1 : a.cabeca > b.cabeca ? 1 : 0,
+    );
+
+    return { edicao, cabecas };
+  }
+
+  private ordenarRangesDosCombos<
+    T extends { rangeInicio: bigint; rangeFinal: bigint },
+  >(combos: T[]): T[] {
+    return [...combos].sort((a, b) =>
+      a.rangeInicio < b.rangeInicio
+        ? -1
+        : a.rangeInicio > b.rangeInicio
+          ? 1
+          : 0,
+    );
   }
 
   private configurarRespostaXlsx(res: Response, nomeArquivo: string): void {

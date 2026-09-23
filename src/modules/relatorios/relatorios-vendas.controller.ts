@@ -96,6 +96,84 @@ export class RelatoriosVendasController {
     );
   }
 
+  @Get('cabecas')
+  @ApiOperation({
+    summary:
+      'Exportar relatório CDP de vendas só com as cabeças (arquivo TXT) por edição (ADMIN)',
+  })
+  @ApiProduces('text/plain')
+  @ApiOkResponse({
+    description:
+      'Arquivo TXT capital_de_premios_cabecas_YYYYMMDD.txt no layout do CDP, com uma linha D3 por cartela ' +
+      '(só o título da cabeça, sem as demais chances). O preço da linha é o da cartela e o trailer T conta as cabeças.',
+    content: {
+      'text/plain': {
+        schema: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @ApiQuery({
+    name: 'edicaoId',
+    required: true,
+    description: 'ID da edição',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: StatusVenda,
+    description:
+      'Filtra por status da venda. Sem ele, o arquivo traz todos os status.',
+  })
+  async exportarCabecasCDP(
+    @Res() res: Response,
+    @Query() filtros: FiltroRelatorioVendasCdpDto,
+  ) {
+    return this.relatoriosService.exportarRelatorioCabecasCDP(
+      res,
+      filtros.edicaoId,
+      filtros.status,
+    );
+  }
+
+  @Get('cabecas/xlsx')
+  @ApiOperation({
+    summary:
+      'Exportar relatório de vendas só com as cabeças em XLSX por edição (ADMIN)',
+  })
+  @ApiProduces(
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  @ApiOkResponse({
+    description:
+      'Planilha capital_de_premios_cabecas_{numeroEdicao}_YYYYMMDD.xlsx com uma linha por cartela: ' +
+      'a cabeça, as demais chances dela, o valor da cartela e os dados da venda.',
+  })
+  @ApiQuery({
+    name: 'edicaoId',
+    required: true,
+    description: 'ID da edição',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: StatusVenda,
+    description:
+      'Filtra por status da venda. Sem ele, a planilha traz todos os status.',
+  })
+  async exportarCabecasXlsx(
+    @Res() res: Response,
+    @Query() filtros: FiltroRelatorioVendasCdpDto,
+  ) {
+    return this.relatoriosService.exportarCabecasXlsx(
+      res,
+      filtros.edicaoId,
+      filtros.status,
+    );
+  }
+
   @Get('sena')
   @ApiOperation({
     summary:
