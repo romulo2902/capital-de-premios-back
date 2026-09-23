@@ -65,7 +65,7 @@ export class DashboardController {
     summary:
       'Listar edições disponíveis para filtro do dashboard (ADMIN + DISTRIBUIDOR + VENDEDOR)',
     description:
-      'Retorna somente id, número, nome, status e datas das edições com vendas aprovadas. ADMIN vê todas as edições que tiveram venda aprovada; DISTRIBUIDOR e VENDEDOR veem apenas aquelas em que a própria operação vendeu.',
+      'Retorna somente id, número, nome, status e datas das edições. ADMIN vê todas as edições que tiveram venda aprovada; DISTRIBUIDOR vê apenas aquelas em que a própria rede vendeu; VENDEDOR vê todas as edições publicadas do produto (tudo menos RASCUNHO), mesmo sem venda própria.',
   })
   @ApiQuery({ name: 'tipo', required: false, enum: ['CDP', 'SENA'] })
   getEdicoesDisponiveis(

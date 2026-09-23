@@ -3,6 +3,8 @@ import {
   Perfil,
   Prisma,
   StatusComissao,
+  StatusEdicao,
+  StatusEdicaoSena,
   StatusVenda,
   StatusVendaSena,
   TipoCartela,
@@ -317,15 +319,10 @@ export class DashboardService {
         throw new ForbiddenException('Perfil sem acesso às edições do dashboard');
       }
 
+      // VENDEDOR vê todas as edições publicadas do produto, mesmo sem venda
+      // própria — os cards simplesmente zeram. Rascunho não foi publicado.
       const edicoes = await this.prisma.edicaoSena.findMany({
-        where: {
-          vendas: {
-            some: {
-              status: StatusVendaSena.APROVADO,
-              vendedorId: user.vendedorId,
-            },
-          },
-        },
+        where: { status: { not: StatusEdicaoSena.RASCUNHO } },
         orderBy: [{ dataSorteioMegaSena: 'desc' }, { numero: 'desc' }],
         select: {
           id: true,
@@ -390,15 +387,10 @@ export class DashboardService {
       throw new ForbiddenException('Perfil sem acesso às edições do dashboard');
     }
 
+    // VENDEDOR vê todas as edições publicadas do produto, mesmo sem venda
+    // própria — os cards simplesmente zeram. Rascunho não foi publicado.
     const edicoes = await this.prisma.edicao.findMany({
-      where: {
-        vendas: {
-          some: {
-            status: StatusVenda.APROVADO,
-            vendedorId: user.vendedorId,
-          },
-        },
-      },
+      where: { status: { not: StatusEdicao.RASCUNHO } },
       orderBy: [{ dataSorteio: 'desc' }, { numero: 'desc' }],
       select: {
         id: true,
