@@ -325,6 +325,36 @@ describe('DashboardService', () => {
         },
       ]);
     });
+
+    it('should list every published edicao for vendedor, with or without own sales', async () => {
+      mockPrisma.edicao.findMany.mockResolvedValue([]);
+
+      await service.getEdicoesDisponiveis({
+        perfil: 'VENDEDOR',
+        vendedorId: 'vend-1',
+      } as RequestUser);
+
+      expect(mockPrisma.edicao.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { status: { not: 'RASCUNHO' } },
+        }),
+      );
+    });
+
+    it('should list every published edicao sena for vendedor, with or without own sales', async () => {
+      mockPrisma.edicaoSena.findMany.mockResolvedValue([]);
+
+      await service.getEdicoesDisponiveis(
+        { perfil: 'VENDEDOR', vendedorId: 'vend-1' } as RequestUser,
+        { tipo: 'SENA' },
+      );
+
+      expect(mockPrisma.edicaoSena.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { status: { not: 'RASCUNHO' } },
+        }),
+      );
+    });
   });
 
   // ─── TIMELINE ─────────────────────────────────────────────────────
