@@ -1217,6 +1217,28 @@ describe('RelatoriosService', () => {
       );
     });
 
+    it('venda POS usa o combo DIGITAL para separar cabeça de chance', async () => {
+      const vendaPos = {
+        ...vendaDupla,
+        id: 'venda-pos',
+        origemParticipacao: OrigemParticipacao.POS,
+        quantidade: 1,
+        total: '10.00',
+      };
+      mockPrisma.bilhete.findMany.mockResolvedValue([
+        { numero: 1535001n, venda: vendaPos },
+        { numero: 1585001n, venda: vendaPos },
+      ]);
+      const res = { setHeader: jest.fn(), send: jest.fn() };
+
+      await service.exportarRelatorioCabecasCDP(res as never, 'edicao-1');
+
+      const conteudo = (res.send.mock.calls[0] as string[])[0];
+      expect(conteudo).toContain('D3;1535001;10.00;');
+      expect(conteudo).not.toContain('1585001');
+      expect(conteudo).toContain('T;1;');
+    });
+
     it('sem status não filtra; com status filtra pela venda', async () => {
       const res = { setHeader: jest.fn(), send: jest.fn() };
 
