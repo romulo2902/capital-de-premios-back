@@ -14,6 +14,7 @@ import { calcularQuantidadeCartelasDaVenda } from '../vendas/vendas-quantidade.u
 import { obterQuantidadeCartelas } from '../edicoes/edicoes-range.util';
 import { resolverIntervalo } from '../edicoes/edicoes-setores.util';
 import { reconstruirCartelasDaVenda } from './relatorios-cabecas.util';
+import { resolverOrigemDoCombo } from '../vendas/vendas-origem.util';
 import {
   aplicarFiltroPeriodoCadastro as aplicarFiltroPeriodoCadastroUtil,
   aplicarFormatoTextoColunas as aplicarFormatoTextoColunasUtil,
@@ -1407,7 +1408,8 @@ export class RelatoriosService {
    * Cabeças da edição, uma por cartela, em ordem crescente de título.
    *
    * O agrupamento é por venda: cada venda usa o intervalo e a quantidade de
-   * chances do combo dela (`origemParticipacao` + `tipoCartela`). Venda sem
+   * chances do combo dela (`origemParticipacao` + `tipoCartela`, com POS
+   * resolvido para o combo DIGITAL, igual à venda). Venda sem
    * `tipoCartela` é legado de uma chance, e aí todo título é cabeça.
    */
   private async buscarCabecasDaEdicao(edicaoId: string, status?: StatusVenda) {
@@ -1459,16 +1461,17 @@ export class RelatoriosService {
 
     for (const { venda, numeros } of vendasPorId.values()) {
       const tipoCartela = venda.tipoCartela ?? TipoCartela.UMA_CHANCE;
+      const origemDoCombo = resolverOrigemDoCombo(venda.origemParticipacao);
       const combo = edicao.combos.find(
         (c) =>
-          c.origemParticipacao === venda.origemParticipacao &&
+          c.origemParticipacao === origemDoCombo &&
           c.tipoCartela === tipoCartela,
       );
       const chancesPorCartela = obterQuantidadeCartelas(tipoCartela);
 
       if (!combo && chancesPorCartela > 1) {
         this.logger.warn(
-          `Venda ${venda.id} sem combo ${venda.origemParticipacao}/${tipoCartela} na edição ${edicaoId}; agrupando com intervalo padrão`,
+          `Venda ${venda.id} sem combo ${origemDoCombo}/${tipoCartela} na edição ${edicaoId}; agrupando com intervalo padrão`,
         );
       }
 

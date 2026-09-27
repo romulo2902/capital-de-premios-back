@@ -47,6 +47,7 @@ import {
 } from '../edicoes/edicoes-setores.util';
 import { criarExcecaoEdicaoEmManutencao } from '../edicoes/edicao-manutencao.util';
 import { calcularQuantidadeCartelasDaVenda } from './vendas-quantidade.util';
+import { resolverOrigemDoCombo } from './vendas-origem.util';
 import { ConfiguracaoComissaoService } from '../configuracao-comissao/configuracao-comissao.service';
 import { CreditosMaquininhaService } from '../maquininhas/creditos-maquininha.service';
 import {
@@ -2527,16 +2528,7 @@ export class VendasService {
   private resolverOrigemDosRangesParaCombo(
     origemParticipacao: OrigemParticipacao,
   ): OrigemParticipacao {
-    // POS não possui ranges próprios: as vendas POS usam a mesma configuração DIGITAL.
-    if (origemParticipacao === OrigemParticipacao.POS) {
-      return OrigemParticipacao.DIGITAL;
-    }
-
-    if (origemParticipacao === OrigemParticipacao.DIGITAL) {
-      return OrigemParticipacao.DIGITAL;
-    }
-
-    return origemParticipacao;
+    return resolverOrigemDoCombo(origemParticipacao);
   }
 
   private extrairCombosSelecionadosDaVenda(
